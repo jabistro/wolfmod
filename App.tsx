@@ -5,6 +5,8 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import HomeScreen from './src/screens/HomeScreen';
 import RolesScreen from './src/screens/RolesScreen';
+import ClockSetupScreen from './src/screens/ClockSetupScreen';
+import ClockScreen from './src/screens/ClockScreen';
 import type { RootStackParamList } from './src/navigation/types';
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -27,6 +29,8 @@ export default function App() {
         >
           <Stack.Screen name="Home" component={HomeScreen} />
           <Stack.Screen name="Roles" component={RolesScreen} options={{ gestureEnabled: false }} />
+          <Stack.Screen name="ClockSetup" component={ClockSetupScreen} />
+          <Stack.Screen name="Clock" component={ClockScreen} options={{ gestureEnabled: false, animationEnabled: false }} />
         </Stack.Navigator>
         <StatusBar style="light" />
       </NavigationContainer>

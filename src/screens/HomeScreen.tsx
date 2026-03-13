@@ -1,18 +1,20 @@
 import React from 'react';
 import { View, Text, Image, TouchableOpacity, SafeAreaView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../navigation/types';
 
-type HomeNavProp = NativeStackNavigationProp<RootStackParamList, 'Home'>;
+type HomeNavProp = StackNavigationProp<RootStackParamList, 'Home'>;
 
-const NAV_BUTTONS = ['Build', 'Clock', 'Roles', 'Settings', 'Tutorial'];
+const NAV_BUTTONS = ['BUILD', 'MODCLOCK', 'ROLES', 'SETTINGS'];
+const DISABLED_BUTTONS = new Set(['BUILD', 'SETTINGS']);
 
 export default function HomeScreen() {
   const navigation = useNavigation<HomeNavProp>();
 
   function handlePress(label: string) {
-    if (label === 'Roles') navigation.navigate('Roles');
+    if (label === 'ROLES') navigation.navigate('Roles');
+    if (label === 'MODCLOCK') navigation.navigate('ClockSetup');
   }
 
   return (
@@ -23,7 +25,7 @@ export default function HomeScreen() {
         <View className="items-center mt-6">
           <View className="w-52 h-52 items-center justify-center">
             <Image
-              source={require('../../assets/wolfmod_logo.png')}
+              source={require('../../assets/images/wolfmod_logo.png')}
               className="w-full h-full"
               resizeMode="contain"
             />
@@ -42,18 +44,23 @@ export default function HomeScreen() {
 
         {/* Nav Buttons */}
         <View className="w-3/4 gap-y-3 mt-auto">
-          {NAV_BUTTONS.map((label) => (
-            <TouchableOpacity
-              key={label}
-              activeOpacity={0.75}
-              onPress={() => handlePress(label)}
-              className="items-center bg-wolf-card border border-wolf-surface rounded-2xl px-5 py-4"
-            >
-              <Text className="text-wolf-text text-lg font-semibold tracking-wider">
-                {label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {NAV_BUTTONS.map((label) => {
+            const disabled = DISABLED_BUTTONS.has(label);
+            return (
+              <TouchableOpacity
+                key={label}
+                activeOpacity={0.75}
+                onPress={() => handlePress(label)}
+                disabled={disabled}
+                className="items-center bg-wolf-card border border-wolf-surface rounded-2xl px-5 py-4"
+                style={disabled ? { opacity: 0.35 } : undefined}
+              >
+                <Text className="text-wolf-text text-lg font-semibold tracking-wider">
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
       </View>
