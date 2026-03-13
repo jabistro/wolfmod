@@ -841,10 +841,10 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   mainTimer: {
-    fontSize: 160,
+    fontSize: 200,
     fontWeight: '200',
     fontVariant: ['tabular-nums'],
-    lineHeight: 170,
+    lineHeight: 180,
   },
   voteText: {
     color: '#D4A017',
