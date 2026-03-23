@@ -1,10 +1,11 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import {
   View,
   Text,
   FlatList,
   Image,
   TouchableOpacity,
+  Pressable,
   Modal,
   SafeAreaView,
   ScrollView,
@@ -15,6 +16,7 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { ROLES, CATEGORIES, type RoleCategory, type Role } from '../data/roles';
+import { getRoleValue } from '../data/roleValues';
 
 function getBarColors(role: Role): string[] {
   if (role.barColors) return role.barColors;
@@ -29,14 +31,33 @@ const CARD_WIDTH = (SCREEN_WIDTH - H_PADDING * 2 - GAP * (COLUMNS - 1)) / COLUMN
 const CARD_HEIGHT = CARD_WIDTH * 1.4;
 
 // Pre-sort role lists once at module level
-const SORTED_ROLES = CATEGORIES.map(cat =>
+const sortedRoles = CATEGORIES.map(cat =>
   ROLES.filter(r => r.category === cat.key).sort((a, b) => a.name.localeCompare(b.name))
 );
 
 export default function RolesScreen() {
   const navigation = useNavigation();
   const [activeIndex, setActiveIndex] = useState(0);
-  const [selectedRole, setSelectedRole] = useState<Role | null>(null);
+  const [sortMode, setSortMode] = useState<'alpha' | 'value'>('alpha');
+  const [modalRoleList, setModalRoleList] = useState<Role[] | null>(null);
+  const [modalIndex, setModalIndex] = useState(0);
+  const modalFlatListRef = useRef<FlatList<Role>>(null);
+
+  const sortedRoles = useMemo(() =>
+    CATEGORIES.map(cat => {
+      const roles = ROLES.filter(r => r.category === cat.key);
+      if (sortMode === 'alpha') {
+        return roles.sort((a, b) => a.name.localeCompare(b.name));
+      }
+      const isWolfTab = cat.key === 'wolves' || cat.key === 'teamwolf';
+      return roles.sort((a, b) => {
+        const valA = getRoleValue(a.name);
+        const valB = getRoleValue(b.name);
+        const diff = isWolfTab ? valA - valB : valB - valA;
+        return diff !== 0 ? diff : a.name.localeCompare(b.name);
+      });
+    }),
+  [sortMode]);
   // Track which pages have been rendered so they stay mounted once visited
   const [renderedPages, setRenderedPages] = useState(() => new Set([0]));
   const scrollRef = useRef<ScrollView>(null);
@@ -83,7 +104,9 @@ export default function RolesScreen() {
           <Text style={styles.backText}>‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Roles</Text>
-        <View style={styles.headerSpacer} />
+        <TouchableOpacity style={styles.sortBtn} onPress={() => setSortMode(m => m === 'alpha' ? 'value' : 'alpha')}>
+          <Text style={styles.sortBtnText}>{sortMode === 'alpha' ? 'A–Z' : '+/−'}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Tabs */}
@@ -129,7 +152,7 @@ export default function RolesScreen() {
           <View key={cat.key} style={styles.page}>
             {renderedPages.has(i) && (
               <FlatList
-                data={SORTED_ROLES[i]}
+                data={sortedRoles[i]}
                 keyExtractor={item => item.name}
                 numColumns={COLUMNS}
                 contentContainerStyle={styles.grid}
@@ -141,7 +164,10 @@ export default function RolesScreen() {
                   const col = index % COLUMNS;
                   return (
                     <TouchableOpacity
-                      onPress={() => setSelectedRole(item)}
+                      onPress={() => {
+                        setModalIndex(index);
+                        setModalRoleList(sortedRoles[i]);
+                      }}
                       style={[styles.card, { marginLeft: col === 0 ? 0 : GAP }]}
                     >
                       <Image source={item.thumb} style={styles.cardImage} resizeMode="cover" />
@@ -157,7 +183,21 @@ export default function RolesScreen() {
                           </View>
                         );
                       })()}
-                      <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
+                      <View style={styles.cardFooter}>
+                        <Text style={styles.cardName} numberOfLines={2}>{item.name}</Text>
+                        {(() => {
+                          const val = getRoleValue(item.name);
+                          const bg = val > 0 ? '#1a4a1a' : val < 0 ? '#4a1a1a' : '#2a2a2a';
+                          const color = val > 0 ? '#4caf50' : val < 0 ? '#ef5350' : '#8A8590';
+                          return (
+                            <View style={[styles.valueBadge, { backgroundColor: bg }]}>
+                              <Text style={[styles.valueBadgeText, { color }]}>
+                                {val > 0 ? `+${val}` : `${val}`}
+                              </Text>
+                            </View>
+                          );
+                        })()}
+                      </View>
                     </TouchableOpacity>
                   );
                 }}
@@ -169,29 +209,56 @@ export default function RolesScreen() {
 
       {/* Detail Modal */}
       <Modal
-        visible={!!selectedRole}
+        visible={!!modalRoleList}
         transparent
         animationType="fade"
-        onRequestClose={() => setSelectedRole(null)}
+        onRequestClose={() => setModalRoleList(null)}
       >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setSelectedRole(null)}
-        >
-          {selectedRole && (
-            <View style={styles.modalCard}>
-              <View style={styles.modalImageWrapper}>
-                <Image
-                  source={selectedRole.image}
-                  style={styles.modalImage}
-                  resizeMode="cover"
-                />
-              </View>
-              <Text style={styles.modalName}>{selectedRole.name}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
+        <View style={styles.modalOverlay}>
+          <FlatList
+            ref={modalFlatListRef}
+            data={modalRoleList ?? []}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={item => item.name}
+            initialScrollIndex={modalIndex}
+            getItemLayout={(_, index) => ({
+              length: SCREEN_WIDTH,
+              offset: SCREEN_WIDTH * index,
+              index,
+            })}
+            onMomentumScrollEnd={e => {
+              const i = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+              setModalIndex(i);
+            }}
+            renderItem={({ item }) => {
+              const val = getRoleValue(item.name);
+              const bg = val > 0 ? '#1a4a1a' : val < 0 ? '#4a1a1a' : '#2a2a2a';
+              const color = val > 0 ? '#4caf50' : val < 0 ? '#ef5350' : '#8A8590';
+              return (
+                <Pressable
+                  style={styles.modalPage}
+                  onPress={() => setModalRoleList(null)}
+                >
+                  <Pressable style={styles.modalCard} onPress={e => e.stopPropagation()}>
+                    <View style={styles.modalImageWrapper}>
+                      <Image source={item.image} style={styles.modalImage} resizeMode="cover" />
+                    </View>
+                    <View style={styles.modalNameRow}>
+                      <Text style={styles.modalName}>{item.name}</Text>
+                      <View style={[styles.valueBadge, { backgroundColor: bg }]}>
+                        <Text style={[styles.modalValueText, { color }]}>
+                          {val > 0 ? `+${val}` : `${val}`}
+                        </Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                </Pressable>
+              );
+            }}
+          />
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -223,8 +290,16 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
   },
-  headerSpacer: {
+  sortBtn: {
     width: 60,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  sortBtnText: {
+    color: '#D4A017',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
   tabRow: {
     flexDirection: 'row',
@@ -279,18 +354,38 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 4,
     overflow: 'hidden',
   },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+    gap: 4,
+  },
   cardName: {
     color: '#F0EDE8',
     fontSize: 10,
     textAlign: 'center',
-    marginTop: 4,
     lineHeight: 13,
+    flexShrink: 1,
+  },
+  valueBadge: {
+    borderRadius: 3,
+    paddingHorizontal: 3,
+    paddingVertical: 1,
+  },
+  valueBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.88)',
-    justifyContent: 'center',
+  },
+  modalPage: {
+    width: SCREEN_WIDTH,
+    flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   modalCard: {
     alignItems: 'center',
@@ -305,11 +400,21 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  modalNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 18,
+    gap: 8,
+  },
   modalName: {
     color: '#F0EDE8',
     fontSize: 22,
     fontWeight: '600',
     textAlign: 'center',
-    marginTop: 18,
+  },
+  modalValueText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
 });
