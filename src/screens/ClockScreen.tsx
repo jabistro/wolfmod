@@ -293,6 +293,7 @@ export default function ClockScreen() {
   // Phase transitions
   function startTrial() {
     nomsAtTrialStart.current = nomsLeft;
+    setNomsLeft(n => n - 1);
     setDayRunning(false);
     setTrialSubPhase('accusation');
     setAccusationState('stopped');
@@ -307,7 +308,6 @@ export default function ClockScreen() {
     if (defenseIntervalRef.current) clearInterval(defenseIntervalRef.current);
     setAccusationState('stopped');
     setDefenseState('stopped');
-    setNomsLeft(n => n - 1);
     setPhase('day');
   }
 
@@ -445,6 +445,8 @@ export default function ClockScreen() {
           setDefenseState('stopped');
           setDefenseSecondsLeft(activeDefenseDuration.current);
         } else {
+          if (defenseIntervalRef.current) clearInterval(defenseIntervalRef.current);
+          setDefenseState('stopped');
           setTrialSubPhase('vote');
         }
       }
