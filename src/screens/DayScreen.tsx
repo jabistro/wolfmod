@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useMutation, useQuery } from 'convex/react';
@@ -17,6 +18,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
+import { SeatingCircle } from '../components/SeatingCircle';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Day'>;
 type Route = RouteProp<RootStackParamList, 'Day'>;
@@ -26,10 +28,11 @@ type Nomination = {
   voteEndsAt: number;
   resultsRevealed: boolean;
   votedCount: number;
-  aliveCount: number;
+  eligibleCount: number;
   livesVoters: string[];
   diesVoters: string[];
   myVote: 'lives' | 'dies' | null;
+  iAmNominee: boolean;
 };
 
 export default function DayScreen() {
@@ -109,7 +112,9 @@ export default function DayScreen() {
       dayNumber={game.dayNumber}
       isHost={isHost}
       meAlive={me.alive}
+      meId={me._id}
       alive={alive}
+      totalSeats={game.playerCount}
       onBeginNight={async () => {
         try {
           await beginNight({
@@ -135,7 +140,9 @@ function DiscussionView({
   dayNumber,
   isHost,
   meAlive,
+  meId,
   alive,
+  totalSeats,
   onBeginNight,
 }: {
   gameId: Id<'games'>;
@@ -143,11 +150,13 @@ function DiscussionView({
   dayNumber: number;
   isHost: boolean;
   meAlive: boolean;
+  meId: Id<'players'>;
   alive: Array<{ _id: Id<'players'>; name: string; seatPosition?: number }>;
+  totalSeats: number;
   onBeginNight: () => Promise<void>;
 }) {
+  const insets = useSafeAreaInsets();
   const nominate = useMutation(api.day.nominate);
-  const [nominateModalOpen, setNominateModalOpen] = useState(false);
   const [confirmTarget, setConfirmTarget] = useState<{
     id: Id<'players'>;
     name: string;
@@ -164,7 +173,6 @@ function DiscussionView({
         targetPlayerId: confirmTarget.id,
       });
       setConfirmTarget(null);
-      setNominateModalOpen(false);
     } catch (e) {
       Alert.alert('Could not start vote', e instanceof Error ? e.message : String(e));
     } finally {
@@ -176,43 +184,39 @@ function DiscussionView({
     <SafeAreaView className="flex-1 bg-wolf-bg">
       <DayHeader dayNumber={dayNumber} mode="DISCUSSION" />
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2 mt-4">
-          ALIVE ({alive.length})
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24, alignItems: 'center' }}>
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest my-3">
+          {alive.length} ALIVE
         </Text>
-        <View className="gap-y-2">
-          {alive.map(p => (
-            <View
-              key={p._id}
-              className="bg-wolf-card rounded-xl px-4 py-3 flex-row items-center"
-              style={{ borderWidth: 1, borderColor: '#2A2A38' }}
-            >
-              <Text className="text-wolf-muted text-xs w-6">
-                {typeof p.seatPosition === 'number' ? p.seatPosition + 1 : '·'}
-              </Text>
-              <Text className="text-wolf-text text-base ml-2">{p.name}</Text>
-            </View>
-          ))}
-        </View>
-
+        <SeatingCircle
+          totalSeats={totalSeats}
+          players={alive}
+          meId={meId}
+          onPress={
+            isHost
+              ? p => setConfirmTarget({ id: p._id, name: p.name })
+              : undefined
+          }
+        />
+        {isHost && (
+          <Text className="text-wolf-muted text-xs text-center mt-4">
+            Tap a player to nominate them.
+          </Text>
+        )}
         {!meAlive && (
-          <Text className="text-wolf-muted text-xs text-center mt-6 italic">
+          <Text className="text-wolf-muted text-xs text-center mt-4 italic">
             You are out of the game — spectating.
           </Text>
         )}
       </ScrollView>
 
       {isHost && (
-        <View className="px-6 pb-8" style={{ gap: 10 }}>
-          <TouchableOpacity
-            onPress={() => setNominateModalOpen(true)}
-            className="bg-wolf-card border border-wolf-accent rounded-xl py-4 items-center"
-            activeOpacity={0.75}
-          >
-            <Text className="text-wolf-accent text-base font-extrabold tracking-widest">
-              NOMINATE
-            </Text>
-          </TouchableOpacity>
+        <View
+          style={{
+            paddingHorizontal: 24,
+            paddingBottom: Math.max(insets.bottom, 16) + 16,
+          }}
+        >
           <TouchableOpacity
             onPress={onBeginNight}
             className="bg-wolf-accent rounded-xl py-4 items-center"
@@ -226,59 +230,17 @@ function DiscussionView({
       )}
 
       {!isHost && (
-        <View className="px-6 pb-8">
+        <View
+          style={{
+            paddingHorizontal: 24,
+            paddingBottom: Math.max(insets.bottom, 16) + 16,
+          }}
+        >
           <Text className="text-wolf-muted text-xs tracking-widest text-center">
             HOST CONTROLS THE FLOOR
           </Text>
         </View>
       )}
-
-      {/* Nominate modal — picker of alive players */}
-      <Modal
-        visible={nominateModalOpen && !confirmTarget}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setNominateModalOpen(false)}
-      >
-        <Pressable
-          onPress={() => setNominateModalOpen(false)}
-          style={{
-            flex: 1,
-            backgroundColor: 'rgba(0,0,0,0.85)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 24,
-          }}
-        >
-          <Pressable
-            onPress={e => e.stopPropagation()}
-            className="bg-wolf-surface rounded-2xl w-full p-6"
-            style={{ maxHeight: '80%' }}
-          >
-            <Text className="text-wolf-text text-lg font-bold mb-3 text-center">
-              Nominate
-            </Text>
-            <ScrollView style={{ maxHeight: 320 }}>
-              {alive.map(p => (
-                <TouchableOpacity
-                  key={p._id}
-                  onPress={() => setConfirmTarget({ id: p._id, name: p.name })}
-                  className="bg-wolf-card rounded-xl px-4 py-3 mb-2"
-                >
-                  <Text className="text-wolf-text">
-                    {typeof p.seatPosition === 'number'
-                      ? `${p.seatPosition + 1}. ${p.name}`
-                      : p.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity onPress={() => setNominateModalOpen(false)} className="mt-3 py-2">
-              <Text className="text-wolf-muted text-center">Cancel</Text>
-            </TouchableOpacity>
-          </Pressable>
-        </Pressable>
-      </Modal>
 
       {/* Confirm/begin-vote modal — gap for the host to make the verbal call */}
       <Modal
@@ -355,6 +317,7 @@ function VoteView({
   isHost: boolean;
   nomination: Nomination;
 }) {
+  const insets = useSafeAreaInsets();
   const castVote = useMutation(api.day.castVote);
   const [submitting, setSubmitting] = useState<'lives' | 'dies' | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -408,10 +371,24 @@ function VoteView({
         </View>
 
         <Text className="text-wolf-muted text-xs tracking-widest mb-2">
-          {nomination.votedCount} / {nomination.aliveCount} VOTED
+          {nomination.votedCount} / {nomination.eligibleCount} VOTED
         </Text>
 
-        {meAlive ? (
+        {nomination.iAmNominee ? (
+          <View className="mt-8 items-center">
+            <View
+              className="rounded-2xl px-6 py-4"
+              style={{ backgroundColor: '#3A2A14', borderWidth: 1, borderColor: '#D4A017' }}
+            >
+              <Text className="text-wolf-accent text-xs font-bold tracking-widest text-center">
+                YOU ARE ON TRIAL
+              </Text>
+              <Text className="text-wolf-text text-sm text-center mt-2">
+                You cannot vote on yourself.
+              </Text>
+            </View>
+          </View>
+        ) : meAlive ? (
           <View className="flex-row mt-6" style={{ gap: 14 }}>
             <TouchableOpacity
               onPress={() => handleVote('lives')}
@@ -455,7 +432,13 @@ function VoteView({
         )}
       </View>
 
-      <View className="px-6 pb-8 items-center">
+      <View
+        style={{
+          paddingHorizontal: 24,
+          paddingBottom: Math.max(insets.bottom, 16) + 16,
+          alignItems: 'center',
+        }}
+      >
         <Text className="text-wolf-muted text-xs tracking-widest">
           {isHost ? 'HOST — RESULTS POST WHEN TIMER ENDS' : 'WAITING FOR TIMER'}
         </Text>
@@ -479,6 +462,7 @@ function ResultsView({
   isHost: boolean;
   nomination: Nomination;
 }) {
+  const insets = useSafeAreaInsets();
   const continueGame = useMutation(api.day.continueGameAfterVote);
   const [submitting, setSubmitting] = useState(false);
 
@@ -560,7 +544,12 @@ function ResultsView({
         </View>
       </ScrollView>
 
-      <View className="px-6 pb-8">
+      <View
+        style={{
+          paddingHorizontal: 24,
+          paddingBottom: Math.max(insets.bottom, 16) + 16,
+        }}
+      >
         {isHost ? (
           <TouchableOpacity
             onPress={handleContinue}

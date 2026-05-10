@@ -57,13 +57,17 @@ export const nominate = mutation({
 
     // Dev convenience: bots auto-vote DIES so the lynch flow is testable with
     // a single real player. Real games will never have bot players, so this
-    // is harmless. Without this, a 1-real + 3-bots game can never reach a
-    // majority because bots default to LIVES.
+    // is harmless. The nominee is excluded — they don't vote on themselves.
     const players = await ctx.db
       .query('players')
       .withIndex('by_game', q => q.eq('gameId', args.gameId))
       .collect();
-    const aliveBots = players.filter(p => p.alive && isBotName(p.name));
+    const aliveBots = players.filter(
+      p =>
+        p.alive &&
+        isBotName(p.name) &&
+        p._id !== args.targetPlayerId,
+    );
     const now = Date.now();
     for (const bot of aliveBots) {
       await ctx.db.insert('nominationVotes', {
@@ -102,6 +106,9 @@ export const castVote = mutation({
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me) throw new Error('You are not in this game.');
     if (!me.alive) throw new Error('Eliminated players cannot vote.');
+    if (me._id === nom.nominatedPlayerId) {
+      throw new Error('You are on trial — you cannot vote on yourself.');
+    }
 
     // Replace any prior vote so players can change their mind before the
     // timer expires.
@@ -167,12 +174,14 @@ export const continueGameAfterVote = mutation({
 
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
 
-    // Tally votes. Alive players who didn't vote default to LIVES.
+    // Tally votes. The nominee doesn't get to vote on themselves; alive
+    // players who didn't vote default to LIVES.
     const players = await ctx.db
       .query('players')
       .withIndex('by_game', q => q.eq('gameId', args.gameId))
       .collect();
     const aliveCount = players.filter(p => p.alive).length;
+    const eligibleCount = Math.max(0, aliveCount - 1);
 
     const votes = await ctx.db
       .query('nominationVotes')
@@ -185,7 +194,7 @@ export const continueGameAfterVote = mutation({
       .collect();
 
     const dies = votes.filter(v => v.vote === 'dies').length;
-    const lives = aliveCount - dies; // unvoted treated as LIVES
+    const lives = eligibleCount - dies; // unvoted (eligible) treated as LIVES
 
     // Strict majority of DIES → lynch. Ties default to LIVES (per house rules).
     const lynch = dies > lives;
@@ -244,10 +253,11 @@ export const dayView = query({
       voteEndsAt: number;
       resultsRevealed: boolean;
       votedCount: number;
-      aliveCount: number;
+      eligibleCount: number;
       livesVoters: string[];
       diesVoters: string[];
       myVote: 'lives' | 'dies' | null;
+      iAmNominee: boolean;
     } | null = null;
 
     if (game.currentNomination) {
@@ -276,15 +286,18 @@ export const dayView = query({
           if (v.vote === 'lives') livesVoters.push(voter.name);
           else diesVoters.push(voter.name);
         }
-        // Alive non-voters defaulted to LIVES.
+        // Alive non-voters defaulted to LIVES — but the nominee doesn't vote
+        // and isn't counted on either side.
         const votedIds = new Set(allVotes.map(v => v.voterPlayerId));
         for (const p of alive) {
+          if (p._id === nom.nominatedPlayerId) continue;
           if (!votedIds.has(p._id)) {
             livesVoters.push(`${p.name} (no vote)`);
           }
         }
       }
 
+      const eligibleCount = Math.max(0, alive.length - 1);
       nomination = {
         nominee: nominee
           ? { _id: nominee._id, name: nominee.name }
@@ -292,10 +305,11 @@ export const dayView = query({
         voteEndsAt: nom.voteEndsAt,
         resultsRevealed: nom.resultsRevealed,
         votedCount: allVotes.length,
-        aliveCount: alive.length,
+        eligibleCount,
         livesVoters,
         diesVoters,
         myVote,
+        iAmNominee: me._id === nom.nominatedPlayerId,
       };
     }
 
@@ -306,6 +320,7 @@ export const dayView = query({
         dayNumber: game.dayNumber,
         nightNumber: game.nightNumber,
         winner: game.winner,
+        playerCount: game.playerCount,
       },
       me: {
         _id: me._id,

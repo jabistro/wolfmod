@@ -5,7 +5,7 @@
  * Phase 3a only implements 'wolves' and 'seer'; later phases extend this list
  * as more roles come online.
  */
-export const NIGHT_STEPS = ['wolves', 'seer'] as const;
+export const NIGHT_STEPS = ['wolves', 'seer', 'pi', 'mentalist', 'witch', 'bodyguard'] as const;
 export type NightStep = (typeof NIGHT_STEPS)[number];
 
 export function isNightStep(s: string | undefined): s is NightStep {
@@ -25,5 +25,13 @@ export function nightStepLabel(step: NightStep): string {
       return 'The wolves are awake';
     case 'seer':
       return 'The seer is awake';
+    case 'pi':
+      return 'The PI is awake';
+    case 'mentalist':
+      return 'The mentalist is awake';
+    case 'witch':
+      return 'The witch is awake';
+    case 'bodyguard':
+      return 'The bodyguard is awake';
   }
 }

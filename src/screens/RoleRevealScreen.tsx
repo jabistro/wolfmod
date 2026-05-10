@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useMutation, useQuery } from 'convex/react';
@@ -35,6 +36,7 @@ export default function RoleRevealScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
   const deviceClientId = useDeviceId();
+  const insets = useSafeAreaInsets();
 
   const reveal = useQuery(
     api.games.revealView,
@@ -259,18 +261,18 @@ export default function RoleRevealScreen() {
         )}
       </View>
 
-      <View className="px-6 pb-3">
+      <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
         <Pressable
           onPressIn={onPressIn}
           onPressOut={onPressOut}
-          style={({ pressed }) => ({
-            backgroundColor: pressed ? '#3A3A48' : '#22222F',
+          style={{
+            backgroundColor: isPressed ? '#2A2A38' : '#22222F',
             borderRadius: 16,
             paddingVertical: 22,
             alignItems: 'center',
-            borderWidth: 1,
-            borderColor: pressed ? '#D4A017' : '#2A2A38',
-          })}
+            borderWidth: 2,
+            borderColor: isPressed ? '#D4A017' : '#5A5560',
+          }}
         >
           <Text className="text-wolf-text text-base font-bold tracking-widest">
             {revealed
@@ -282,7 +284,12 @@ export default function RoleRevealScreen() {
         </Pressable>
       </View>
 
-      <View className="px-6 pb-8">
+      <View
+        style={{
+          paddingHorizontal: 24,
+          paddingBottom: Math.max(insets.bottom, 16) + 16,
+        }}
+      >
         <TouchableOpacity
           onPress={handleConfirm}
           disabled={!hasSeenRole || confirming}

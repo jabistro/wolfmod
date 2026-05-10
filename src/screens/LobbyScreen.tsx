@@ -10,6 +10,7 @@ import {
   Alert,
   Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useMutation, useQuery } from 'convex/react';
@@ -72,6 +73,7 @@ export default function LobbyScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
   const deviceClientId = useDeviceId();
+  const insets = useSafeAreaInsets();
 
   const lobby = useQuery(
     api.games.lobbyView,
@@ -286,7 +288,11 @@ export default function LobbyScreen() {
         <View className="w-16" />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingBottom: 24 + Math.max(insets.bottom, 16),
+        }}
+      >
         {/* Room code */}
         <View className="items-center pt-2 pb-6">
           <Text className="text-wolf-muted text-xs tracking-widest">ROOM CODE</Text>

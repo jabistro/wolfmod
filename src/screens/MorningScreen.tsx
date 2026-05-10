@@ -8,6 +8,7 @@ import {
   Alert,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useMutation, useQuery } from 'convex/react';
@@ -23,6 +24,7 @@ export default function MorningScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
   const deviceClientId = useDeviceId();
+  const insets = useSafeAreaInsets();
 
   const view = useQuery(
     api.night.morningView,
@@ -146,7 +148,12 @@ export default function MorningScreen() {
         )}
       </Animated.View>
 
-      <View className="px-6 pb-8">
+      <View
+        style={{
+          paddingHorizontal: 24,
+          paddingBottom: Math.max(insets.bottom, 16) + 16,
+        }}
+      >
         {me.isHost ? (
           <TouchableOpacity
             onPress={handleBeginDay}

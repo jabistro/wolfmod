@@ -7,6 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useQuery } from 'convex/react';
@@ -29,6 +30,7 @@ export default function EndGameScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
   const deviceClientId = useDeviceId();
+  const insets = useSafeAreaInsets();
 
   const view = useQuery(
     api.games.endGameView,
@@ -129,7 +131,12 @@ export default function EndGameScreen() {
         </View>
       </ScrollView>
 
-      <View className="px-6 pb-8">
+      <View
+        style={{
+          paddingHorizontal: 24,
+          paddingBottom: Math.max(insets.bottom, 16) + 16,
+        }}
+      >
         <TouchableOpacity
           onPress={() => navigation.popToTop()}
           className="bg-wolf-accent rounded-xl py-5 items-center"

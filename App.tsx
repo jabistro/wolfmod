@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
 import HomeScreen from './src/screens/HomeScreen';
 import RolesScreen from './src/screens/RolesScreen';
@@ -43,33 +44,35 @@ export default function App() {
 
   return (
     <ConvexProvider client={convex}>
-      <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0F0F14' }}>
-        <NavigationContainer theme={AppTheme}>
-          <Stack.Navigator
-            screenOptions={{
-              headerShown: false,
-              cardStyle: { backgroundColor: '#0F0F14' },
-              gestureEnabled: true,
-            }}
-          >
-            <Stack.Screen name="Home" component={HomeScreen} />
-            <Stack.Screen name="Roles" component={RolesScreen} options={{ gestureEnabled: false }} />
-            <Stack.Screen name="ClockSetup" component={ClockSetupScreen} />
-            <Stack.Screen name="Clock" component={ClockScreen} options={{ gestureEnabled: false, animationEnabled: false }} />
-            <Stack.Screen name="PlayMenu" component={PlayMenuScreen} />
-            <Stack.Screen name="CreateGame" component={CreateGameScreen} />
-            <Stack.Screen name="JoinGame" component={JoinGameScreen} />
-            <Stack.Screen name="Lobby" component={LobbyScreen} options={{ gestureEnabled: false }} />
-            <Stack.Screen name="RoleReveal" component={RoleRevealScreen} options={{ gestureEnabled: false }} />
-            <Stack.Screen name="Night" component={NightScreen} options={{ gestureEnabled: false }} />
-            <Stack.Screen name="Morning" component={MorningScreen} options={{ gestureEnabled: false }} />
-            <Stack.Screen name="Day" component={DayScreen} options={{ gestureEnabled: false }} />
-            <Stack.Screen name="EndGame" component={EndGameScreen} options={{ gestureEnabled: false }} />
-          </Stack.Navigator>
-          <StatusBar style="light" />
-        </NavigationContainer>
-        {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
-      </GestureHandlerRootView>
+      <SafeAreaProvider>
+        <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0F0F14' }}>
+          <NavigationContainer theme={AppTheme}>
+            <Stack.Navigator
+              screenOptions={{
+                headerShown: false,
+                cardStyle: { backgroundColor: '#0F0F14' },
+                gestureEnabled: true,
+              }}
+            >
+              <Stack.Screen name="Home" component={HomeScreen} />
+              <Stack.Screen name="Roles" component={RolesScreen} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="ClockSetup" component={ClockSetupScreen} />
+              <Stack.Screen name="Clock" component={ClockScreen} options={{ gestureEnabled: false, animationEnabled: false }} />
+              <Stack.Screen name="PlayMenu" component={PlayMenuScreen} />
+              <Stack.Screen name="CreateGame" component={CreateGameScreen} />
+              <Stack.Screen name="JoinGame" component={JoinGameScreen} />
+              <Stack.Screen name="Lobby" component={LobbyScreen} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="RoleReveal" component={RoleRevealScreen} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Night" component={NightScreen} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Morning" component={MorningScreen} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Day" component={DayScreen} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="EndGame" component={EndGameScreen} options={{ gestureEnabled: false }} />
+            </Stack.Navigator>
+            <StatusBar style="light" />
+          </NavigationContainer>
+          {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
+        </GestureHandlerRootView>
+      </SafeAreaProvider>
     </ConvexProvider>
   );
 }
