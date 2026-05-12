@@ -42,6 +42,18 @@ export default function NightScreen() {
       : 'skip',
   );
 
+  const forceAdvance = useMutation(api.night.forceAdvanceStep);
+  const refreshStep = useMutation(api.night.refreshStep);
+
+  // Local clock used to surface the host's "skip ahead" override without
+  // needing a server roundtrip — the server returns `skipEligibleAt` and the
+  // client checks it against wall-clock time on a 1s tick.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Phase-driven nav: when night ends → morning, route everyone forward.
   useEffect(() => {
     if (!view) return;
@@ -191,7 +203,98 @@ export default function NightScreen() {
       {!isMyStep && (
         <WaitingView role={me.role} stepLabel={stepLabel} history={seerHistory} />
       )}
+
+      {me.isHost &&
+        game.nightStep != null &&
+        view.game.skipEligibleAt != null &&
+        now > view.game.skipEligibleAt && (
+          <HostStallOverride
+            onRefresh={async () => {
+              try {
+                await refreshStep({
+                  gameId: game._id,
+                  callerDeviceClientId: deviceClientId,
+                  expectedStep: game.nightStep!,
+                });
+              } catch (e) {
+                Alert.alert(
+                  'Could not refresh',
+                  e instanceof Error ? e.message : String(e),
+                );
+              }
+            }}
+            onSkip={async () => {
+              try {
+                await forceAdvance({
+                  gameId: game._id,
+                  callerDeviceClientId: deviceClientId,
+                  expectedStep: game.nightStep!,
+                });
+              } catch (e) {
+                Alert.alert(
+                  'Could not skip',
+                  e instanceof Error ? e.message : String(e),
+                );
+              }
+            }}
+          />
+        )}
     </SafeAreaView>
+  );
+}
+
+// ───── Host stall override ─────────────────────────────────────────────────
+//
+// Surfaces only to the host, only after the current step has stalled past
+// `skipEligibleAt`. Two paths: REFRESH wipes the step's recorded actions and
+// resets the dwell so the stuck actor gets a clean second chance; SKIP just
+// advances without taking any action on anyone's behalf. Intentionally
+// generic — never mentions the role or player holding things up, so a host
+// who is also a player can't infer who has which role.
+
+function HostStallOverride({
+  onRefresh,
+  onSkip,
+}: {
+  onRefresh: () => void;
+  onSkip: () => void;
+}) {
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left: 16,
+        right: 16,
+        bottom: 24,
+      }}
+    >
+      <View className="bg-wolf-card rounded-xl px-4 py-3 mb-2">
+        <Text className="text-wolf-muted text-xs text-center">
+          This step is taking longer than usual.
+        </Text>
+      </View>
+      <View className="flex-row" style={{ gap: 10 }}>
+        <TouchableOpacity
+          onPress={onRefresh}
+          activeOpacity={0.75}
+          className="bg-wolf-card rounded-xl py-4 items-center flex-1"
+          style={{ borderWidth: 1, borderColor: '#D4A017' }}
+        >
+          <Text className="text-wolf-accent text-base font-extrabold tracking-widest">
+            REFRESH
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onSkip}
+          activeOpacity={0.75}
+          className="bg-wolf-accent rounded-xl py-4 items-center flex-1"
+        >
+          <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+            SKIP AHEAD
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
@@ -906,6 +1009,8 @@ function MentalistPicker({
   meId: Id<'players'>;
   mentalistState: {
     hasActedThisNight: boolean;
+    noValidTargets: boolean;
+    lockedTargets: Array<{ _id: Id<'players'>; name: string }>;
     history: Array<{
       nightNumber: number;
       firstName: string;
@@ -992,6 +1097,31 @@ function MentalistPicker({
     }
   }
 
+  // Shorthanded — last night's two targets plus the alive pool leave fewer
+  // than two legal picks. The engine auto-passes the step; we just explain
+  // what's happening while the dwell runs.
+  if (mentalistState.noValidTargets) {
+    const lockedNames = mentalistState.lockedTargets.map(t => t.name);
+    return (
+      <View className="flex-1 px-6 pt-2 pb-8">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator color="#D4A017" />
+          <Text className="text-wolf-text text-base text-center mt-6 px-4">
+            Not enough new options tonight.
+          </Text>
+          <Text className="text-wolf-muted text-sm text-center mt-3 px-6">
+            {lockedNames.length > 0
+              ? `Last night you read ${lockedNames.join(' & ')}, and they can't be picked back-to-back.`
+              : 'You need at least two valid targets to read.'}
+          </Text>
+          <Text className="text-wolf-muted text-xs text-center mt-4 px-6">
+            Passing for the night…
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   if (mentalistState.hasActedThisNight && !pendingResult) {
     const last = mentalistState.history[mentalistState.history.length - 1];
     return (
@@ -1030,6 +1160,17 @@ function MentalistPicker({
         <Text className="text-wolf-text text-base text-center mt-2 mb-2">
           Pick two players. You'll be told whether they share a team.
         </Text>
+
+        {mentalistState.lockedTargets.length > 0 && (
+          <View className="bg-wolf-card rounded-xl px-4 py-3 mb-3">
+            <Text className="text-wolf-muted text-xs leading-5">
+              Off-limits tonight (read them last night):{' '}
+              <Text className="text-wolf-text">
+                {mentalistState.lockedTargets.map(t => t.name).join(' & ')}
+              </Text>
+            </Text>
+          </View>
+        )}
 
         {mentalistState.history.length > 0 && (
           <View className="bg-wolf-card rounded-xl px-4 py-3 mb-4">

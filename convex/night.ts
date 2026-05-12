@@ -43,6 +43,15 @@ type Player = Doc<'players'>;
 const STEP_DWELL_MIN_MS = 6000;
 const STEP_DWELL_MAX_MS = 12000;
 
+// Guaranteed remaining dwell after an info-role submits, so the result modal
+// stays on-screen long enough to read even if the original dwell was about to
+// expire.
+const INFO_READING_WINDOW_MS = 4000;
+
+// How long past the dwell deadline the host has to wait before the
+// "Skip Ahead" override becomes available.
+const SKIP_STALL_THRESHOLD_MS = 20_000;
+
 function randomDwellMs(): number {
   return (
     STEP_DWELL_MIN_MS +
@@ -123,6 +132,9 @@ async function isStepComplete(
 ): Promise<boolean> {
   switch (step) {
     case 'wolves': {
+      // Defensive: if no wolves alive, the step is vacuously complete. In
+      // practice this should be caught by the win-condition first.
+      if (actors.length === 0) return true;
       const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
       return kills.length > 0;
     }
@@ -137,13 +149,23 @@ async function isStepComplete(
       return checks.length + skips.length >= actors.length;
     }
     case 'mentalist': {
+      // Mentalist may also pass when they have fewer than 2 valid targets
+      // for the night (self is never valid, and last night's two targets are
+      // off-limits per house rules). The skip action signals "no eligible
+      // pair tonight" without leaking the actor's situation.
       const checks = await getNightActions(
         ctx,
         gameId,
         nightNumber,
         'mentalist_check',
       );
-      return checks.length >= actors.length;
+      const skips = await getNightActions(
+        ctx,
+        gameId,
+        nightNumber,
+        'mentalist_skip',
+      );
+      return checks.length + skips.length >= actors.length;
     }
     case 'witch': {
       // Witch's step is complete when each witch has submitted a 'witch_done'
@@ -185,6 +207,23 @@ function piTrioResult(
   const right = allPlayers.find(p => p.seatPosition === rightSeat);
   const trio = [target, left, right].filter((p): p is Player => !!p);
   return trio.some(p => p.role && isWolfTeam(p.role)) ? 'wolf' : 'village';
+}
+
+/**
+ * Returns the players a mentalist may legally compare on a given night —
+ * everyone alive except themselves and either of their two prior-night
+ * targets (per house rule: no back-to-back picks).
+ */
+function mentalistValidPool(
+  mentalist: Player,
+  alivePlayers: Player[],
+): Player[] {
+  const lastTargets = (mentalist.roleState?.mentalistLastTargets ??
+    []) as Id<'players'>[];
+  const excluded = new Set<Id<'players'>>(lastTargets);
+  return alivePlayers.filter(
+    p => p._id !== mentalist._id && !excluded.has(p._id),
+  );
 }
 
 async function autoResolveStep(
@@ -254,10 +293,22 @@ async function autoResolveStep(
       return;
     }
     case 'mentalist': {
-      // Bot mentalist picks two random non-self alive players.
+      // Bot mentalist picks two random valid targets (excluding self and
+      // last night's two targets per house rules). When the valid pool is
+      // less than 2, the bot passes — same auto-pass path a human takes
+      // when shorthanded.
       for (const m of actors) {
-        const candidates = alivePlayers.filter(p => p._id !== m._id);
-        if (candidates.length < 2) continue;
+        const candidates = mentalistValidPool(m, alivePlayers);
+        if (candidates.length < 2) {
+          await ctx.db.insert('nightActions', {
+            gameId,
+            nightNumber,
+            actorPlayerId: m._id,
+            actionType: 'mentalist_skip',
+            resolvedAt: now,
+          });
+          continue;
+        }
         const first = pickRandom(candidates)!;
         const remaining = candidates.filter(p => p._id !== first._id);
         const second = pickRandom(remaining)!;
@@ -418,6 +469,44 @@ async function resolveMorning(
     await ctx.db.patch(bg.actorPlayerId, { roleState: nextRoleState });
   }
 
+  // Persist Mentalist back-to-back lock. A real comparison records this
+  // night's two targets; an auto-pass (no eligible pair) clears the lock so
+  // they're not still excluded on the next night.
+  const mentalistChecks = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'mentalist_check',
+  );
+  for (const mc of mentalistChecks) {
+    if (!mc.actorPlayerId) continue;
+    const mentalist = await ctx.db.get(mc.actorPlayerId);
+    if (!mentalist) continue;
+    const firstId = mc.result?.firstId as Id<'players'> | undefined;
+    const secondId = mc.result?.secondId as Id<'players'> | undefined;
+    if (!firstId || !secondId) continue;
+    await ctx.db.patch(mc.actorPlayerId, {
+      roleState: {
+        ...(mentalist.roleState ?? {}),
+        mentalistLastTargets: [firstId, secondId],
+      },
+    });
+  }
+  const mentalistSkips = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'mentalist_skip',
+  );
+  for (const ms of mentalistSkips) {
+    if (!ms.actorPlayerId) continue;
+    const mentalist = await ctx.db.get(ms.actorPlayerId);
+    if (!mentalist) continue;
+    const next = { ...(mentalist.roleState ?? {}) };
+    delete next.mentalistLastTargets;
+    await ctx.db.patch(ms.actorPlayerId, { roleState: next });
+  }
+
   // Clear per-night ephemeral roleState so next night starts clean.
   const players = await ctx.db
     .query('players')
@@ -493,7 +582,30 @@ export async function enterStep(
   const alive = players.filter(p => p.alive);
   const actors = activePlayersForStep(step, alive);
 
-  if (actors.length > 0 && actors.every(a => isBotName(a.name))) {
+  // A witch whose save AND poison are both spent has nothing left to decide,
+  // so we pre-record their "done" — same path as a bot — and let the dwell
+  // run normally. Outside observers see the step take a regular 6–12 s, with
+  // no tell that the witch's potions were exhausted.
+  const witchHasNothingLeft =
+    step === 'witch' &&
+    actors.length > 0 &&
+    actors.every(
+      a => !!a.roleState?.witchSaveUsed && !!a.roleState?.witchPoisonUsed,
+    );
+
+  // A mentalist who can't form a legal pair (self is never valid + last
+  // night's two targets are off-limits) auto-passes. Same cloaking — the
+  // step still dwells normally before advancing.
+  const mentalistShorthanded =
+    step === 'mentalist' &&
+    actors.length > 0 &&
+    actors.every(a => mentalistValidPool(a, alive).length < 2);
+
+  if (
+    (actors.length > 0 && actors.every(a => isBotName(a.name))) ||
+    witchHasNothingLeft ||
+    mentalistShorthanded
+  ) {
     await autoResolveStep(ctx, gameId, step, actors, alive, game.nightNumber);
   }
 
@@ -548,6 +660,32 @@ async function advanceFromCurrentStep(
   } else {
     await resolveMorning(ctx, gameId, game.nightNumber);
   }
+}
+
+/**
+ * After an info-role action (Seer/PI/Mentalist), make sure there's still
+ * enough remaining dwell for the player to read their result before the step
+ * advances. Bumps `nightStepEndsAt` only if it's about to expire — most of
+ * the time this is a no-op, preserving the original cloaking variance.
+ *
+ * When we do bump, we also schedule a fresh `dwellTick` at the new deadline.
+ * The original tick will still fire at the old time, but will no-op via the
+ * dwell check; the new tick is the one that ultimately advances.
+ */
+async function ensureReadingWindow(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  step: NightStep,
+): Promise<void> {
+  const game = await ctx.db.get(gameId);
+  if (!game || game.phase !== 'night' || game.nightStep !== step) return;
+  const minEndsAt = Date.now() + INFO_READING_WINDOW_MS;
+  if ((game.nightStepEndsAt ?? 0) >= minEndsAt) return;
+  await ctx.db.patch(gameId, { nightStepEndsAt: minEndsAt });
+  await ctx.scheduler.runAfter(INFO_READING_WINDOW_MS, internal.night.dwellTick, {
+    gameId,
+    expectedStep: step,
+  });
 }
 
 export const dwellTick = internalMutation({
@@ -690,6 +828,7 @@ export const submitSeerCheck = mutation({
     // their result before the screen swaps to Morning. The client calls
     // `tickNight` after the player taps OK on the result modal. Returning
     // the team lets the client display the result without a query roundtrip.
+    await ensureReadingWindow(ctx, args.gameId, 'seer');
     return { team };
   },
 });
@@ -757,6 +896,7 @@ export const submitPICheck = mutation({
 
     // Don't auto-advance — same as Seer, the PI needs to read the result
     // before the screen moves on. Client calls `tickNight` after OK.
+    await ensureReadingWindow(ctx, args.gameId, 'pi');
     return { team };
   },
 });
@@ -829,6 +969,22 @@ export const submitMentalistCheck = mutation({
     }
 
     if (
+      args.firstPlayerId === me._id ||
+      args.secondPlayerId === me._id
+    ) {
+      throw new Error('You cannot read yourself.');
+    }
+
+    const lastTargets = (me.roleState?.mentalistLastTargets ??
+      []) as Id<'players'>[];
+    const lastSet = new Set<Id<'players'>>(lastTargets);
+    if (lastSet.has(args.firstPlayerId) || lastSet.has(args.secondPlayerId)) {
+      throw new Error(
+        'You cannot pick someone you compared last night.',
+      );
+    }
+
+    if (
       await findMyAction(
         ctx,
         args.gameId,
@@ -870,6 +1026,7 @@ export const submitMentalistCheck = mutation({
     });
 
     // Don't advance — Seer pattern. Client calls tickNight after OK.
+    await ensureReadingWindow(ctx, args.gameId, 'mentalist');
     return { sameTeam };
   },
 });
@@ -1120,6 +1277,158 @@ export const tickNight = mutation({
   },
 });
 
+/**
+ * Host override. If a step has been stalled past the dwell deadline by more
+ * than `SKIP_STALL_THRESHOLD_MS` (typically because a real player is AFK),
+ * the host can force the engine to advance. Whatever actions have already
+ * been recorded apply normally; anything missing simply doesn't happen
+ * (e.g. no wolf_kill → no death from wolves that night). No random actions
+ * are taken on anyone's behalf.
+ */
+export const forceAdvanceStep = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    expectedStep: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night') {
+      throw new Error('Not currently in a night phase.');
+    }
+    // If the step has already moved on between the host tapping and the
+    // mutation running, treat as success so the host doesn't see a confusing
+    // error message.
+    if (game.nightStep !== args.expectedStep) return;
+    const eligibleAt =
+      (game.nightStepEndsAt ?? 0) + SKIP_STALL_THRESHOLD_MS;
+    if (Date.now() < eligibleAt) {
+      throw new Error('This step has not stalled long enough to skip.');
+    }
+    await advanceFromCurrentStep(ctx, args.gameId);
+  },
+});
+
+/**
+ * Action types each step records on the `nightActions` table. Used by
+ * `refreshStep` to wipe only the current step's worth of actions when the
+ * host gives a stuck player a do-over.
+ */
+const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
+  wolves: ['wolf_kill'],
+  seer: ['seer_check'],
+  pi: ['pi_check', 'pi_skip'],
+  mentalist: ['mentalist_check'],
+  witch: ['witch_save', 'witch_poison', 'witch_done'],
+  bodyguard: ['bg_protect'],
+};
+
+/**
+ * Host override that gives the stuck actor a second chance. Wipes any
+ * actions the current step has already recorded this night, clears any
+ * step-scoped roleState (only wolves' `wolfVote` currently), and starts a
+ * fresh dwell. The actor's `hasActedThisNight` flips back to false on the
+ * next reactive tick, so their picker reappears and they can re-act.
+ *
+ * Eligibility is gated by the same stall threshold as `forceAdvanceStep`,
+ * so it only surfaces after the step has genuinely stalled.
+ */
+export const refreshStep = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    expectedStep: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night') {
+      throw new Error('Not currently in a night phase.');
+    }
+    if (game.nightStep !== args.expectedStep) return;
+    if (!isNightStep(args.expectedStep)) {
+      throw new Error('Unknown night step.');
+    }
+    const step: NightStep = args.expectedStep;
+
+    const eligibleAt =
+      (game.nightStepEndsAt ?? 0) + SKIP_STALL_THRESHOLD_MS;
+    if (Date.now() < eligibleAt) {
+      throw new Error('This step has not stalled long enough to refresh.');
+    }
+
+    // Wipe this step's recorded actions for the current night.
+    const types = new Set<string>(STEP_ACTION_TYPES[step]);
+    const actions = await ctx.db
+      .query('nightActions')
+      .withIndex('by_game_night', q =>
+        q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
+      )
+      .collect();
+    for (const a of actions) {
+      if (types.has(a.actionType)) {
+        await ctx.db.delete(a._id);
+      }
+    }
+
+    // Clear step-scoped ephemeral roleState. Today this only matters for the
+    // wolves step — each wolf's per-night vote lives on the player doc and
+    // must be reset so a stale prior pick doesn't accidentally form a new
+    // consensus.
+    if (step === 'wolves') {
+      const allPlayers = await ctx.db
+        .query('players')
+        .withIndex('by_game', q => q.eq('gameId', args.gameId))
+        .collect();
+      for (const p of allPlayers) {
+        if (p.roleState && 'wolfVote' in p.roleState) {
+          const next = { ...p.roleState };
+          delete next.wolfVote;
+          await ctx.db.patch(p._id, { roleState: next });
+        }
+      }
+    }
+
+    // Fresh dwell + new tick. Mirror enterStep's auto-resolve so bot actors
+    // and "no decision left" witches re-record their no-op actions.
+    const dwellMs = randomDwellMs();
+    const endsAt = Date.now() + dwellMs;
+    await ctx.db.patch(args.gameId, { nightStepEndsAt: endsAt });
+
+    const players = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    const alive = players.filter(p => p.alive);
+    const actors = activePlayersForStep(step, alive);
+    const witchHasNothingLeft =
+      step === 'witch' &&
+      actors.length > 0 &&
+      actors.every(
+        a => !!a.roleState?.witchSaveUsed && !!a.roleState?.witchPoisonUsed,
+      );
+    const mentalistShorthanded =
+      step === 'mentalist' &&
+      actors.length > 0 &&
+      actors.every(a => mentalistValidPool(a, alive).length < 2);
+    if (
+      (actors.length > 0 && actors.every(a => isBotName(a.name))) ||
+      witchHasNothingLeft ||
+      mentalistShorthanded
+    ) {
+      await autoResolveStep(ctx, args.gameId, step, actors, alive, game.nightNumber);
+    }
+
+    await ctx.scheduler.runAfter(dwellMs, internal.night.dwellTick, {
+      gameId: args.gameId,
+      expectedStep: step,
+    });
+  },
+});
+
 export const beginNight = mutation({
   args: {
     gameId: v.id('games'),
@@ -1290,9 +1599,14 @@ export const nightView = query({
     }
 
     // Mentalist-only state. History of prior comparisons with both target
-    // names; hasActedThisNight gates the locked waiting view.
+    // names; hasActedThisNight gates the locked waiting view. `lockedTargets`
+    // is last night's pair (off-limits this night). `noValidTargets` is true
+    // when the valid pool drops below 2, in which case the engine auto-passes
+    // the step and the picker shows a "shorthanded — passing" explanation.
     let mentalistState: {
       hasActedThisNight: boolean;
+      noValidTargets: boolean;
+      lockedTargets: Array<{ _id: Id<'players'>; name: string }>;
       history: Array<{
         nightNumber: number;
         firstName: string;
@@ -1326,8 +1640,24 @@ export const nightView = query({
           sameTeam: (a.result?.sameTeam as 'same' | 'different') ?? 'different',
         };
       });
+      const lastTargets = (me.roleState?.mentalistLastTargets ??
+        []) as Id<'players'>[];
+      const lockedTargets = lastTargets
+        .map(id => playerById.get(id))
+        .filter((p): p is Player => !!p)
+        .map(p => ({ _id: p._id, name: p.name }));
+      const hasActedThisNight = allActions.some(
+        a =>
+          a.actorPlayerId === me._id &&
+          a.nightNumber === game.nightNumber &&
+          (a.actionType === 'mentalist_check' ||
+            a.actionType === 'mentalist_skip'),
+      );
+      const noValidTargets = mentalistValidPool(me, alive).length < 2;
       mentalistState = {
-        hasActedThisNight: history.some(h => h.nightNumber === game.nightNumber),
+        hasActedThisNight,
+        noValidTargets,
+        lockedTargets,
         history,
       };
     }
@@ -1430,8 +1760,9 @@ export const nightView = query({
         // would still include their two neighbors). Just alive.
         pool = alive;
       } else if (step === 'mentalist') {
-        // Mentalist may include themselves in either of the two picks.
-        pool = alive;
+        // Mentalist cannot read themselves and cannot pick anyone they
+        // compared last night (house rule: no back-to-back targets).
+        pool = mentalistValidPool(me, alive);
       } else if (step === 'witch') {
         // Poison targets — alive, non-self.
         pool = alive.filter(p => p._id !== me._id);
@@ -1471,6 +1802,14 @@ export const nightView = query({
         nightNumber: game.nightNumber,
         nightStep: step,
         playerCount: game.playerCount,
+        nightStepEndsAt: game.nightStepEndsAt ?? null,
+        // Wall-clock time at which the host's "skip ahead" override unlocks.
+        // The client computes "now > this" locally on a 1-second tick so
+        // the button surfaces without needing a server roundtrip.
+        skipEligibleAt:
+          game.nightStepEndsAt != null
+            ? game.nightStepEndsAt + SKIP_STALL_THRESHOLD_MS
+            : null,
       },
       me: {
         _id: me._id,
