@@ -103,6 +103,20 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
       return <Text className="text-wolf-text text-sm">Poisoned {t}</Text>;
     case 'witch_done':
       return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
+    case 'huntress_shot':
+      return (
+        <Text className="text-wolf-text text-sm">
+          Shot {t} —{' '}
+          <Text
+            className="font-bold"
+            style={{ color: entry.outcome === 'killed' ? '#B03A2E' : '#5BA0E5' }}
+          >
+            {entry.outcome === 'killed' ? 'KILLED' : 'SAVED'}
+          </Text>
+        </Text>
+      );
+    case 'huntress_skip':
+      return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
     default:
       return <Text className="text-wolf-muted text-sm">{entry.kind}</Text>;
   }

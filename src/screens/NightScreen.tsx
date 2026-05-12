@@ -95,6 +95,7 @@ export default function NightScreen() {
     mentalistState,
     witchState,
     bgState,
+    huntressState,
     targetables,
   } = view;
 
@@ -196,6 +197,18 @@ export default function NightScreen() {
           targetables={targetables}
           totalSeats={game.playerCount}
           bgState={bgState}
+          meId={me._id}
+        />
+      )}
+
+      {isMyStep && game.nightStep === 'huntress' && huntressState && (
+        <HuntressPicker
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alivePlayers={view.alivePlayers}
+          targetables={targetables}
+          totalSeats={game.playerCount}
+          huntressState={huntressState}
           meId={me._id}
         />
       )}
@@ -1770,6 +1783,183 @@ function BodyguardPicker({
           />
         </View>
       </ScrollView>
+    </View>
+  );
+}
+
+// ───── Huntress picker ─────────────────────────────────────────────────────
+//
+// One-time night shot. Pick a target and confirm, or pass to save the shot.
+// No instant result modal — hits and misses surface together at morning per
+// the no-night-announcements house rule.
+
+function HuntressPicker({
+  gameId,
+  deviceClientId,
+  alivePlayers,
+  targetables,
+  totalSeats,
+  huntressState,
+  meId,
+}: {
+  gameId: Id<'games'>;
+  deviceClientId: string;
+  alivePlayers: SeatingPlayer[];
+  targetables: Targetable[];
+  totalSeats: number;
+  huntressState: {
+    huntressUsed: boolean;
+    hasActedThisNight: boolean;
+  };
+  meId: Id<'players'>;
+}) {
+  const submitShot = useMutation(api.night.submitHuntressShot);
+  const submitSkip = useMutation(api.night.submitHuntressSkip);
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingTarget, setPendingTarget] = useState<{
+    id: Id<'players'>;
+    name: string;
+  } | null>(null);
+
+  function handlePickTarget(targetId: Id<'players'>, name: string) {
+    if (submitting || pendingTarget) return;
+    setPendingTarget({ id: targetId, name });
+  }
+
+  async function handleConfirm() {
+    if (!pendingTarget || submitting) return;
+    setSubmitting(true);
+    try {
+      await submitShot({
+        gameId,
+        callerDeviceClientId: deviceClientId,
+        targetPlayerId: pendingTarget.id,
+      });
+      setPendingTarget(null);
+    } catch (e) {
+      Alert.alert('Could not shoot', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleCancel() {
+    if (submitting) return;
+    setPendingTarget(null);
+  }
+
+  async function handleSkip() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await submitSkip({ gameId, callerDeviceClientId: deviceClientId });
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (huntressState.hasActedThisNight) {
+    return (
+      <View className="flex-1 px-6 pt-2 pb-8">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator color="#D4A017" />
+          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+            Waiting for the night to settle…
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View className="flex-1">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
+        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
+          One-time shot. Pick a target to shoot, or save it for later.
+        </Text>
+        <View style={{ alignItems: 'center' }}>
+          <SeatingCircle
+            totalSeats={totalSeats}
+            players={alivePlayers}
+            meId={meId}
+            selectableIds={
+              new Set(targetables.map(t => t._id as unknown as string))
+            }
+            onPress={
+              submitting || pendingTarget
+                ? undefined
+                : p => handlePickTarget(p._id, p.name)
+            }
+          />
+        </View>
+      </ScrollView>
+
+      <View className="px-6 pb-3">
+        <TouchableOpacity
+          onPress={handleSkip}
+          disabled={submitting || !!pendingTarget}
+          style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+          className="bg-wolf-card rounded-xl py-4 items-center"
+        >
+          <Text className="text-wolf-muted text-base font-bold tracking-widest">
+            SAVE FOR LATER
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {pendingTarget && (
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.92)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 32,
+          }}
+        >
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
+            SHOOT
+          </Text>
+          <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
+            {pendingTarget.name.toUpperCase()}
+          </Text>
+          <Text className="text-wolf-muted text-sm text-center mb-10">
+            Your only shot. Are you sure?
+          </Text>
+          <View className="flex-row" style={{ gap: 14 }}>
+            <TouchableOpacity
+              onPress={handleCancel}
+              disabled={submitting}
+              className="bg-wolf-card rounded-xl py-4 px-10"
+              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
+            >
+              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
+                NO
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleConfirm}
+              disabled={submitting}
+              style={{ opacity: submitting ? 0.4 : 1 }}
+              className="bg-wolf-accent rounded-xl py-4 px-10"
+            >
+              {submitting ? (
+                <ActivityIndicator color="#0F0F14" />
+              ) : (
+                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                  YES
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }

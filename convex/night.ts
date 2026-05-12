@@ -79,6 +79,12 @@ function activePlayersForStep(step: NightStep, alive: Player[]): Player[] {
       return alive.filter(p => p.role === 'Witch');
     case 'bodyguard':
       return alive.filter(p => p.role === 'Bodyguard');
+    case 'huntress':
+      // One-time: once she's used her shot, she's no longer an active actor.
+      // The step still dwells for cloaking but auto-completes since actors=[].
+      return alive.filter(
+        p => p.role === 'Huntress' && !p.roleState?.huntressUsed,
+      );
   }
 }
 
@@ -103,6 +109,8 @@ function stepIsInGame(step: NightStep, selectedRoles: string[]): boolean {
       return set.has('Witch');
     case 'bodyguard':
       return set.has('Bodyguard');
+    case 'huntress':
+      return set.has('Huntress');
   }
 }
 
@@ -177,6 +185,12 @@ async function isStepComplete(
     case 'bodyguard': {
       const protects = await getNightActions(ctx, gameId, nightNumber, 'bg_protect');
       return protects.length >= actors.length;
+    }
+    case 'huntress': {
+      // Either shoot or save the shot — both signals are completion.
+      const shots = await getNightActions(ctx, gameId, nightNumber, 'huntress_shot');
+      const skips = await getNightActions(ctx, gameId, nightNumber, 'huntress_skip');
+      return shots.length + skips.length >= actors.length;
     }
   }
 }
@@ -369,6 +383,20 @@ async function autoResolveStep(
       });
       return;
     }
+    case 'huntress': {
+      // Bot huntress saves her shot — never burns a one-time power on a
+      // random target in tests.
+      for (const h of actors) {
+        await ctx.db.insert('nightActions', {
+          gameId,
+          nightNumber,
+          actorPlayerId: h._id,
+          actionType: 'huntress_skip',
+          resolvedAt: now,
+        });
+      }
+      return;
+    }
   }
 }
 
@@ -395,6 +423,11 @@ async function resolveMorning(
   const witchPoisons = await getNightActions(ctx, gameId, nightNumber, 'witch_poison');
   for (const p of witchPoisons) {
     if (p.targetPlayerId) candidates.set(p.targetPlayerId, 'poison');
+  }
+
+  const huntressShots = await getNightActions(ctx, gameId, nightNumber, 'huntress_shot');
+  for (const h of huntressShots) {
+    if (h.targetPlayerId) candidates.set(h.targetPlayerId, 'huntress');
   }
 
   const protectedTargets = new Set<Id<'players'>>();
@@ -432,6 +465,18 @@ async function resolveMorning(
     if (!pi) continue;
     await ctx.db.patch(pc.actorPlayerId, {
       roleState: { ...(pi.roleState ?? {}), piUsed: true },
+    });
+  }
+
+  // Persist Huntress usage across nights — house rule: a shot consumes her
+  // power even when BG blocks it, so we flip the flag on every shot row
+  // (skip rows preserve the shot for later).
+  for (const hs of huntressShots) {
+    if (!hs.actorPlayerId) continue;
+    const huntress = await ctx.db.get(hs.actorPlayerId);
+    if (!huntress) continue;
+    await ctx.db.patch(hs.actorPlayerId, {
+      roleState: { ...(huntress.roleState ?? {}), huntressUsed: true },
     });
   }
 
@@ -1097,6 +1142,122 @@ export const submitBGProtect = mutation({
   },
 });
 
+// ───── Huntress ─────────────────────────────────────────────────────────────
+//
+// One-time night shot. Hits land at morning resolution (cloaked with all
+// other overnight deaths). BG can block the target — when blocked, the shot
+// is still consumed per house rules. Pass keeps the shot for later.
+
+export const submitHuntressShot = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    targetPlayerId: v.id('players'),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || game.nightStep !== 'huntress') {
+      throw new Error('The huntress is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Huntress') {
+      throw new Error('Only the huntress can shoot.');
+    }
+    if (me.roleState?.huntressUsed) {
+      throw new Error('You have already used your shot.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'huntress_shot',
+      )
+    ) {
+      throw new Error('Shot already taken tonight.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'huntress_skip',
+      )
+    ) {
+      throw new Error('You have already passed tonight.');
+    }
+
+    const target = await ctx.db.get(args.targetPlayerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new Error('Invalid target.');
+    }
+    if (!target.alive) throw new Error('Target is already eliminated.');
+    if (target._id === me._id) throw new Error('Cannot shoot yourself.');
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'huntress_shot',
+      targetPlayerId: args.targetPlayerId,
+      resolvedAt: Date.now(),
+    });
+
+    await maybeAdvance(ctx, args.gameId);
+  },
+});
+
+export const submitHuntressSkip = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || game.nightStep !== 'huntress') {
+      throw new Error('The huntress is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Huntress') {
+      throw new Error('Only the huntress can pass tonight.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'huntress_shot',
+      ) ||
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'huntress_skip',
+      )
+    ) {
+      return; // already decided
+    }
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'huntress_skip',
+      resolvedAt: Date.now(),
+    });
+
+    await maybeAdvance(ctx, args.gameId);
+  },
+});
+
 // ───── Witch ────────────────────────────────────────────────────────────────
 //
 // Three mutations: save (consumes the save potion to revive tonight's wolf
@@ -1323,6 +1484,7 @@ const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
   mentalist: ['mentalist_check'],
   witch: ['witch_save', 'witch_poison', 'witch_done'],
   bodyguard: ['bg_protect'],
+  huntress: ['huntress_shot', 'huntress_skip'],
 };
 
 /**
@@ -1712,6 +1874,31 @@ export const nightView = query({
       };
     }
 
+    // Huntress-only state. huntressUsed flips at morning resolution (a shot
+    // is consumed even if BG blocked it). hasActedThisNight drives the locked
+    // waiting view post-decision.
+    let huntressState: {
+      huntressUsed: boolean;
+      hasActedThisNight: boolean;
+    } | null = null;
+    if (me.role === 'Huntress') {
+      const myActions = await ctx.db
+        .query('nightActions')
+        .withIndex('by_game_night', q =>
+          q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
+        )
+        .collect();
+      huntressState = {
+        huntressUsed: !!me.roleState?.huntressUsed,
+        hasActedThisNight: myActions.some(
+          a =>
+            a.actorPlayerId === me._id &&
+            (a.actionType === 'huntress_shot' ||
+              a.actionType === 'huntress_skip'),
+        ),
+      };
+    }
+
     // Bodyguard-only state: which players are off-limits this night, and
     // whether we've already submitted a protect (drives the locked waiting
     // view, mirroring the Seer's post-action UX).
@@ -1776,6 +1963,9 @@ export const nightView = query({
           if (p._id === me._id && selfUsed) return false;
           return true;
         });
+      } else if (step === 'huntress') {
+        // House rule: no self-shot.
+        pool = alive.filter(p => p._id !== me._id);
       }
       targetables = pool
         .sort((a, b) => (a.seatPosition ?? 0) - (b.seatPosition ?? 0))
@@ -1827,6 +2017,7 @@ export const nightView = query({
       mentalistState,
       witchState,
       bgState,
+      huntressState,
       targetables,
       alivePlayers: aliveSummaries,
     };

@@ -560,6 +560,13 @@ export const endGameView = query({
         continue;
       }
 
+      if (a.actionType === 'huntress_shot') {
+        const killed =
+          a.targetPlayerId &&
+          deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+        baseEntry.outcome = killed ? 'killed' : 'saved';
+      }
+
       if (a.actorPlayerId) pushEntry(a.actorPlayerId, baseEntry);
     }
 
