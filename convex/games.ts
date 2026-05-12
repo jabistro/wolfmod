@@ -1,5 +1,6 @@
 import { mutation, query, type MutationCtx } from './_generated/server';
 import { v } from 'convex/values';
+import type { Id } from './_generated/dataModel';
 import { isWolfTeam } from '../src/data/v1Roles';
 import { findCaller, requireHost, isBotName } from './helpers';
 
@@ -486,6 +487,82 @@ export const endGameView = query({
       .collect();
     const me = players.find(p => p.deviceClientId === args.deviceClientId);
 
+    const nameById = new Map(players.map(p => [p._id, p.name]));
+    const nameFor = (id: Id<'players'> | undefined): string | null =>
+      id ? (nameById.get(id) ?? null) : null;
+
+    const actions = await ctx.db
+      .query('nightActions')
+      .withIndex('by_game_night', q => q.eq('gameId', args.gameId))
+      .collect();
+    actions.sort(
+      (a, b) =>
+        a.nightNumber - b.nightNumber || a.resolvedAt - b.resolvedAt,
+    );
+
+    type HistoryEntry = {
+      nightNumber: number;
+      kind: string;
+      targetName: string | null;
+      secondTargetName: string | null;
+      team: string | null;
+      sameTeam: string | null;
+      outcome: string | null;
+    };
+
+    // Build a set of (night, targetId) pairs that actually died, used to
+    // mark wolf_kill entries as KILLED vs SAVED.
+    const deathKey = (night: number, id: Id<'players'>) => `${night}:${id}`;
+    const deaths = new Set<string>();
+    for (const a of actions) {
+      if (a.actionType === 'death' && a.targetPlayerId) {
+        deaths.add(deathKey(a.nightNumber, a.targetPlayerId));
+      }
+    }
+    const historyByPlayer = new Map<Id<'players'>, HistoryEntry[]>();
+    const pushEntry = (
+      playerId: Id<'players'>,
+      entry: HistoryEntry,
+    ) => {
+      const list = historyByPlayer.get(playerId) ?? [];
+      list.push(entry);
+      historyByPlayer.set(playerId, list);
+    };
+
+    for (const a of actions) {
+      if (a.actionType === 'death') continue; // resolution row, not a choice
+      const result = (a.result ?? {}) as {
+        team?: string;
+        firstId?: Id<'players'>;
+        secondId?: Id<'players'>;
+        sameTeam?: string;
+      };
+      const baseEntry: HistoryEntry = {
+        nightNumber: a.nightNumber,
+        kind: a.actionType,
+        targetName: nameFor(a.targetPlayerId),
+        secondTargetName: nameFor(result.secondId),
+        team: result.team ?? null,
+        sameTeam: result.sameTeam ?? null,
+        outcome: null,
+      };
+
+      if (a.actionType === 'wolf_kill') {
+        const killed =
+          a.targetPlayerId &&
+          deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+        baseEntry.outcome = killed ? 'killed' : 'saved';
+        // Team decision — attribute to every wolf-team player so each wolf
+        // sees the kill in their own history.
+        for (const p of players) {
+          if (p.role && isWolfTeam(p.role)) pushEntry(p._id, baseEntry);
+        }
+        continue;
+      }
+
+      if (a.actorPlayerId) pushEntry(a.actorPlayerId, baseEntry);
+    }
+
     return {
       game: {
         _id: game._id,
@@ -502,6 +579,7 @@ export const endGameView = query({
           alive: p.alive,
           seatPosition: p.seatPosition,
           isMe: p._id === me?._id,
+          history: historyByPlayer.get(p._id) ?? [],
         })),
     };
   },

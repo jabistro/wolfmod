@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -26,11 +26,101 @@ const TEAM_COLORS: Record<Team, string> = {
   solo: '#8B6436',
 };
 
+type HistoryEntry = {
+  nightNumber: number;
+  kind: string;
+  targetName: string | null;
+  secondTargetName: string | null;
+  team: string | null;
+  sameTeam: string | null;
+  outcome: string | null;
+};
+
+function renderEntryBody(entry: HistoryEntry): React.ReactNode {
+  const t = entry.targetName ?? '—';
+  switch (entry.kind) {
+    case 'wolf_kill':
+      return (
+        <Text className="text-wolf-text text-sm">
+          Targeted {t} —{' '}
+          <Text
+            className="font-bold"
+            style={{ color: entry.outcome === 'killed' ? '#B03A2E' : '#5BA0E5' }}
+          >
+            {entry.outcome === 'killed' ? 'KILLED' : 'SAVED'}
+          </Text>
+        </Text>
+      );
+    case 'seer_check':
+      return (
+        <Text className="text-wolf-text text-sm">
+          Checked {t} —{' '}
+          <Text
+            className="font-bold"
+            style={{ color: entry.team === 'wolf' ? '#B03A2E' : '#5BA0E5' }}
+          >
+            {entry.team === 'wolf' ? 'WOLF' : 'VILLAGER'}
+          </Text>
+        </Text>
+      );
+    case 'pi_check':
+      return (
+        <Text className="text-wolf-text text-sm">
+          Investigated {t} —{' '}
+          <Text
+            className="font-bold"
+            style={{ color: entry.team === 'wolf' ? '#B03A2E' : '#5BA0E5' }}
+          >
+            {entry.team === 'wolf' ? 'WOLF' : 'VILLAGER'}
+          </Text>
+        </Text>
+      );
+    case 'pi_skip':
+      return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
+    case 'mentalist_check': {
+      const second = entry.secondTargetName ?? '—';
+      return (
+        <Text className="text-wolf-text text-sm">
+          Compared {t} &amp; {second} —{' '}
+          <Text
+            className="font-bold"
+            style={{
+              color: entry.sameTeam === 'same' ? '#5BA0E5' : '#E07070',
+            }}
+          >
+            {entry.sameTeam === 'same' ? 'SAME' : 'DIFFERENT'}
+          </Text>
+        </Text>
+      );
+    }
+    case 'mentalist_skip':
+      return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
+    case 'bg_protect':
+      return <Text className="text-wolf-text text-sm">Protected {t}</Text>;
+    case 'witch_save':
+      return <Text className="text-wolf-text text-sm">Saved {t}</Text>;
+    case 'witch_poison':
+      return <Text className="text-wolf-text text-sm">Poisoned {t}</Text>;
+    case 'witch_done':
+      return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
+    default:
+      return <Text className="text-wolf-muted text-sm">{entry.kind}</Text>;
+  }
+}
+
 export default function EndGameScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
   const deviceClientId = useDeviceId();
   const insets = useSafeAreaInsets();
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const toggleExpanded = (id: string) =>
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const view = useQuery(
     api.games.endGameView,
@@ -90,41 +180,75 @@ export default function EndGameScreen() {
           {players.map(p => {
             const team = p.role ? teamForRole(p.role) : null;
             const teamColor = team ? TEAM_COLORS[team] : '#3A3A48';
+            const history = (p.history ?? []) as HistoryEntry[];
+            const hasHistory = history.length > 0;
+            const isExpanded = expandedIds.has(p._id);
             return (
               <View
                 key={p._id}
-                className="bg-wolf-card rounded-xl px-4 py-3 flex-row items-center"
-                style={{
-                  borderWidth: p.isMe ? 2 : 1,
-                  borderColor: p.isMe ? '#D4A017' : '#2A2A38',
-                }}
+                className="bg-wolf-card rounded-xl overflow-hidden"
+                style={{ borderWidth: 1, borderColor: '#2A2A38' }}
               >
-                <Text className="text-wolf-muted text-xs w-7">
-                  {typeof p.seatPosition === 'number'
-                    ? p.seatPosition + 1
-                    : '·'}
-                </Text>
-                <View className="flex-1 ml-2">
-                  <Text className="text-wolf-text text-base font-semibold">
-                    {p.name}
-                    {p.isMe && (
-                      <Text className="text-wolf-accent text-xs"> (you)</Text>
-                    )}
+                <TouchableOpacity
+                  activeOpacity={hasHistory ? 0.7 : 1}
+                  disabled={!hasHistory}
+                  onPress={() => toggleExpanded(p._id)}
+                  className="px-4 py-3 flex-row items-center"
+                >
+                  <Text className="text-wolf-muted text-xs w-7">
+                    {typeof p.seatPosition === 'number'
+                      ? p.seatPosition + 1
+                      : '·'}
                   </Text>
-                  {!p.alive && (
-                    <Text className="text-wolf-muted text-xs italic">
-                      eliminated
+                  <View className="flex-1 ml-2">
+                    <Text className="text-wolf-text text-base font-semibold">
+                      {p.name}
+                      {p.isMe && (
+                        <Text className="text-wolf-accent text-xs"> (you)</Text>
+                      )}
+                    </Text>
+                    {!p.alive && (
+                      <Text className="text-wolf-muted text-xs italic">
+                        eliminated
+                      </Text>
+                    )}
+                  </View>
+                  <View
+                    className="rounded-full px-3 py-1"
+                    style={{ backgroundColor: teamColor }}
+                  >
+                    <Text className="text-wolf-text text-xs font-bold">
+                      {p.role ?? '—'}
+                    </Text>
+                  </View>
+                  {hasHistory && (
+                    <Text className="text-wolf-muted text-xs ml-2 w-4 text-center">
+                      {isExpanded ? '▾' : '▸'}
                     </Text>
                   )}
-                </View>
-                <View
-                  className="rounded-full px-3 py-1"
-                  style={{ backgroundColor: teamColor }}
-                >
-                  <Text className="text-wolf-text text-xs font-bold">
-                    {p.role ?? '—'}
-                  </Text>
-                </View>
+                </TouchableOpacity>
+                {hasHistory && isExpanded && (
+                  <View
+                    className="px-4 py-3 gap-y-2"
+                    style={{
+                      borderTopWidth: 1,
+                      borderTopColor: '#2A2A38',
+                      backgroundColor: '#1A1A24',
+                    }}
+                  >
+                    {history.map((entry, i) => (
+                      <View
+                        key={`${entry.nightNumber}-${entry.kind}-${i}`}
+                        className="flex-row"
+                      >
+                        <Text className="text-wolf-muted text-xs font-bold tracking-widest w-16">
+                          N{entry.nightNumber}
+                        </Text>
+                        <View className="flex-1">{renderEntryBody(entry)}</View>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             );
           })}
