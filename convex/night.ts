@@ -85,6 +85,10 @@ function activePlayersForStep(step: NightStep, alive: Player[]): Player[] {
       return alive.filter(
         p => p.role === 'Huntress' && !p.roleState?.huntressUsed,
       );
+    case 'revealer':
+      return alive.filter(p => p.role === 'Revealer');
+    case 'reviler':
+      return alive.filter(p => p.role === 'Reviler');
   }
 }
 
@@ -111,6 +115,10 @@ function stepIsInGame(step: NightStep, selectedRoles: string[]): boolean {
       return set.has('Bodyguard');
     case 'huntress':
       return set.has('Huntress');
+    case 'revealer':
+      return set.has('Revealer');
+    case 'reviler':
+      return set.has('Reviler');
   }
 }
 
@@ -190,6 +198,16 @@ async function isStepComplete(
       // Either shoot or save the shot — both signals are completion.
       const shots = await getNightActions(ctx, gameId, nightNumber, 'huntress_shot');
       const skips = await getNightActions(ctx, gameId, nightNumber, 'huntress_skip');
+      return shots.length + skips.length >= actors.length;
+    }
+    case 'revealer': {
+      const shots = await getNightActions(ctx, gameId, nightNumber, 'revealer_shot');
+      const skips = await getNightActions(ctx, gameId, nightNumber, 'revealer_skip');
+      return shots.length + skips.length >= actors.length;
+    }
+    case 'reviler': {
+      const shots = await getNightActions(ctx, gameId, nightNumber, 'reviler_shot');
+      const skips = await getNightActions(ctx, gameId, nightNumber, 'reviler_skip');
       return shots.length + skips.length >= actors.length;
     }
   }
@@ -397,6 +415,33 @@ async function autoResolveStep(
       }
       return;
     }
+    case 'revealer': {
+      // Bot revealer always passes — die-on-miss makes random targeting in
+      // tests a guaranteed self-kill, which is rarely what we want.
+      for (const r of actors) {
+        await ctx.db.insert('nightActions', {
+          gameId,
+          nightNumber,
+          actorPlayerId: r._id,
+          actionType: 'revealer_skip',
+          resolvedAt: now,
+        });
+      }
+      return;
+    }
+    case 'reviler': {
+      // Same reasoning as revealer — bot passes to avoid auto-suicide in tests.
+      for (const r of actors) {
+        await ctx.db.insert('nightActions', {
+          gameId,
+          nightNumber,
+          actorPlayerId: r._id,
+          actionType: 'reviler_skip',
+          resolvedAt: now,
+        });
+      }
+      return;
+    }
   }
 }
 
@@ -413,21 +458,68 @@ async function resolveMorning(
   // night, then filter through protection (BG, future: Tough Guy, etc.) and
   // commit the survivors. Each new death source plugs into the candidates
   // map; each new protection source plugs into the protected set.
-  const candidates = new Map<Id<'players'>, string>();
+  // `protectable: false` flags self-deaths (Revealer/Reviler miss) that BG
+  // explicitly cannot save per house rules.
+  type Candidate = { cause: string; protectable: boolean };
+  const candidates = new Map<Id<'players'>, Candidate>();
+  const addCandidate = (
+    id: Id<'players'>,
+    cause: string,
+    protectable: boolean,
+  ) => {
+    const existing = candidates.get(id);
+    if (!existing) {
+      candidates.set(id, { cause, protectable });
+      return;
+    }
+    // Once an entry is unprotectable, keep it that way — a self-death always
+    // kills even if the same player is also a protectable target tonight.
+    if (!existing.protectable) return;
+    if (!protectable) candidates.set(id, { cause, protectable: false });
+  };
 
   const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
   for (const kill of kills) {
-    if (kill.targetPlayerId) candidates.set(kill.targetPlayerId, 'wolf');
+    if (kill.targetPlayerId) addCandidate(kill.targetPlayerId, 'wolf', true);
   }
 
   const witchPoisons = await getNightActions(ctx, gameId, nightNumber, 'witch_poison');
   for (const p of witchPoisons) {
-    if (p.targetPlayerId) candidates.set(p.targetPlayerId, 'poison');
+    if (p.targetPlayerId) addCandidate(p.targetPlayerId, 'poison', true);
   }
 
   const huntressShots = await getNightActions(ctx, gameId, nightNumber, 'huntress_shot');
   for (const h of huntressShots) {
-    if (h.targetPlayerId) candidates.set(h.targetPlayerId, 'huntress');
+    if (h.targetPlayerId) addCandidate(h.targetPlayerId, 'huntress', true);
+  }
+
+  // Revealer: wolf target → target dies (BG can save). Non-wolf target →
+  // shooter dies (BG cannot save the shooter per house rules).
+  const revealerShots = await getNightActions(ctx, gameId, nightNumber, 'revealer_shot');
+  for (const rs of revealerShots) {
+    if (!rs.targetPlayerId || !rs.actorPlayerId) continue;
+    const target = await ctx.db.get(rs.targetPlayerId);
+    if (!target) continue;
+    if (target.role && isWolfTeam(target.role)) {
+      addCandidate(rs.targetPlayerId, 'revealer', true);
+    } else {
+      addCandidate(rs.actorPlayerId, 'revealer-miss', false);
+    }
+  }
+
+  // Reviler: special-villager target (village team minus plain Villager) →
+  // target dies (BG can save). Anything else (plain Villager, wolves, Minion,
+  // Reviler... — impossible since no self-shot) → shooter dies (BG cannot save).
+  const revilerShots = await getNightActions(ctx, gameId, nightNumber, 'reviler_shot');
+  for (const rs of revilerShots) {
+    if (!rs.targetPlayerId || !rs.actorPlayerId) continue;
+    const target = await ctx.db.get(rs.targetPlayerId);
+    if (!target) continue;
+    if (isSpecialVillager(target.role)) {
+      addCandidate(rs.targetPlayerId, 'reviler', true);
+    } else {
+      addCandidate(rs.actorPlayerId, 'reviler-miss', false);
+    }
   }
 
   const protectedTargets = new Set<Id<'players'>>();
@@ -440,8 +532,8 @@ async function resolveMorning(
     if (s.targetPlayerId) protectedTargets.add(s.targetPlayerId);
   }
 
-  for (const [targetId, cause] of candidates) {
-    if (protectedTargets.has(targetId)) continue;
+  for (const [targetId, c] of candidates) {
+    if (c.protectable && protectedTargets.has(targetId)) continue;
     const target = await ctx.db.get(targetId);
     if (!target || !target.alive) continue;
     await ctx.db.patch(targetId, { alive: false });
@@ -451,7 +543,7 @@ async function resolveMorning(
       actorPlayerId: undefined,
       actionType: 'death',
       targetPlayerId: targetId,
-      result: { cause },
+      result: { cause: c.cause },
       resolvedAt: now,
     });
   }
@@ -1258,6 +1350,238 @@ export const submitHuntressSkip = mutation({
   },
 });
 
+// ───── Revealer ─────────────────────────────────────────────────────────────
+//
+// Every night, optional. Die-on-miss: if the target is not a wolf, the
+// Revealer dies and the target lives. BG can save the target side; the
+// shooter is never saved from a self-death (house rule).
+
+export const submitRevealerShot = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    targetPlayerId: v.id('players'),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || game.nightStep !== 'revealer') {
+      throw new Error('The revealer is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Revealer') {
+      throw new Error('Only the revealer can shoot.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'revealer_shot',
+      )
+    ) {
+      throw new Error('Shot already taken tonight.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'revealer_skip',
+      )
+    ) {
+      throw new Error('You have already passed tonight.');
+    }
+
+    const target = await ctx.db.get(args.targetPlayerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new Error('Invalid target.');
+    }
+    if (!target.alive) throw new Error('Target is already eliminated.');
+    if (target._id === me._id) throw new Error('Cannot shoot yourself.');
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'revealer_shot',
+      targetPlayerId: args.targetPlayerId,
+      resolvedAt: Date.now(),
+    });
+
+    await maybeAdvance(ctx, args.gameId);
+  },
+});
+
+export const submitRevealerSkip = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || game.nightStep !== 'revealer') {
+      throw new Error('The revealer is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Revealer') {
+      throw new Error('Only the revealer can pass tonight.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'revealer_shot',
+      ) ||
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'revealer_skip',
+      )
+    ) {
+      return;
+    }
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'revealer_skip',
+      resolvedAt: Date.now(),
+    });
+
+    await maybeAdvance(ctx, args.gameId);
+  },
+});
+
+// ───── Reviler ──────────────────────────────────────────────────────────────
+//
+// Solo antagonist who wakes alone. Hit target = any village-team role that
+// isn't plain Villager (Seer, BG, Witch, PI, etc.). Miss = shooter dies.
+// Doesn't know wolf identities; doesn't count toward parity. BG saves the
+// target side of a hit but not the shooter side of a miss.
+
+function isSpecialVillager(role: string | undefined): boolean {
+  if (!role) return false;
+  return teamForRole(role) === 'village' && role !== 'Villager';
+}
+
+export const submitRevilerShot = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    targetPlayerId: v.id('players'),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || game.nightStep !== 'reviler') {
+      throw new Error('The reviler is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Reviler') {
+      throw new Error('Only the reviler can shoot.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'reviler_shot',
+      )
+    ) {
+      throw new Error('Shot already taken tonight.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'reviler_skip',
+      )
+    ) {
+      throw new Error('You have already passed tonight.');
+    }
+
+    const target = await ctx.db.get(args.targetPlayerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new Error('Invalid target.');
+    }
+    if (!target.alive) throw new Error('Target is already eliminated.');
+    if (target._id === me._id) throw new Error('Cannot shoot yourself.');
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'reviler_shot',
+      targetPlayerId: args.targetPlayerId,
+      resolvedAt: Date.now(),
+    });
+
+    await maybeAdvance(ctx, args.gameId);
+  },
+});
+
+export const submitRevilerSkip = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || game.nightStep !== 'reviler') {
+      throw new Error('The reviler is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Reviler') {
+      throw new Error('Only the reviler can pass tonight.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'reviler_shot',
+      ) ||
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'reviler_skip',
+      )
+    ) {
+      return;
+    }
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'reviler_skip',
+      resolvedAt: Date.now(),
+    });
+
+    await maybeAdvance(ctx, args.gameId);
+  },
+});
+
 // ───── Witch ────────────────────────────────────────────────────────────────
 //
 // Three mutations: save (consumes the save potion to revive tonight's wolf
@@ -1485,6 +1809,8 @@ const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
   witch: ['witch_save', 'witch_poison', 'witch_done'],
   bodyguard: ['bg_protect'],
   huntress: ['huntress_shot', 'huntress_skip'],
+  revealer: ['revealer_shot', 'revealer_skip'],
+  reviler: ['reviler_shot', 'reviler_skip'],
 };
 
 /**
@@ -1874,6 +2200,49 @@ export const nightView = query({
       };
     }
 
+    // Reviler-only state. Solo antagonist; same shape as revealerState.
+    let revilerState: {
+      hasActedThisNight: boolean;
+    } | null = null;
+    if (me.role === 'Reviler') {
+      const myActions = await ctx.db
+        .query('nightActions')
+        .withIndex('by_game_night', q =>
+          q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
+        )
+        .collect();
+      revilerState = {
+        hasActedThisNight: myActions.some(
+          a =>
+            a.actorPlayerId === me._id &&
+            (a.actionType === 'reviler_shot' ||
+              a.actionType === 'reviler_skip'),
+        ),
+      };
+    }
+
+    // Revealer-only state. No usage flag (every night, optional);
+    // hasActedThisNight drives the locked waiting view.
+    let revealerState: {
+      hasActedThisNight: boolean;
+    } | null = null;
+    if (me.role === 'Revealer') {
+      const myActions = await ctx.db
+        .query('nightActions')
+        .withIndex('by_game_night', q =>
+          q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
+        )
+        .collect();
+      revealerState = {
+        hasActedThisNight: myActions.some(
+          a =>
+            a.actorPlayerId === me._id &&
+            (a.actionType === 'revealer_shot' ||
+              a.actionType === 'revealer_skip'),
+        ),
+      };
+    }
+
     // Huntress-only state. huntressUsed flips at morning resolution (a shot
     // is consumed even if BG blocked it). hasActedThisNight drives the locked
     // waiting view post-decision.
@@ -1966,6 +2335,13 @@ export const nightView = query({
       } else if (step === 'huntress') {
         // House rule: no self-shot.
         pool = alive.filter(p => p._id !== me._id);
+      } else if (step === 'revealer') {
+        // House rule: no self-shot.
+        pool = alive.filter(p => p._id !== me._id);
+      } else if (step === 'reviler') {
+        // House rule: no self-shot. Reviler is blind to roles — they may
+        // pick anyone alive, and the morning resolves whether it's a hit.
+        pool = alive.filter(p => p._id !== me._id);
       }
       targetables = pool
         .sort((a, b) => (a.seatPosition ?? 0) - (b.seatPosition ?? 0))
@@ -2018,6 +2394,8 @@ export const nightView = query({
       witchState,
       bgState,
       huntressState,
+      revealerState,
+      revilerState,
       targetables,
       alivePlayers: aliveSummaries,
     };

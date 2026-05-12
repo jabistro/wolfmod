@@ -13,6 +13,8 @@ export const NIGHT_STEPS = [
   'witch',
   'bodyguard',
   'huntress',
+  'revealer',
+  'reviler',
 ] as const;
 export type NightStep = (typeof NIGHT_STEPS)[number];
 
@@ -43,5 +45,9 @@ export function nightStepLabel(step: NightStep): string {
       return 'The bodyguard is awake';
     case 'huntress':
       return 'The huntress is awake';
+    case 'revealer':
+      return 'The revealer is awake';
+    case 'reviler':
+      return 'The reviler is awake';
   }
 }

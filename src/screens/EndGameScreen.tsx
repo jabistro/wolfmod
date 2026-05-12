@@ -117,6 +117,54 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
       );
     case 'huntress_skip':
       return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
+    case 'revealer_shot': {
+      const label =
+        entry.outcome === 'killed'
+          ? 'KILLED'
+          : entry.outcome === 'missed'
+            ? 'MISSED'
+            : 'SAVED';
+      const color =
+        entry.outcome === 'killed'
+          ? '#B03A2E'
+          : entry.outcome === 'missed'
+            ? '#E0A030'
+            : '#5BA0E5';
+      return (
+        <Text className="text-wolf-text text-sm">
+          Shot {t} —{' '}
+          <Text className="font-bold" style={{ color }}>
+            {label}
+          </Text>
+        </Text>
+      );
+    }
+    case 'revealer_skip':
+      return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
+    case 'reviler_shot': {
+      const label =
+        entry.outcome === 'killed'
+          ? 'KILLED'
+          : entry.outcome === 'missed'
+            ? 'MISSED'
+            : 'SAVED';
+      const color =
+        entry.outcome === 'killed'
+          ? '#B03A2E'
+          : entry.outcome === 'missed'
+            ? '#E0A030'
+            : '#5BA0E5';
+      return (
+        <Text className="text-wolf-text text-sm">
+          Reviled {t} —{' '}
+          <Text className="font-bold" style={{ color }}>
+            {label}
+          </Text>
+        </Text>
+      );
+    }
+    case 'reviler_skip':
+      return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
     default:
       return <Text className="text-wolf-muted text-sm">{entry.kind}</Text>;
   }

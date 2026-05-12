@@ -1,7 +1,7 @@
 import { mutation, query, type MutationCtx } from './_generated/server';
 import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
-import { isWolfTeam } from '../src/data/v1Roles';
+import { isWolfTeam, teamForRole } from '../src/data/v1Roles';
 import { findCaller, requireHost, isBotName } from './helpers';
 
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I, O
@@ -565,6 +565,45 @@ export const endGameView = query({
           a.targetPlayerId &&
           deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
         baseEntry.outcome = killed ? 'killed' : 'saved';
+      }
+
+      if (a.actionType === 'revealer_shot') {
+        // Three outcomes:
+        // - target was wolf-team, died → KILLED
+        // - target was wolf-team, BG protected → SAVED
+        // - target was not wolf-team → revealer dies, target lives → MISSED
+        const target = a.targetPlayerId
+          ? players.find(p => p._id === a.targetPlayerId)
+          : null;
+        const targetIsWolf = !!target?.role && isWolfTeam(target.role);
+        if (targetIsWolf) {
+          const killed =
+            a.targetPlayerId &&
+            deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+          baseEntry.outcome = killed ? 'killed' : 'saved';
+        } else {
+          baseEntry.outcome = 'missed';
+        }
+      }
+
+      if (a.actionType === 'reviler_shot') {
+        // Hit = special villager (village team minus plain Villager). Same
+        // KILLED / SAVED / MISSED outcomes as the Revealer.
+        const target = a.targetPlayerId
+          ? players.find(p => p._id === a.targetPlayerId)
+          : null;
+        const targetIsSpecial =
+          !!target?.role &&
+          teamForRole(target.role) === 'village' &&
+          target.role !== 'Villager';
+        if (targetIsSpecial) {
+          const killed =
+            a.targetPlayerId &&
+            deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+          baseEntry.outcome = killed ? 'killed' : 'saved';
+        } else {
+          baseEntry.outcome = 'missed';
+        }
       }
 
       if (a.actorPlayerId) pushEntry(a.actorPlayerId, baseEntry);

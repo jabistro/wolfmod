@@ -96,6 +96,8 @@ export default function NightScreen() {
     witchState,
     bgState,
     huntressState,
+    revealerState,
+    revilerState,
     targetables,
   } = view;
 
@@ -209,6 +211,30 @@ export default function NightScreen() {
           targetables={targetables}
           totalSeats={game.playerCount}
           huntressState={huntressState}
+          meId={me._id}
+        />
+      )}
+
+      {isMyStep && game.nightStep === 'revealer' && revealerState && (
+        <RevealerPicker
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alivePlayers={view.alivePlayers}
+          targetables={targetables}
+          totalSeats={game.playerCount}
+          revealerState={revealerState}
+          meId={me._id}
+        />
+      )}
+
+      {isMyStep && game.nightStep === 'reviler' && revilerState && (
+        <RevilerPicker
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alivePlayers={view.alivePlayers}
+          targetables={targetables}
+          totalSeats={game.playerCount}
+          revilerState={revilerState}
           meId={me._id}
         />
       )}
@@ -1931,6 +1957,358 @@ function HuntressPicker({
           </Text>
           <Text className="text-wolf-muted text-sm text-center mb-10">
             Your only shot. Are you sure?
+          </Text>
+          <View className="flex-row" style={{ gap: 14 }}>
+            <TouchableOpacity
+              onPress={handleCancel}
+              disabled={submitting}
+              className="bg-wolf-card rounded-xl py-4 px-10"
+              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
+            >
+              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
+                NO
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleConfirm}
+              disabled={submitting}
+              style={{ opacity: submitting ? 0.4 : 1 }}
+              className="bg-wolf-accent rounded-xl py-4 px-10"
+            >
+              {submitting ? (
+                <ActivityIndicator color="#0F0F14" />
+              ) : (
+                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                  YES
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ───── Revealer picker ─────────────────────────────────────────────────────
+//
+// Optional every night. Die-on-miss: if the target isn't a wolf, the
+// Revealer dies and the target lives. UI emphasises this risk in the
+// confirm copy so the player can back out before locking in.
+
+function RevealerPicker({
+  gameId,
+  deviceClientId,
+  alivePlayers,
+  targetables,
+  totalSeats,
+  revealerState,
+  meId,
+}: {
+  gameId: Id<'games'>;
+  deviceClientId: string;
+  alivePlayers: SeatingPlayer[];
+  targetables: Targetable[];
+  totalSeats: number;
+  revealerState: {
+    hasActedThisNight: boolean;
+  };
+  meId: Id<'players'>;
+}) {
+  const submitShot = useMutation(api.night.submitRevealerShot);
+  const submitSkip = useMutation(api.night.submitRevealerSkip);
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingTarget, setPendingTarget] = useState<{
+    id: Id<'players'>;
+    name: string;
+  } | null>(null);
+
+  function handlePickTarget(targetId: Id<'players'>, name: string) {
+    if (submitting || pendingTarget) return;
+    setPendingTarget({ id: targetId, name });
+  }
+
+  async function handleConfirm() {
+    if (!pendingTarget || submitting) return;
+    setSubmitting(true);
+    try {
+      await submitShot({
+        gameId,
+        callerDeviceClientId: deviceClientId,
+        targetPlayerId: pendingTarget.id,
+      });
+      setPendingTarget(null);
+    } catch (e) {
+      Alert.alert('Could not shoot', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleCancel() {
+    if (submitting) return;
+    setPendingTarget(null);
+  }
+
+  async function handleSkip() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await submitSkip({ gameId, callerDeviceClientId: deviceClientId });
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (revealerState.hasActedThisNight) {
+    return (
+      <View className="flex-1 px-6 pt-2 pb-8">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator color="#D4A017" />
+          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+            Waiting for the night to settle…
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View className="flex-1">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
+        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
+          Pick a wolf to reveal them. If they aren't a wolf, you die instead.
+        </Text>
+        <View style={{ alignItems: 'center' }}>
+          <SeatingCircle
+            totalSeats={totalSeats}
+            players={alivePlayers}
+            meId={meId}
+            selectableIds={
+              new Set(targetables.map(t => t._id as unknown as string))
+            }
+            onPress={
+              submitting || pendingTarget
+                ? undefined
+                : p => handlePickTarget(p._id, p.name)
+            }
+          />
+        </View>
+      </ScrollView>
+
+      <View className="px-6 pb-3">
+        <TouchableOpacity
+          onPress={handleSkip}
+          disabled={submitting || !!pendingTarget}
+          style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+          className="bg-wolf-card rounded-xl py-4 items-center"
+        >
+          <Text className="text-wolf-muted text-base font-bold tracking-widest">
+            PASS TONIGHT
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {pendingTarget && (
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.92)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 32,
+          }}
+        >
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
+            REVEAL
+          </Text>
+          <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
+            {pendingTarget.name.toUpperCase()}
+          </Text>
+          <Text className="text-wolf-muted text-sm text-center mb-10 px-4">
+            If they aren't a wolf, you die. Are you sure?
+          </Text>
+          <View className="flex-row" style={{ gap: 14 }}>
+            <TouchableOpacity
+              onPress={handleCancel}
+              disabled={submitting}
+              className="bg-wolf-card rounded-xl py-4 px-10"
+              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
+            >
+              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
+                NO
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleConfirm}
+              disabled={submitting}
+              style={{ opacity: submitting ? 0.4 : 1 }}
+              className="bg-wolf-accent rounded-xl py-4 px-10"
+            >
+              {submitting ? (
+                <ActivityIndicator color="#0F0F14" />
+              ) : (
+                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                  YES
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ───── Reviler picker ──────────────────────────────────────────────────────
+//
+// Solo antagonist. Optional every night. Die-on-miss when target isn't a
+// "special villager" (any village-team role besides plain Villager). UI
+// copy stays narrative — server enforces the actual hit rule.
+
+function RevilerPicker({
+  gameId,
+  deviceClientId,
+  alivePlayers,
+  targetables,
+  totalSeats,
+  revilerState,
+  meId,
+}: {
+  gameId: Id<'games'>;
+  deviceClientId: string;
+  alivePlayers: SeatingPlayer[];
+  targetables: Targetable[];
+  totalSeats: number;
+  revilerState: {
+    hasActedThisNight: boolean;
+  };
+  meId: Id<'players'>;
+}) {
+  const submitShot = useMutation(api.night.submitRevilerShot);
+  const submitSkip = useMutation(api.night.submitRevilerSkip);
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingTarget, setPendingTarget] = useState<{
+    id: Id<'players'>;
+    name: string;
+  } | null>(null);
+
+  function handlePickTarget(targetId: Id<'players'>, name: string) {
+    if (submitting || pendingTarget) return;
+    setPendingTarget({ id: targetId, name });
+  }
+
+  async function handleConfirm() {
+    if (!pendingTarget || submitting) return;
+    setSubmitting(true);
+    try {
+      await submitShot({
+        gameId,
+        callerDeviceClientId: deviceClientId,
+        targetPlayerId: pendingTarget.id,
+      });
+      setPendingTarget(null);
+    } catch (e) {
+      Alert.alert('Could not shoot', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleCancel() {
+    if (submitting) return;
+    setPendingTarget(null);
+  }
+
+  async function handleSkip() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await submitSkip({ gameId, callerDeviceClientId: deviceClientId });
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (revilerState.hasActedThisNight) {
+    return (
+      <View className="flex-1 px-6 pt-2 pb-8">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator color="#D4A017" />
+          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+            Waiting for the night to settle…
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View className="flex-1">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
+        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
+          Pick a special villager to revile them. If they aren't one, you die instead.
+        </Text>
+        <View style={{ alignItems: 'center' }}>
+          <SeatingCircle
+            totalSeats={totalSeats}
+            players={alivePlayers}
+            meId={meId}
+            selectableIds={
+              new Set(targetables.map(t => t._id as unknown as string))
+            }
+            onPress={
+              submitting || pendingTarget
+                ? undefined
+                : p => handlePickTarget(p._id, p.name)
+            }
+          />
+        </View>
+      </ScrollView>
+
+      <View className="px-6 pb-3">
+        <TouchableOpacity
+          onPress={handleSkip}
+          disabled={submitting || !!pendingTarget}
+          style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+          className="bg-wolf-card rounded-xl py-4 items-center"
+        >
+          <Text className="text-wolf-muted text-base font-bold tracking-widest">
+            PASS TONIGHT
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {pendingTarget && (
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.92)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 32,
+          }}
+        >
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
+            REVILE
+          </Text>
+          <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
+            {pendingTarget.name.toUpperCase()}
+          </Text>
+          <Text className="text-wolf-muted text-sm text-center mb-10 px-4">
+            If they aren't a special villager, you die. Are you sure?
           </Text>
           <View className="flex-row" style={{ gap: 14 }}>
             <TouchableOpacity
