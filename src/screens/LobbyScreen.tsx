@@ -20,6 +20,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { V1_ROLES } from '../data/v1Roles';
 import { ROLES, CATEGORIES, type RoleCategory } from '../data/roles';
+import { getRoleValue } from '../data/roleValues';
 
 // Build the category map for v1 roles once. The role selection modal uses
 // this to power its team tabs (Villagers / Wolves / Team Wolf / Solo) so
@@ -118,6 +119,13 @@ export default function LobbyScreen() {
     () => Object.values(draftCounts).reduce((a, b) => a + b, 0),
     [draftCounts],
   );
+  const draftBalance = useMemo(() => {
+    let total = 0;
+    for (const [role, count] of Object.entries(draftCounts)) {
+      total += getRoleValue(role) * count;
+    }
+    return total;
+  }, [draftCounts]);
 
   if (!deviceClientId || lobby === undefined) {
     return (
@@ -568,9 +576,26 @@ export default function LobbyScreen() {
               <TouchableOpacity onPress={() => setRolesModalOpen(false)} className="w-16">
                 <Text className="text-wolf-text">Cancel</Text>
               </TouchableOpacity>
-              <Text className="flex-1 text-wolf-text text-base font-bold text-center">
-                Roles ({draftTotal} / {game.playerCount})
-              </Text>
+              <View className="flex-1 items-center">
+                <Text className="text-wolf-text text-base font-bold">
+                  Roles ({draftTotal} / {game.playerCount})
+                </Text>
+                <Text
+                  style={{
+                    color:
+                      draftBalance > 0
+                        ? '#4caf50'
+                        : draftBalance < 0
+                          ? '#ef5350'
+                          : '#8A8590',
+                    fontSize: 12,
+                    fontWeight: '600',
+                    marginTop: 2,
+                  }}
+                >
+                  Balance: {draftBalance > 0 ? `+${draftBalance}` : draftBalance}
+                </Text>
+              </View>
               <TouchableOpacity
                 onPress={saveRoles}
                 disabled={draftTotal !== game.playerCount}
@@ -647,7 +672,7 @@ export default function LobbyScreen() {
               {(() => {
                 const filtered = V1_ROLES.filter(
                   role => V1_ROLE_CATEGORY_MAP.get(role) === roleFilter,
-                );
+                ).sort((a, b) => a.localeCompare(b));
                 if (filtered.length === 0) {
                   return (
                     <View className="py-10 items-center">
@@ -666,6 +691,26 @@ export default function LobbyScreen() {
                     className="flex-row items-center py-3 border-b border-wolf-card"
                   >
                     <Text className="text-wolf-text text-base flex-1">{role}</Text>
+                    {(() => {
+                      const val = getRoleValue(role);
+                      const bg = val > 0 ? '#1a4a1a' : val < 0 ? '#4a1a1a' : '#2a2a2a';
+                      const color = val > 0 ? '#4caf50' : val < 0 ? '#ef5350' : '#8A8590';
+                      return (
+                        <View
+                          style={{
+                            backgroundColor: bg,
+                            borderRadius: 4,
+                            paddingHorizontal: 6,
+                            paddingVertical: 2,
+                            marginRight: 12,
+                          }}
+                        >
+                          <Text style={{ color, fontSize: 12, fontWeight: '700' }}>
+                            {val > 0 ? `+${val}` : `${val}`}
+                          </Text>
+                        </View>
+                      );
+                    })()}
                     <TouchableOpacity
                       onPress={() => decrement(role)}
                       disabled={count === 0}
