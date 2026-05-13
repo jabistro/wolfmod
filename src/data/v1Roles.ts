@@ -64,11 +64,13 @@ const VILLAGE_ROLES = new Set<string>([
   'Revealer',
   'Mad Destroyer',
 ]);
-const SOLO_ROLES = new Set<string>(['Reviler']);
+// No v1 roles are currently TEAM_SOLO. Reviler and Minion both win with the
+// wolves and are wolf-team for grouping (Mentalist reads them as same-team
+// as actual wolves). They're still excluded from parity in `checkWinCondition`.
+// TEAM_SOLO stays defined for future v2 roles (Tanner, Cult Leader, etc.).
 
 export function teamForRole(role: string): Team {
-  if (isWolfTeam(role) || role === 'Minion') return TEAM_WOLF;
-  if (SOLO_ROLES.has(role)) return TEAM_SOLO;
+  if (isWolfTeam(role) || role === 'Minion' || role === 'Reviler') return TEAM_WOLF;
   if (VILLAGE_ROLES.has(role)) return TEAM_VILLAGE;
   return TEAM_VILLAGE;
 }

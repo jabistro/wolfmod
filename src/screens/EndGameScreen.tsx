@@ -26,6 +26,17 @@ const TEAM_COLORS: Record<Team, string> = {
   solo: '#8B6436',
 };
 
+// Wolf-aligned roles that aren't actual wolves get the "Team Wolf" hue used
+// in the Roles browser, distinct from the deep red of true wolves.
+const TEAM_WOLF_COLOR = '#C05050';
+const TEAMWOLF_ROLES = new Set<string>(['Minion', 'Reviler']);
+
+function pillColorFor(role: string | null, team: Team | null): string {
+  if (role && TEAMWOLF_ROLES.has(role)) return TEAM_WOLF_COLOR;
+  if (team) return TEAM_COLORS[team];
+  return '#3A3A48';
+}
+
 type HistoryEntry = {
   nightNumber: number;
   kind: string;
@@ -39,18 +50,28 @@ type HistoryEntry = {
 function renderEntryBody(entry: HistoryEntry): React.ReactNode {
   const t = entry.targetName ?? '—';
   switch (entry.kind) {
-    case 'wolf_kill':
+    case 'wolf_kill': {
+      const label =
+        entry.outcome === 'killed'
+          ? 'KILLED'
+          : entry.outcome === 'delayed'
+            ? 'DEATH DELAYED'
+            : 'SAVED';
+      const color =
+        entry.outcome === 'killed'
+          ? '#B03A2E'
+          : entry.outcome === 'delayed'
+            ? '#E0A030'
+            : '#5BA0E5';
       return (
         <Text className="text-wolf-text text-sm">
           Targeted {t} —{' '}
-          <Text
-            className="font-bold"
-            style={{ color: entry.outcome === 'killed' ? '#B03A2E' : '#5BA0E5' }}
-          >
-            {entry.outcome === 'killed' ? 'KILLED' : 'SAVED'}
+          <Text className="font-bold" style={{ color }}>
+            {label}
           </Text>
         </Text>
       );
+    }
     case 'seer_check':
       return (
         <Text className="text-wolf-text text-sm">
@@ -165,6 +186,24 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
     }
     case 'reviler_skip':
       return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
+    case 'tough_guy_wounded':
+      return (
+        <Text className="text-wolf-text text-sm">
+          Attacked by wolves —{' '}
+          <Text className="font-bold" style={{ color: '#E0A030' }}>
+            DEATH DELAYED
+          </Text>
+        </Text>
+      );
+    case 'wolf_blocked':
+      return (
+        <Text className="text-wolf-text text-sm">
+          Diseased blood —{' '}
+          <Text className="font-bold" style={{ color: '#E0A030' }}>
+            NO KILL
+          </Text>
+        </Text>
+      );
     default:
       return <Text className="text-wolf-muted text-sm">{entry.kind}</Text>;
   }
@@ -241,7 +280,7 @@ export default function EndGameScreen() {
         <View className="gap-y-2">
           {players.map(p => {
             const team = p.role ? teamForRole(p.role) : null;
-            const teamColor = team ? TEAM_COLORS[team] : '#3A3A48';
+            const teamColor = pillColorFor(p.role ?? null, team);
             const history = (p.history ?? []) as HistoryEntry[];
             const hasHistory = history.length > 0;
             const isExpanded = expandedIds.has(p._id);
@@ -279,14 +318,22 @@ export default function EndGameScreen() {
                     className="rounded-full px-3 py-1"
                     style={{ backgroundColor: teamColor }}
                   >
-                    <Text className="text-wolf-text text-xs font-bold">
+                    <Text
+                      numberOfLines={1}
+                      className="text-wolf-text text-xs font-bold"
+                    >
                       {p.role ?? '—'}
                     </Text>
                   </View>
-                  {hasHistory && (
+                  {hasHistory ? (
                     <Text className="text-wolf-muted text-xs ml-2 w-4 text-center">
                       {isExpanded ? '▾' : '▸'}
                     </Text>
+                  ) : (
+                    // Spacer so caret-less rows align their pill with rows
+                    // that DO have a caret. Same total width as the caret
+                    // group: ml-2 (8px) + w-4 (16px) = 24px.
+                    <View className="ml-2 w-4" />
                   )}
                 </TouchableOpacity>
                 {hasHistory && isExpanded && (

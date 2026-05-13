@@ -152,7 +152,16 @@ async function isStepComplete(
       // practice this should be caught by the win-condition first.
       if (actors.length === 0) return true;
       const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
-      return kills.length > 0;
+      if (kills.length > 0) return true;
+      // Diseased carryover: enterStep inserted a wolf_blocked row instead of
+      // letting wolves pick — that also completes the step.
+      const blocked = await getNightActions(
+        ctx,
+        gameId,
+        nightNumber,
+        'wolf_blocked',
+      );
+      return blocked.length > 0;
     }
     case 'seer': {
       const checks = await getNightActions(ctx, gameId, nightNumber, 'seer_check');
@@ -454,6 +463,16 @@ async function resolveMorning(
 ) {
   const now = Date.now();
 
+  // Reset the Diseased-block carryover. The flag was honored when wolves
+  // entered their step tonight (no picker, wolf_blocked row inserted); we
+  // clear it here so the next wolves step runs normally. If a fresh Diseased
+  // death lands tonight, the trigger near the end of this function flips it
+  // back on for the following night.
+  const gameAtStart = await ctx.db.get(gameId);
+  if (gameAtStart?.wolvesBlockedNextNight) {
+    await ctx.db.patch(gameId, { wolvesBlockedNextNight: false });
+  }
+
   // Build a set of death candidates from every kill source recorded for the
   // night, then filter through protection (BG, future: Tough Guy, etc.) and
   // commit the survivors. Each new death source plugs into the candidates
@@ -477,6 +496,19 @@ async function resolveMorning(
     if (!existing.protectable) return;
     if (!protectable) candidates.set(id, { cause, protectable: false });
   };
+
+  // Wounded Tough Guys die at this morning's resolution, regardless of any
+  // protection (BG can't save twice from the same wound). Their flag was set
+  // at the previous morning when they survived a wolf attack.
+  const allPlayersForTG = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  for (const p of allPlayersForTG) {
+    if (p.alive && p.role === 'Tough Guy' && p.roleState?.toughGuyWounded) {
+      addCandidate(p._id, 'tough_guy', false);
+    }
+  }
 
   const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
   for (const kill of kills) {
@@ -532,6 +564,27 @@ async function resolveMorning(
     if (s.targetPlayerId) protectedTargets.add(s.targetPlayerId);
   }
 
+  // Tough Guy first-attack survival. For every TG attacked by wolves this
+  // night who isn't already wounded and isn't BG-protected, drop the wolf
+  // entry from candidates ONLY when wolf is their sole cause (poison,
+  // huntress, etc. still kill them normally — TG resists wolf bite, not
+  // poison or arrows). They get wounded and die at the next morning.
+  const tgsToWound = new Set<Id<'players'>>();
+  for (const k of kills) {
+    if (!k.targetPlayerId) continue;
+    const tg = await ctx.db.get(k.targetPlayerId);
+    if (!tg || tg.role !== 'Tough Guy') continue;
+    if (tg.roleState?.toughGuyWounded) continue;
+    if (protectedTargets.has(tg._id)) continue; // BG cleanly saved, no wound
+    const cand = candidates.get(tg._id);
+    if (cand?.cause === 'wolf') {
+      candidates.delete(tg._id);
+      tgsToWound.add(tg._id);
+    }
+    // else: another death source (poison, huntress, etc.) — they die from
+    // that; we deliberately don't burn the wound on a TG who's dying anyway.
+  }
+
   for (const [targetId, c] of candidates) {
     if (c.protectable && protectedTargets.has(targetId)) continue;
     const target = await ctx.db.get(targetId);
@@ -546,6 +599,38 @@ async function resolveMorning(
       result: { cause: c.cause },
       resolvedAt: now,
     });
+  }
+
+  // Tough Guy wound persistence. Only flag survivors — if a TG was in
+  // tgsToWound but somehow died anyway (defensive: e.g., wound flag race),
+  // we skip the patch. The `tough_guy_wounded` action row gives the
+  // morning view a private "you survived" signal AND lets end-game show it.
+  for (const tgId of tgsToWound) {
+    const tg = await ctx.db.get(tgId);
+    if (!tg || !tg.alive) continue;
+    await ctx.db.patch(tgId, {
+      roleState: { ...(tg.roleState ?? {}), toughGuyWounded: true },
+    });
+    await ctx.db.insert('nightActions', {
+      gameId,
+      nightNumber,
+      actorPlayerId: tgId,
+      actionType: 'tough_guy_wounded',
+      targetPlayerId: tgId,
+      resolvedAt: now,
+    });
+  }
+
+  // Diseased trigger. If any Diseased player actually died from a wolf kill
+  // this morning, set the carryover flag so the next wolves step inserts a
+  // `wolf_blocked` action instead of a kill.
+  for (const k of kills) {
+    if (!k.targetPlayerId) continue;
+    const t = await ctx.db.get(k.targetPlayerId);
+    if (!t || t.role !== 'Diseased') continue;
+    if (t.alive) continue; // saved by BG or witch — no trigger
+    await ctx.db.patch(gameId, { wolvesBlockedNextNight: true });
+    break;
   }
 
   // Persist PI usage across nights — once they investigate, they're spent
@@ -738,7 +823,22 @@ export async function enterStep(
     actors.length > 0 &&
     actors.every(a => mentalistValidPool(a, alive).length < 2);
 
-  if (
+  // Wolves are blocked tonight because a Diseased was eaten last night.
+  // Wolves DO see the blocked view (they need to know they can't act), but
+  // nobody else hears about it — the village's mystery is preserved. The
+  // flag stays set until the next morning's resolution clears it, which
+  // makes refreshStep replay correctly.
+  const wolvesBlocked = step === 'wolves' && !!game.wolvesBlockedNextNight;
+
+  if (wolvesBlocked) {
+    await ctx.db.insert('nightActions', {
+      gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: actors[0]?._id,
+      actionType: 'wolf_blocked',
+      resolvedAt: Date.now(),
+    });
+  } else if (
     (actors.length > 0 && actors.every(a => isBotName(a.name))) ||
     witchHasNothingLeft ||
     mentalistShorthanded
@@ -1079,8 +1179,10 @@ export const submitPISkip = mutation({
 //
 // Each night, picks two players. Server compares teamForRole(first) to
 // teamForRole(second) and returns 'same' or 'different'. Wolf-team grouping
-// includes Werewolf, Wolf Man, Hunter Wolf, AND Minion (different from the
-// Seer's "true wolves only" wolf detection); Reviler is its own solo team.
+// includes Werewolf, Wolf Man, Hunter Wolf, Minion, AND Reviler (different
+// from the Seer's "true wolves only" wolf detection — Minion and Reviler
+// both win with the wolves and read same-team here even though Seer/PI
+// don't see them as wolves).
 
 export const submitMentalistCheck = mutation({
   args: {
@@ -1465,10 +1567,11 @@ export const submitRevealerSkip = mutation({
 
 // ───── Reviler ──────────────────────────────────────────────────────────────
 //
-// Solo antagonist who wakes alone. Hit target = any village-team role that
-// isn't plain Villager (Seer, BG, Witch, PI, etc.). Miss = shooter dies.
-// Doesn't know wolf identities; doesn't count toward parity. BG saves the
-// target side of a hit but not the shooter side of a miss.
+// Wolf-team antagonist who wakes alone (doesn't see wolves and isn't seen by
+// them). Wins with the wolves but is excluded from parity. Hit target = any
+// village-team role that isn't plain Villager (Seer, BG, Witch, PI, etc.).
+// Miss = shooter dies. BG saves the target side of a hit but not the shooter
+// side of a miss.
 
 function isSpecialVillager(role: string | undefined): boolean {
   if (!role) return false;
@@ -1802,7 +1905,7 @@ export const forceAdvanceStep = mutation({
  * host gives a stuck player a do-over.
  */
 const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
-  wolves: ['wolf_kill'],
+  wolves: ['wolf_kill', 'wolf_blocked'],
   seer: ['seer_check'],
   pi: ['pi_check', 'pi_skip'],
   mentalist: ['mentalist_check'],
@@ -1902,7 +2005,19 @@ export const refreshStep = mutation({
       step === 'mentalist' &&
       actors.length > 0 &&
       actors.every(a => mentalistValidPool(a, alive).length < 2);
-    if (
+    // Refresh while the diseased-block carryover is still active replays the
+    // wolf_blocked row that was just wiped. The flag stays set until morning,
+    // so this branch fires whenever a refresh hits a blocked wolves step.
+    const wolvesBlocked = step === 'wolves' && !!game.wolvesBlockedNextNight;
+    if (wolvesBlocked) {
+      await ctx.db.insert('nightActions', {
+        gameId: args.gameId,
+        nightNumber: game.nightNumber,
+        actorPlayerId: actors[0]?._id,
+        actionType: 'wolf_blocked',
+        resolvedAt: Date.now(),
+      });
+    } else if (
       (actors.length > 0 && actors.every(a => isBotName(a.name))) ||
       witchHasNothingLeft ||
       mentalistShorthanded
@@ -1995,7 +2110,8 @@ export const nightView = query({
     }
 
     // Wolf-step live state: only visible to wolves (so non-wolves can't peek
-    // at who's been chosen).
+    // at who's been chosen). `blocked` is true when a Diseased was eaten
+    // last night — wolves see a sickened-pack view in place of the picker.
     let wolfState:
       | {
           wolves: Array<{
@@ -2005,6 +2121,7 @@ export const nightView = query({
             isMe: boolean;
             currentVote?: Id<'players'>;
           }>;
+          blocked: boolean;
         }
       | null = null;
     if (step === 'wolves' && me.role && isWolfTeam(me.role)) {
@@ -2017,6 +2134,7 @@ export const nightView = query({
           isMe: w._id === me._id,
           currentVote: w.roleState?.wolfVote as Id<'players'> | undefined,
         })),
+        blocked: !!game.wolvesBlockedNextNight,
       };
     }
 

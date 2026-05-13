@@ -52,6 +52,15 @@ export default defineSchema({
       }),
     ),
     nominationsThisDay: v.optional(v.number()),
+
+    /**
+     * Carryover from a Diseased death. Flipped on at the morning resolution
+     * where a Diseased player actually died from wolf attack; read at the
+     * following night's wolves step to insert a `wolf_blocked` action in
+     * place of `wolf_kill`. Cleared at the start of the next morning
+     * resolution so the cycle resets each night.
+     */
+    wolvesBlockedNextNight: v.optional(v.boolean()),
   }).index('by_room_code', ['roomCode']),
 
   players: defineTable({

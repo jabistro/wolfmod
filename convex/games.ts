@@ -511,12 +511,18 @@ export const endGameView = query({
     };
 
     // Build a set of (night, targetId) pairs that actually died, used to
-    // mark wolf_kill entries as KILLED vs SAVED.
+    // mark wolf_kill entries as KILLED vs SAVED. `delayedWounds` tags the
+    // same key when the night flagged the target as a Tough Guy first
+    // attack — wolf_kill on that target should render DEATH DELAYED.
     const deathKey = (night: number, id: Id<'players'>) => `${night}:${id}`;
     const deaths = new Set<string>();
+    const delayedWounds = new Set<string>();
     for (const a of actions) {
       if (a.actionType === 'death' && a.targetPlayerId) {
         deaths.add(deathKey(a.nightNumber, a.targetPlayerId));
+      }
+      if (a.actionType === 'tough_guy_wounded' && a.targetPlayerId) {
+        delayedWounds.add(deathKey(a.nightNumber, a.targetPlayerId));
       }
     }
     const historyByPlayer = new Map<Id<'players'>, HistoryEntry[]>();
@@ -548,12 +554,24 @@ export const endGameView = query({
       };
 
       if (a.actionType === 'wolf_kill') {
+        const delayed =
+          a.targetPlayerId &&
+          delayedWounds.has(deathKey(a.nightNumber, a.targetPlayerId));
         const killed =
           a.targetPlayerId &&
           deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
-        baseEntry.outcome = killed ? 'killed' : 'saved';
+        baseEntry.outcome = delayed ? 'delayed' : killed ? 'killed' : 'saved';
         // Team decision — attribute to every wolf-team player so each wolf
         // sees the kill in their own history.
+        for (const p of players) {
+          if (p.role && isWolfTeam(p.role)) pushEntry(p._id, baseEntry);
+        }
+        continue;
+      }
+
+      if (a.actionType === 'wolf_blocked') {
+        // Diseased carryover — wolves skipped their pick. Show in every
+        // wolf-team player's history so they see the lost night.
         for (const p of players) {
           if (p.role && isWolfTeam(p.role)) pushEntry(p._id, baseEntry);
         }

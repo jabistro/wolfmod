@@ -19,6 +19,18 @@ import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { V1_ROLES } from '../data/v1Roles';
+import { ROLES, CATEGORIES, type RoleCategory } from '../data/roles';
+
+// Build the category map for v1 roles once. The role selection modal uses
+// this to power its team tabs (Villagers / Wolves / Team Wolf / Solo) so
+// the host can quickly filter to a specific team. Solo currently has no
+// v1 roles; the tab is still rendered so the structure is in place when
+// v2 solo roles land.
+const V1_ROLE_CATEGORY_MAP: Map<string, RoleCategory> = (() => {
+  const m = new Map<string, RoleCategory>();
+  for (const r of ROLES) m.set(r.name, r.category);
+  return m;
+})();
 
 type Nav = StackNavigationProp<RootStackParamList, 'Lobby'>;
 type Route = RouteProp<RootStackParamList, 'Lobby'>;
@@ -92,6 +104,7 @@ export default function LobbyScreen() {
   const [seatModalIndex, setSeatModalIndex] = useState<number | null>(null);
   const [rolesModalOpen, setRolesModalOpen] = useState(false);
   const [draftCounts, setDraftCounts] = useState<Record<string, number>>({});
+  const [roleFilter, setRoleFilter] = useState<RoleCategory>('villagers');
 
   // When the host starts the game, every player's lobby query observes the phase
   // change and auto-navigates to the reveal screen.
@@ -183,6 +196,7 @@ export default function LobbyScreen() {
     const counts: Record<string, number> = {};
     for (const r of game.selectedRoles) counts[r] = (counts[r] ?? 0) + 1;
     setDraftCounts(counts);
+    setRoleFilter('villagers');
     setRolesModalOpen(true);
   }
 
@@ -566,8 +580,84 @@ export default function LobbyScreen() {
                 <Text className="text-wolf-accent font-bold">Done</Text>
               </TouchableOpacity>
             </View>
+            <View
+              className="flex-row px-4 py-3 border-b border-wolf-card"
+              style={{ gap: 6 }}
+            >
+              {CATEGORIES.map(tab => {
+                const active = roleFilter === tab.key;
+                return (
+                  <TouchableOpacity
+                    key={tab.key}
+                    onPress={() => setRoleFilter(tab.key)}
+                    style={{
+                      flex: 1,
+                      backgroundColor: active ? tab.color : '#22222F',
+                      paddingVertical: 8,
+                      borderRadius: 8,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {/* Solo tab marks its split-loyalty visual the same way
+                        the Roles browser does: a 4px stripe on each side,
+                        split top/bottom between village + each wolf hue. */}
+                    {tab.key === 'solo' && active && (
+                      <>
+                        <View
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            bottom: 0,
+                            left: 0,
+                            width: 4,
+                            flexDirection: 'column',
+                          }}
+                        >
+                          <View style={{ flex: 1, backgroundColor: '#4A90D9' }} />
+                          <View style={{ flex: 1, backgroundColor: '#C05050' }} />
+                        </View>
+                        <View
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            bottom: 0,
+                            right: 0,
+                            width: 4,
+                            flexDirection: 'column',
+                          }}
+                        >
+                          <View style={{ flex: 1, backgroundColor: '#4A90D9' }} />
+                          <View style={{ flex: 1, backgroundColor: '#8B1818' }} />
+                        </View>
+                      </>
+                    )}
+                    <Text
+                      className="text-wolf-text font-bold"
+                      style={{ fontSize: 11, letterSpacing: 0.5 }}
+                    >
+                      {tab.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 16 }}>
-              {V1_ROLES.map(role => {
+              {(() => {
+                const filtered = V1_ROLES.filter(
+                  role => V1_ROLE_CATEGORY_MAP.get(role) === roleFilter,
+                );
+                if (filtered.length === 0) {
+                  return (
+                    <View className="py-10 items-center">
+                      <Text className="text-wolf-muted text-sm text-center">
+                        No roles in this team yet.
+                      </Text>
+                    </View>
+                  );
+                }
+                return filtered.map(role => {
                 const count = draftCounts[role] ?? 0;
                 const canIncrement = draftTotal < game.playerCount;
                 return (
@@ -600,7 +690,8 @@ export default function LobbyScreen() {
                     </TouchableOpacity>
                   </View>
                 );
-              })}
+                });
+              })()}
             </ScrollView>
           </View>
         </View>

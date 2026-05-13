@@ -130,15 +130,19 @@ export default function NightScreen() {
       <NightHeader nightNumber={game.nightNumber} stepLabel={stepLabel} />
 
       {isMyStep && game.nightStep === 'wolves' && wolfState && (
-        <WolvesPicker
-          gameId={game._id}
-          deviceClientId={deviceClientId}
-          alivePlayers={view.alivePlayers}
-          targetables={targetables}
-          totalSeats={game.playerCount}
-          meId={me._id}
-          wolves={wolfState.wolves}
-        />
+        wolfState.blocked ? (
+          <WolvesBlockedView wolves={wolfState.wolves} />
+        ) : (
+          <WolvesPicker
+            gameId={game._id}
+            deviceClientId={deviceClientId}
+            alivePlayers={view.alivePlayers}
+            targetables={targetables}
+            totalSeats={game.playerCount}
+            meId={me._id}
+            wolves={wolfState.wolves}
+          />
+        )
       )}
 
       {isMyStep && game.nightStep === 'seer' && (
@@ -362,6 +366,54 @@ function NightHeader({
           {stepLabel.toUpperCase()}
         </Text>
       ) : null}
+    </View>
+  );
+}
+
+// ───── Wolves blocked view ─────────────────────────────────────────────────
+//
+// Shown ONLY to wolves on the night following a Diseased kill. Wolves need
+// to know they can't act (so they don't sit confused waiting for a picker);
+// the rest of the table hears nothing about it and has to figure out at
+// morning why no one died. Step still dwells normally for cloaking.
+
+function WolvesBlockedView({
+  wolves,
+}: {
+  wolves: Array<{
+    _id: Id<'players'>;
+    name: string;
+    role: string;
+    isMe: boolean;
+  }>;
+}) {
+  return (
+    <View className="flex-1 px-6 pt-2 pb-8">
+      <View className="bg-wolf-card rounded-xl px-5 py-5 mb-5">
+        <Text className="text-wolf-red text-base font-extrabold tracking-widest text-center mb-2">
+          THE BLOOD WAS DISEASED
+        </Text>
+        <Text className="text-wolf-text text-sm text-center">
+          The pack is sickened. There is no kill tonight.
+        </Text>
+      </View>
+
+      <View className="bg-wolf-card rounded-xl px-4 py-3">
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
+          YOUR PACK
+        </Text>
+        {wolves.map(w => (
+          <View
+            key={w._id}
+            className="flex-row items-center justify-between py-1"
+          >
+            <Text className="text-wolf-text text-sm">
+              {w.isMe ? 'You' : w.name}{' '}
+              <Text className="text-wolf-muted text-xs">({w.role})</Text>
+            </Text>
+          </View>
+        ))}
+      </View>
     </View>
   );
 }
