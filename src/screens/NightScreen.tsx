@@ -12,6 +12,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useMutation, useQuery } from 'convex/react';
@@ -62,6 +63,8 @@ export default function NightScreen() {
       navigation.replace('Morning', { gameId: params.gameId });
     } else if (phase === 'day') {
       navigation.replace('Day', { gameId: params.gameId });
+    } else if (phase === 'triggers') {
+      navigation.replace('Triggers', { gameId: params.gameId });
     } else if (phase === 'ended') {
       navigation.replace('EndGame', { gameId: params.gameId });
     }
@@ -302,13 +305,14 @@ function HostStallOverride({
   onRefresh: () => void;
   onSkip: () => void;
 }) {
+  const insets = useSafeAreaInsets();
   return (
     <View
       style={{
         position: 'absolute',
         left: 16,
         right: 16,
-        bottom: 24,
+        bottom: Math.max(insets.bottom, 12) + 12,
       }}
     >
       <View className="bg-wolf-card rounded-xl px-4 py-3 mb-2">
@@ -827,6 +831,7 @@ function PIPicker({
     }>;
   };
 }) {
+  const insets = useSafeAreaInsets();
   const submitCheck = useMutation(api.night.submitPICheck);
   const submitSkip = useMutation(api.night.submitPISkip);
   const tickNight = useMutation(api.night.tickNight);
@@ -967,7 +972,10 @@ function PIPicker({
         </View>
       </ScrollView>
 
-      <View className="px-6 pb-3">
+      <View
+        className="px-6"
+        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
+      >
         <TouchableOpacity
           onPress={handleSkip}
           disabled={submitting || !!pendingTarget || !!pendingResult}
@@ -1111,6 +1119,7 @@ function MentalistPicker({
   };
   nightNumber: number;
 }) {
+  const insets = useSafeAreaInsets();
   const submitCheck = useMutation(api.night.submitMentalistCheck);
   const tickNight = useMutation(api.night.tickNight);
 
@@ -1313,7 +1322,10 @@ function MentalistPicker({
         </View>
       </ScrollView>
 
-      <View className="px-6 pb-3">
+      <View
+        className="px-6"
+        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
+      >
         <TouchableOpacity
           onPress={() => setConfirmOpen(true)}
           disabled={picks.length !== 2 || submitting}
@@ -1454,6 +1466,7 @@ function WitchPicker({
     tonightVictim: { _id: Id<'players'>; name: string } | null;
   };
 }) {
+  const insets = useSafeAreaInsets();
   const submitSave = useMutation(api.night.submitWitchSave);
   const submitPoison = useMutation(api.night.submitWitchPoison);
   const submitDone = useMutation(api.night.submitWitchDone);
@@ -1601,7 +1614,10 @@ function WitchPicker({
         </View>
       </ScrollView>
 
-      <View className="px-6 pb-3">
+      <View
+        className="px-6"
+        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
+      >
         <TouchableOpacity
           onPress={handleDone}
           disabled={submitting}
@@ -1891,6 +1907,7 @@ function HuntressPicker({
   };
   meId: Id<'players'>;
 }) {
+  const insets = useSafeAreaInsets();
   const submitShot = useMutation(api.night.submitHuntressShot);
   const submitSkip = useMutation(api.night.submitHuntressSkip);
   const [submitting, setSubmitting] = useState(false);
@@ -1974,7 +1991,10 @@ function HuntressPicker({
         </View>
       </ScrollView>
 
-      <View className="px-6 pb-3">
+      <View
+        className="px-6"
+        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
+      >
         <TouchableOpacity
           onPress={handleSkip}
           disabled={submitting || !!pendingTarget}
@@ -2067,6 +2087,7 @@ function RevealerPicker({
   };
   meId: Id<'players'>;
 }) {
+  const insets = useSafeAreaInsets();
   const submitShot = useMutation(api.night.submitRevealerShot);
   const submitSkip = useMutation(api.night.submitRevealerSkip);
   const [submitting, setSubmitting] = useState(false);
@@ -2150,7 +2171,10 @@ function RevealerPicker({
         </View>
       </ScrollView>
 
-      <View className="px-6 pb-3">
+      <View
+        className="px-6"
+        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
+      >
         <TouchableOpacity
           onPress={handleSkip}
           disabled={submitting || !!pendingTarget}
@@ -2243,6 +2267,7 @@ function RevilerPicker({
   };
   meId: Id<'players'>;
 }) {
+  const insets = useSafeAreaInsets();
   const submitShot = useMutation(api.night.submitRevilerShot);
   const submitSkip = useMutation(api.night.submitRevilerSkip);
   const [submitting, setSubmitting] = useState(false);
@@ -2326,7 +2351,10 @@ function RevilerPicker({
         </View>
       </ScrollView>
 
-      <View className="px-6 pb-3">
+      <View
+        className="px-6"
+        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
+      >
         <TouchableOpacity
           onPress={handleSkip}
           disabled={submitting || !!pendingTarget}

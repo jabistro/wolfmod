@@ -45,6 +45,8 @@ type HistoryEntry = {
   team: string | null;
   sameTeam: string | null;
   outcome: string | null;
+  direction: string | null;
+  victimNames: string[] | null;
 };
 
 function renderEntryBody(entry: HistoryEntry): React.ReactNode {
@@ -202,6 +204,52 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
           <Text className="font-bold" style={{ color: '#E0A030' }}>
             NO KILL
           </Text>
+        </Text>
+      );
+    case 'hunter_shot':
+    case 'hunter_wolf_shot': {
+      const color = entry.outcome === 'killed' ? '#B03A2E' : '#E0A030';
+      const label = entry.outcome === 'killed' ? 'KILLED' : 'MISSED';
+      return (
+        <Text className="text-wolf-text text-sm">
+          Shot {t} —{' '}
+          <Text className="font-bold" style={{ color }}>
+            {label}
+          </Text>
+        </Text>
+      );
+    }
+    case 'hunter_skip':
+    case 'hunter_wolf_skip':
+      return <Text className="text-wolf-muted text-sm italic">Held fire</Text>;
+    case 'mad_destroyer_kill': {
+      const dir = entry.direction === 'L' ? 'LEFT' : entry.direction === 'R' ? 'RIGHT' : '?';
+      const victims = entry.victimNames ?? [];
+      if (victims.length === 0) {
+        return (
+          <Text className="text-wolf-text text-sm">
+            Destruction —{' '}
+            <Text className="font-bold" style={{ color: '#E0A030' }}>
+              NO VICTIMS
+            </Text>
+          </Text>
+        );
+      }
+      return (
+        <Text className="text-wolf-text text-sm">
+          Destroyed{' '}
+          <Text className="font-bold" style={{ color: '#B03A2E' }}>
+            {dir}
+          </Text>
+          {' — '}
+          {victims.join(', ')}
+        </Text>
+      );
+    }
+    case 'mad_destroyer_skip':
+      return (
+        <Text className="text-wolf-muted text-sm italic">
+          No victims to destroy
         </Text>
       );
     default:

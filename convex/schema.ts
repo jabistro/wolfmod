@@ -9,6 +9,7 @@ export default defineSchema({
       v.literal('lobby'),
       v.literal('reveal'),
       v.literal('night'),
+      v.literal('triggers'),
       v.literal('morning'),
       v.literal('day'),
       v.literal('ended'),
@@ -61,6 +62,71 @@ export default defineSchema({
      * resolution so the cycle resets each night.
      */
     wolvesBlockedNextNight: v.optional(v.boolean()),
+
+    /**
+     * Death-trigger queue. Populated when Hunter / Hunter Wolf / Mad
+     * Destroyer dies (overnight or via lynch). Ordered Hunter/HW first
+     * (public — their death is announced), MD last (silent — MD's role
+     * is never spoken aloud). Each trigger gets a 10 s dwell so the host
+     * can't infer from timing whether a special role died.
+     */
+    pendingDeathTriggers: v.optional(
+      v.array(
+        v.object({
+          playerId: v.id('players'),
+          role: v.union(
+            v.literal('Hunter'),
+            v.literal('Hunter Wolf'),
+            v.literal('Mad Destroyer'),
+          ),
+          visibility: v.union(v.literal('public'), v.literal('silent')),
+        }),
+      ),
+    ),
+    /**
+     * Where the engine returns to after `pendingDeathTriggers` empties.
+     * Set when entering the 'triggers' phase.
+     */
+    triggersFollowUp: v.optional(
+      v.union(
+        v.literal('morning'),
+        v.literal('day'),
+        v.literal('night'),
+      ),
+    ),
+    /**
+     * Wall-clock deadline (ms) for the current trigger head's decision. On
+     * timeout, an internal mutation auto-defaults (Hunter/HW → skip, MD →
+     * LEFT). The dwell is also enforced as a minimum so quick decisions
+     * don't leak "actor decided fast".
+     */
+    triggerEndsAt: v.optional(v.number()),
+    /**
+     * Wall-clock lock on the CONTINUE button after a vote is revealed.
+     * Set in tallyVote regardless of whether anyone was lynched. Cloaks
+     * whether a trigger role died — the host can't tell from button
+     * timing.
+     */
+    voteDwellEndsAt: v.optional(v.number()),
+
+    /**
+     * Public message shown to ALL phones for ~4 s after a Hunter/HW shot
+     * or an MD cascade with victims. Cloaks the role (Hunter shots are
+     * phrased "X HAS SHOT Y" for both Hunter and Hunter Wolf; MD
+     * cascades list eliminations with no attribution). Queue processing
+     * pauses for this window so the village can read the result before
+     * the next trigger fires. Cleared by `announcementTick`.
+     *
+     * Suppressed in Case A pre-morning context (`triggersFollowUp ===
+     * 'morning'`) — MD cascade victims fold silently into the morning
+     * announcement instead.
+     */
+    triggerAnnouncement: v.optional(
+      v.object({
+        lines: v.array(v.string()),
+        endsAt: v.number(),
+      }),
+    ),
   }).index('by_room_code', ['roomCode']),
 
   players: defineTable({

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -106,6 +106,8 @@ export default function LobbyScreen() {
   const [rolesModalOpen, setRolesModalOpen] = useState(false);
   const [draftCounts, setDraftCounts] = useState<Record<string, number>>({});
   const [roleFilter, setRoleFilter] = useState<RoleCategory>('villagers');
+  const rolesPagerRef = useRef<ScrollView | null>(null);
+  const [rolesPagerWidth, setRolesPagerWidth] = useState(SCREEN_WIDTH);
 
   // When the host starts the game, every player's lobby query observes the phase
   // change and auto-navigates to the reveal screen.
@@ -206,6 +208,16 @@ export default function LobbyScreen() {
     setDraftCounts(counts);
     setRoleFilter('villagers');
     setRolesModalOpen(true);
+    // The pager retains its scroll offset across opens; rewind to page 0.
+    setTimeout(() => rolesPagerRef.current?.scrollTo({ x: 0, animated: false }), 0);
+  }
+
+  function selectRoleTab(key: RoleCategory) {
+    setRoleFilter(key);
+    const idx = CATEGORIES.findIndex(c => c.key === key);
+    if (idx >= 0) {
+      rolesPagerRef.current?.scrollTo({ x: idx * rolesPagerWidth, animated: true });
+    }
   }
 
   function increment(role: string) {
@@ -614,7 +626,7 @@ export default function LobbyScreen() {
                 return (
                   <TouchableOpacity
                     key={tab.key}
-                    onPress={() => setRoleFilter(tab.key)}
+                    onPress={() => selectRoleTab(tab.key)}
                     style={{
                       flex: 1,
                       backgroundColor: active ? tab.color : '#22222F',
@@ -668,76 +680,112 @@ export default function LobbyScreen() {
                 );
               })}
             </View>
-            <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 16 }}>
-              {(() => {
-                const filtered = V1_ROLES.filter(
-                  role => V1_ROLE_CATEGORY_MAP.get(role) === roleFilter,
-                ).sort((a, b) => a.localeCompare(b));
-                if (filtered.length === 0) {
-                  return (
-                    <View className="py-10 items-center">
-                      <Text className="text-wolf-muted text-sm text-center">
-                        No roles in this team yet.
-                      </Text>
-                    </View>
-                  );
+            <View
+              style={{ flex: 1 }}
+              onLayout={e => {
+                const w = e.nativeEvent.layout.width;
+                if (w > 0 && w !== rolesPagerWidth) {
+                  setRolesPagerWidth(w);
+                  // Re-anchor the pager to the current tab after a width change.
+                  const idx = CATEGORIES.findIndex(c => c.key === roleFilter);
+                  if (idx >= 0) {
+                    requestAnimationFrame(() =>
+                      rolesPagerRef.current?.scrollTo({ x: idx * w, animated: false }),
+                    );
+                  }
                 }
-                return filtered.map(role => {
-                const count = draftCounts[role] ?? 0;
-                const canIncrement = draftTotal < game.playerCount;
-                return (
-                  <View
-                    key={role}
-                    className="flex-row items-center py-3 border-b border-wolf-card"
-                  >
-                    <Text className="text-wolf-text text-base flex-1">{role}</Text>
-                    {(() => {
-                      const val = getRoleValue(role);
-                      const bg = val > 0 ? '#1a4a1a' : val < 0 ? '#4a1a1a' : '#2a2a2a';
-                      const color = val > 0 ? '#4caf50' : val < 0 ? '#ef5350' : '#8A8590';
-                      return (
-                        <View
-                          style={{
-                            backgroundColor: bg,
-                            borderRadius: 4,
-                            paddingHorizontal: 6,
-                            paddingVertical: 2,
-                            marginRight: 12,
-                          }}
-                        >
-                          <Text style={{ color, fontSize: 12, fontWeight: '700' }}>
-                            {val > 0 ? `+${val}` : `${val}`}
+              }}
+            >
+              <ScrollView
+                ref={rolesPagerRef}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={e => {
+                  const idx = Math.round(
+                    e.nativeEvent.contentOffset.x / rolesPagerWidth,
+                  );
+                  const next = CATEGORIES[idx];
+                  if (next && next.key !== roleFilter) setRoleFilter(next.key);
+                }}
+              >
+                {CATEGORIES.map(cat => {
+                  const filtered = V1_ROLES.filter(
+                    role => V1_ROLE_CATEGORY_MAP.get(role) === cat.key,
+                  ).sort((a, b) => a.localeCompare(b));
+                  return (
+                    <ScrollView
+                      key={cat.key}
+                      style={{ width: rolesPagerWidth }}
+                      contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 16 }}
+                    >
+                      {filtered.length === 0 ? (
+                        <View className="py-10 items-center">
+                          <Text className="text-wolf-muted text-sm text-center">
+                            No roles in this team yet.
                           </Text>
                         </View>
-                      );
-                    })()}
-                    <TouchableOpacity
-                      onPress={() => decrement(role)}
-                      disabled={count === 0}
-                      style={{ opacity: count === 0 ? 0.3 : 1 }}
-                      className="w-9 h-9 bg-wolf-card rounded-full items-center justify-center"
-                    >
-                      <Text className="text-wolf-text text-lg">−</Text>
-                    </TouchableOpacity>
-                    <Text
-                      className="text-wolf-text mx-3 text-center"
-                      style={{ minWidth: 24, fontVariant: ['tabular-nums'] }}
-                    >
-                      {count}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={() => increment(role)}
-                      disabled={!canIncrement}
-                      style={{ opacity: canIncrement ? 1 : 0.3 }}
-                      className="w-9 h-9 bg-wolf-card rounded-full items-center justify-center"
-                    >
-                      <Text className="text-wolf-text text-lg">+</Text>
-                    </TouchableOpacity>
-                  </View>
-                );
-                });
-              })()}
-            </ScrollView>
+                      ) : (
+                        filtered.map(role => {
+                          const count = draftCounts[role] ?? 0;
+                          const canIncrement = draftTotal < game.playerCount;
+                          const val = getRoleValue(role);
+                          const bg =
+                            val > 0 ? '#1a4a1a' : val < 0 ? '#4a1a1a' : '#2a2a2a';
+                          const color =
+                            val > 0 ? '#4caf50' : val < 0 ? '#ef5350' : '#8A8590';
+                          return (
+                            <View
+                              key={role}
+                              className="flex-row items-center py-3 border-b border-wolf-card"
+                            >
+                              <Text className="text-wolf-text text-base flex-1">
+                                {role}
+                              </Text>
+                              <View
+                                style={{
+                                  backgroundColor: bg,
+                                  borderRadius: 4,
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  marginRight: 12,
+                                }}
+                              >
+                                <Text style={{ color, fontSize: 12, fontWeight: '700' }}>
+                                  {val > 0 ? `+${val}` : `${val}`}
+                                </Text>
+                              </View>
+                              <TouchableOpacity
+                                onPress={() => decrement(role)}
+                                disabled={count === 0}
+                                style={{ opacity: count === 0 ? 0.3 : 1 }}
+                                className="w-9 h-9 bg-wolf-card rounded-full items-center justify-center"
+                              >
+                                <Text className="text-wolf-text text-lg">−</Text>
+                              </TouchableOpacity>
+                              <Text
+                                className="text-wolf-text mx-3 text-center"
+                                style={{ minWidth: 24, fontVariant: ['tabular-nums'] }}
+                              >
+                                {count}
+                              </Text>
+                              <TouchableOpacity
+                                onPress={() => increment(role)}
+                                disabled={!canIncrement}
+                                style={{ opacity: canIncrement ? 1 : 0.3 }}
+                                className="w-9 h-9 bg-wolf-card rounded-full items-center justify-center"
+                              >
+                                <Text className="text-wolf-text text-lg">+</Text>
+                              </TouchableOpacity>
+                            </View>
+                          );
+                        })
+                      )}
+                    </ScrollView>
+                  );
+                })}
+              </ScrollView>
+            </View>
           </View>
         </View>
       </Modal>

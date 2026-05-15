@@ -2,6 +2,24 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { isWolfTeam } from '../src/data/v1Roles';
 
+export type TriggerRole = 'Hunter' | 'Hunter Wolf' | 'Mad Destroyer';
+export const TRIGGER_ROLES: ReadonlySet<string> = new Set<string>([
+  'Hunter',
+  'Hunter Wolf',
+  'Mad Destroyer',
+]);
+export function isTriggerRole(role: string | undefined | null): role is TriggerRole {
+  return !!role && TRIGGER_ROLES.has(role);
+}
+/**
+ * Hunter / Hunter Wolf are "public" — their death is announced. Mad
+ * Destroyer is "silent" — their death is never mentioned. The trigger
+ * queue interleaves both kinds.
+ */
+export function triggerVisibility(role: TriggerRole): 'public' | 'silent' {
+  return role === 'Mad Destroyer' ? 'silent' : 'public';
+}
+
 export async function findCaller(
   ctx: MutationCtx | QueryCtx,
   gameId: Id<'games'>,

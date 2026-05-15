@@ -56,6 +56,8 @@ export default function MorningScreen() {
       navigation.replace('Day', { gameId: params.gameId });
     } else if (phase === 'night') {
       navigation.replace('Night', { gameId: params.gameId });
+    } else if (phase === 'triggers') {
+      navigation.replace('Triggers', { gameId: params.gameId });
     } else if (phase === 'ended') {
       navigation.replace('EndGame', { gameId: params.gameId });
     }

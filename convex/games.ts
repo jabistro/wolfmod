@@ -508,6 +508,8 @@ export const endGameView = query({
       team: string | null;
       sameTeam: string | null;
       outcome: string | null;
+      direction: string | null;
+      victimNames: string[] | null;
     };
 
     // Build a set of (night, targetId) pairs that actually died, used to
@@ -551,6 +553,8 @@ export const endGameView = query({
         team: result.team ?? null,
         sameTeam: result.sameTeam ?? null,
         outcome: null,
+        direction: null,
+        victimNames: null,
       };
 
       if (a.actionType === 'wolf_kill') {
@@ -622,6 +626,33 @@ export const endGameView = query({
         } else {
           baseEntry.outcome = 'missed';
         }
+      }
+
+      // Hunter / Hunter Wolf shot — BG and witch saves don't apply to
+      // trigger kills, so if the target's death row exists for the same
+      // round, it's a confirmed kill. Otherwise (defensive) treat as
+      // missed.
+      if (
+        a.actionType === 'hunter_shot' ||
+        a.actionType === 'hunter_wolf_shot'
+      ) {
+        const killed =
+          !!a.targetPlayerId &&
+          deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+        baseEntry.outcome = killed ? 'killed' : 'missed';
+      }
+
+      // Mad Destroyer's blast — populate direction + victim names from
+      // the result blob so the end-game row can render the full cascade.
+      if (a.actionType === 'mad_destroyer_kill') {
+        const direction = (a.result?.direction as string | undefined) ?? null;
+        const victimIds = (a.result?.victimIds as
+          | Id<'players'>[]
+          | undefined) ?? [];
+        baseEntry.direction = direction;
+        baseEntry.victimNames = victimIds
+          .map(id => nameFor(id))
+          .filter((n): n is string => !!n);
       }
 
       if (a.actorPlayerId) pushEntry(a.actorPlayerId, baseEntry);

@@ -11,8 +11,14 @@ import {
   requireHost,
   applyWinIfReached,
   isBotName,
+  isTriggerRole,
 } from './helpers';
 import { enterStep } from './night';
+import {
+  enqueueTriggersForDeaths,
+  processTriggerQueue,
+  TRIGGER_DWELL_MS,
+} from './triggers';
 import { NIGHT_STEPS } from '../src/data/nightOrder';
 
 const DEFAULT_VOTE_TIMER_SEC = 5;
@@ -153,9 +159,63 @@ export const tallyVote = internalMutation({
     if (game.dayNumber !== args.dayNumber) return;
     if (nom.resultsRevealed) return;
 
+    // Compute lynch result. Aligned with the same math as
+    // continueGameAfterVote (eligible = alive - 1, no-votes default to LIVES,
+    // strict majority of DIES needed to lynch).
+    const players = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    const aliveCount = players.filter(p => p.alive).length;
+    const eligibleCount = Math.max(0, aliveCount - 1);
+    const votes = await ctx.db
+      .query('nominationVotes')
+      .withIndex('by_game_nomination', q =>
+        q
+          .eq('gameId', args.gameId)
+          .eq('dayNumber', game.dayNumber)
+          .eq('nominationIndex', nom.nominationIndex),
+      )
+      .collect();
+    const dies = votes.filter(v => v.vote === 'dies').length;
+    const lives = eligibleCount - dies;
+    const lynch = dies > lives;
+
+    // Reveal results + start the host's CONTINUE dwell. The dwell runs
+    // regardless of lynch so the host can't infer "trigger role fired"
+    // from a slow button-enable.
     await ctx.db.patch(args.gameId, {
       currentNomination: { ...nom, resultsRevealed: true },
+      voteDwellEndsAt: Date.now() + TRIGGER_DWELL_MS,
     });
+
+    if (!lynch) return;
+
+    // Apply the lynch death immediately so the trigger actor (if any) can
+    // act during the dwell. Their decision is private; host CONTINUE
+    // remains locked until the dwell ends and any cascade triggers
+    // resolve.
+    const targetId = nom.nominatedPlayerId;
+    const target = await ctx.db.get(targetId);
+    if (!target) return;
+    await ctx.db.patch(targetId, { alive: false });
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: undefined,
+      actionType: 'death',
+      targetPlayerId: targetId,
+      result: { cause: 'lynch' },
+      resolvedAt: Date.now(),
+    });
+
+    if (target.role && isTriggerRole(target.role)) {
+      // followUp='night' signals processTriggerQueue NOT to auto-finalize
+      // on queue-empty — the host's CONTINUE is the gate to night.
+      await ctx.db.patch(args.gameId, { triggersFollowUp: 'night' });
+      await enqueueTriggersForDeaths(ctx, args.gameId, [targetId]);
+      await processTriggerQueue(ctx, args.gameId);
+    }
   },
 });
 
@@ -174,51 +234,42 @@ export const continueGameAfterVote = mutation({
 
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
 
-    // Tally votes. The nominee doesn't get to vote on themselves; alive
-    // players who didn't vote default to LIVES.
-    const players = await ctx.db
-      .query('players')
-      .withIndex('by_game', q => q.eq('gameId', args.gameId))
-      .collect();
-    const aliveCount = players.filter(p => p.alive).length;
-    const eligibleCount = Math.max(0, aliveCount - 1);
-
-    const votes = await ctx.db
-      .query('nominationVotes')
-      .withIndex('by_game_nomination', q =>
-        q
-          .eq('gameId', args.gameId)
-          .eq('dayNumber', game.dayNumber)
-          .eq('nominationIndex', nom.nominationIndex),
-      )
-      .collect();
-
-    const dies = votes.filter(v => v.vote === 'dies').length;
-    const lives = eligibleCount - dies; // unvoted (eligible) treated as LIVES
-
-    // Strict majority of DIES → lynch. Ties default to LIVES (per house rules).
-    const lynch = dies > lives;
-
-    if (!lynch) {
-      // No lynch — day continues; clear the nomination so another can be
-      // started.
-      await ctx.db.patch(args.gameId, {
-        currentNomination: undefined,
-      });
-      return;
+    // Dwell lock: even on a no-lynch vote, we hold CONTINUE for the dwell
+    // so the host can't tell from button-timing whether a trigger fired.
+    // The lynch death + trigger queue (if any) were already applied in
+    // tallyVote; we just gate the transition here.
+    const now = Date.now();
+    if (game.voteDwellEndsAt && now < game.voteDwellEndsAt) {
+      throw new Error('Continue is still locked.');
+    }
+    if ((game.pendingDeathTriggers?.length ?? 0) > 0) {
+      throw new Error('A trigger is still being decided.');
+    }
+    if (
+      game.triggerAnnouncement &&
+      now < game.triggerAnnouncement.endsAt
+    ) {
+      throw new Error('Announcement is still displaying.');
     }
 
-    // Lynch: nominee dies. Win check, then transition straight to night.
-    const targetId = nom.nominatedPlayerId as Id<'players'>;
-    await ctx.db.patch(targetId, { alive: false });
+    const nominee = await ctx.db.get(nom.nominatedPlayerId as Id<'players'>);
+    // Lynch is encoded in the nominee's alive=false state (set in
+    // tallyVote). Trigger cascades during the day only kill OTHER players,
+    // so the nominee can only have died here from the lynch itself.
+    const wasLynched = !!nominee && !nominee.alive;
+
     await ctx.db.patch(args.gameId, {
       currentNomination: undefined,
+      voteDwellEndsAt: undefined,
+      triggersFollowUp: undefined,
+      triggerAnnouncement: undefined,
     });
 
-    const won = await applyWinIfReached(ctx, args.gameId);
-    if (won) return; // phase already set to 'ended'
+    if (!wasLynched) return;
 
-    // Lynch ends the day → night begins.
+    const won = await applyWinIfReached(ctx, args.gameId);
+    if (won) return;
+
     await ctx.db.patch(args.gameId, {
       phase: 'night',
       nightNumber: game.nightNumber + 1,
@@ -247,6 +298,41 @@ export const dayView = query({
 
     const playerById = new Map(players.map(p => [p._id, p]));
     const alive = players.filter(p => p.alive);
+
+    // Cascade deaths from THIS lynch (Hunter/HW shot, MD blast). The lynch
+    // tally row uses cause='lynch' and is excluded — the lynchee is
+    // already shown in the result pill above the votes. We filter by
+    // resolvedAt >= the moment the lynch tally began (voteDwellEndsAt -
+    // TRIGGER_DWELL_MS) to avoid pulling in earlier cascade rows from
+    // the same nightNumber (e.g., a Hunter who died at night and shot
+    // someone during the morning trigger phase on this same day).
+    let cascadeDeaths: Array<{
+      _id: Id<'players'>;
+      name: string;
+      cause: string;
+    }> = [];
+    if (
+      game.currentNomination?.resultsRevealed &&
+      game.voteDwellEndsAt != null
+    ) {
+      const lynchStart = game.voteDwellEndsAt - TRIGGER_DWELL_MS;
+      const rows = await ctx.db
+        .query('nightActions')
+        .withIndex('by_game_night', q =>
+          q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
+        )
+        .filter(q => q.eq(q.field('actionType'), 'death'))
+        .collect();
+      for (const r of rows) {
+        if (r.resolvedAt < lynchStart) continue;
+        const cause = (r.result?.cause as string | undefined) ?? '';
+        if (cause === 'lynch' || cause === '') continue;
+        if (!r.targetPlayerId) continue;
+        const p = playerById.get(r.targetPlayerId);
+        if (!p) continue;
+        cascadeDeaths.push({ _id: p._id, name: p.name, cause });
+      }
+    }
 
     let nomination: {
       nominee: { _id: Id<'players'>; name: string } | null;
@@ -321,6 +407,8 @@ export const dayView = query({
         nightNumber: game.nightNumber,
         winner: game.winner,
         playerCount: game.playerCount,
+        voteDwellEndsAt: game.voteDwellEndsAt ?? null,
+        pendingTriggerCount: game.pendingDeathTriggers?.length ?? 0,
       },
       me: {
         _id: me._id,
@@ -338,6 +426,7 @@ export const dayView = query({
           seatPosition: p.seatPosition,
         })),
       currentNomination: nomination,
+      cascadeDeaths,
     };
   },
 });

@@ -11,8 +11,13 @@ import {
   findCaller,
   requireHost,
   isBotName,
+  isTriggerRole,
   recordWinIfReached,
 } from './helpers';
+import {
+  enqueueTriggersForDeaths,
+  processTriggerQueue,
+} from './triggers';
 import {
   isWolfTeam,
   seerSees,
@@ -564,6 +569,11 @@ async function resolveMorning(
     if (s.targetPlayerId) protectedTargets.add(s.targetPlayerId);
   }
 
+  // Tracks every player who actually dies this morning resolution. Used at
+  // the end to build the death-trigger queue from any Hunter/HW/MD among
+  // them.
+  const newDeadIds: Id<'players'>[] = [];
+
   // Tough Guy first-attack survival. For every TG attacked by wolves this
   // night who isn't already wounded and isn't BG-protected, drop the wolf
   // entry from candidates ONLY when wolf is their sole cause (poison,
@@ -599,6 +609,7 @@ async function resolveMorning(
       result: { cause: c.cause },
       resolvedAt: now,
     });
+    newDeadIds.push(targetId);
   }
 
   // Tough Guy wound persistence. Only flag survivors — if a TG was in
@@ -742,14 +753,75 @@ async function resolveMorning(
     }
   }
 
-  // Record winner if a win has been reached, but always show morning so the
-  // death announcement plays out narratively. The game-over transition
-  // happens when the host taps BEGIN DAY (or VIEW RESULTS).
+  // Death-trigger routing. Hunter / Hunter Wolf / Mad Destroyer among the
+  // newly-dead each generate a queued trigger. Two cases:
+  //
+  // Case A — only MD died (no Hunter/HW): MD acts SILENTLY before the
+  //   morning is announced. The 'triggers' phase runs first; its cascade
+  //   victims fold silently into the death list. Morning is shown when
+  //   the queue empties.
+  //
+  // Case B — any Hunter/HW died (with or without MD): the morning is
+  //   shown first, INCLUDING the Hunter/HW death (so they learn at the
+  //   same time as everyone else). Hunter cascade victims are NOT yet
+  //   processed. Host taps BEGIN DAY → engine routes through the
+  //   'triggers' phase (public Hunter prompts first, silent MD last)
+  //   before reaching the day.
+  //
+  // No triggers — straight to morning, record winner if applicable.
+  const triggerDeaths = await collectTriggerDeaths(ctx, newDeadIds);
+  if (triggerDeaths.length === 0) {
+    await ctx.db.patch(gameId, { phase: 'morning', nightStep: undefined });
+    await recordWinIfReached(ctx, gameId);
+    return;
+  }
+  const hasPublic = triggerDeaths.some(t => t.role !== 'Mad Destroyer');
+  if (hasPublic) {
+    // Case B: morning first, triggers after BEGIN DAY.
+    await ctx.db.patch(gameId, {
+      phase: 'morning',
+      nightStep: undefined,
+      triggersFollowUp: 'day',
+    });
+    await enqueueTriggersForDeaths(
+      ctx,
+      gameId,
+      triggerDeaths.map(t => t.id),
+    );
+    // Don't recordWinIfReached yet — the triggers may shift the count
+    // (Hunter cascade) before the game is officially over.
+    return;
+  }
+  // Case A: silent MD pre-morning.
   await ctx.db.patch(gameId, {
-    phase: 'morning',
+    phase: 'triggers',
     nightStep: undefined,
+    triggersFollowUp: 'morning',
   });
-  await recordWinIfReached(ctx, gameId);
+  await enqueueTriggersForDeaths(
+    ctx,
+    gameId,
+    triggerDeaths.map(t => t.id),
+  );
+  await processTriggerQueue(ctx, gameId);
+}
+
+/**
+ * Filters a set of just-died player IDs to those whose role is a trigger
+ * role (Hunter / Hunter Wolf / Mad Destroyer), returning them with their
+ * role attached. Death order is preserved.
+ */
+async function collectTriggerDeaths(
+  ctx: MutationCtx,
+  deadIds: readonly Id<'players'>[],
+): Promise<Array<{ id: Id<'players'>; role: string }>> {
+  const out: Array<{ id: Id<'players'>; role: string }> = [];
+  for (const id of deadIds) {
+    const p = await ctx.db.get(id);
+    if (!p || !isTriggerRole(p.role)) continue;
+    out.push({ id, role: p.role });
+  }
+  return out;
 }
 
 // ───── Step engine ──────────────────────────────────────────────────────────
@@ -2074,6 +2146,15 @@ export const beginDay = mutation({
       return;
     }
 
+    // Case B from resolveMorning: morning was shown, but death-trigger
+    // queue is still pending. Route through the 'triggers' phase first.
+    // Day starts when the queue empties (see finalizeTriggerPhase).
+    if ((game.pendingDeathTriggers?.length ?? 0) > 0) {
+      await ctx.db.patch(args.gameId, { phase: 'triggers' });
+      await processTriggerQueue(ctx, args.gameId);
+      return;
+    }
+
     await ctx.db.patch(args.gameId, {
       phase: 'day',
       dayNumber: game.dayNumber + 1,
@@ -2545,6 +2626,12 @@ export const morningView = query({
       .collect();
 
     const playerById = new Map(players.map(p => [p._id, p]));
+    // Morning announces every overnight death. Role identities aren't
+    // surfaced — only names — so MD's mechanic stays hidden even though
+    // their death is reported. (Hiding the death entirely was a worse
+    // cloak: their seat empties in the day phase anyway, and in 1-wolf
+    // games with no MD cascade victims it created a "no one died but a
+    // seat is gone" contradiction.)
     const deaths = deathActions
       .map(a => (a.targetPlayerId ? playerById.get(a.targetPlayerId) : null))
       .filter((p): p is Player => !!p)
@@ -2553,6 +2640,7 @@ export const morningView = query({
         name: p.name,
         seatPosition: p.seatPosition,
       }));
+    const triggersPending = (game.pendingDeathTriggers?.length ?? 0) > 0;
 
     return {
       game: {
@@ -2568,6 +2656,7 @@ export const morningView = query({
         isHost: me.isHost,
       },
       deaths,
+      triggersPending,
     };
   },
 });

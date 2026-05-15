@@ -17,6 +17,7 @@ import JoinGameScreen from './src/screens/JoinGameScreen';
 import LobbyScreen from './src/screens/LobbyScreen';
 import RoleRevealScreen from './src/screens/RoleRevealScreen';
 import NightScreen from './src/screens/NightScreen';
+import TriggersScreen from './src/screens/TriggersScreen';
 import MorningScreen from './src/screens/MorningScreen';
 import DayScreen from './src/screens/DayScreen';
 import EndGameScreen from './src/screens/EndGameScreen';
@@ -64,6 +65,7 @@ export default function App() {
               <Stack.Screen name="Lobby" component={LobbyScreen} options={{ gestureEnabled: false }} />
               <Stack.Screen name="RoleReveal" component={RoleRevealScreen} options={{ gestureEnabled: false }} />
               <Stack.Screen name="Night" component={NightScreen} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Triggers" component={TriggersScreen} options={{ gestureEnabled: false }} />
               <Stack.Screen name="Morning" component={MorningScreen} options={{ gestureEnabled: false }} />
               <Stack.Screen name="Day" component={DayScreen} options={{ gestureEnabled: false }} />
               <Stack.Screen name="EndGame" component={EndGameScreen} options={{ gestureEnabled: false }} />

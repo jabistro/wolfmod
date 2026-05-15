@@ -14,6 +14,7 @@ export type RootStackParamList = {
   Lobby: { gameId: string };
   RoleReveal: { gameId: string };
   Night: { gameId: string };
+  Triggers: { gameId: string };
   Morning: { gameId: string };
   Day: { gameId: string };
   EndGame: { gameId: string };
