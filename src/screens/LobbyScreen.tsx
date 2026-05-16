@@ -40,6 +40,8 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 const CIRCLE_SIZE = Math.min(360, SCREEN_WIDTH - 24);
 const MIN_SEAT = 30;
 const MAX_SEAT = 64;
+const MIN_PLAYER_COUNT = 3;
+const MAX_PLAYER_COUNT = 30;
 
 /**
  * Largest seatSize that keeps adjacent seats from overlapping when N seats are
@@ -97,6 +99,8 @@ export default function LobbyScreen() {
 
   const assignSeat = useMutation(api.games.assignPlayerToSeat);
   const removeFromSeat = useMutation(api.games.removePlayerFromSeat);
+  const clearAllSeats = useMutation(api.games.clearAllSeats);
+  const setPlayerCount = useMutation(api.games.setPlayerCount);
   const setRoles = useMutation(api.games.setRoles);
   const startGame = useMutation(api.games.startGame);
   const leaveGame = useMutation(api.games.leaveGame);
@@ -197,6 +201,46 @@ export default function LobbyScreen() {
         callerDeviceClientId: deviceClientId,
       });
       setSeatModalIndex(null);
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  function handleClearAllSeats() {
+    if (!deviceClientId) return;
+    Alert.alert(
+      'Clear all seats?',
+      'Every player will be unseated. Roles stay picked.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await clearAllSeats({
+                gameId: game._id,
+                callerDeviceClientId: deviceClientId,
+              });
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : String(e));
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  async function changePlayerCount(delta: number) {
+    if (!deviceClientId) return;
+    const next = game.playerCount + delta;
+    if (next < MIN_PLAYER_COUNT || next > MAX_PLAYER_COUNT) return;
+    try {
+      await setPlayerCount({
+        gameId: game._id,
+        playerCount: next,
+        callerDeviceClientId: deviceClientId,
+      });
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : String(e));
     }
@@ -336,9 +380,47 @@ export default function LobbyScreen() {
           >
             {game.roomCode}
           </Text>
-          <Text className="text-wolf-muted text-xs tracking-widest mt-2">
-            {players.length} / {game.playerCount} JOINED
-          </Text>
+          {isHost ? (
+            <View
+              className="flex-row items-center mt-2"
+              style={{ gap: 12 }}
+            >
+              <TouchableOpacity
+                onPress={() => changePlayerCount(-1)}
+                disabled={
+                  game.playerCount <= MIN_PLAYER_COUNT ||
+                  game.playerCount <= players.length
+                }
+                style={{
+                  opacity:
+                    game.playerCount <= MIN_PLAYER_COUNT ||
+                    game.playerCount <= players.length
+                      ? 0.3
+                      : 1,
+                }}
+                className="w-7 h-7 bg-wolf-card rounded-full items-center justify-center"
+              >
+                <Text className="text-wolf-text text-base">−</Text>
+              </TouchableOpacity>
+              <Text className="text-wolf-muted text-xs tracking-widest">
+                {players.length} / {game.playerCount} JOINED
+              </Text>
+              <TouchableOpacity
+                onPress={() => changePlayerCount(1)}
+                disabled={game.playerCount >= MAX_PLAYER_COUNT}
+                style={{
+                  opacity: game.playerCount >= MAX_PLAYER_COUNT ? 0.3 : 1,
+                }}
+                className="w-7 h-7 bg-wolf-card rounded-full items-center justify-center"
+              >
+                <Text className="text-wolf-text text-base">+</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Text className="text-wolf-muted text-xs tracking-widest mt-2">
+              {players.length} / {game.playerCount} JOINED
+            </Text>
+          )}
         </View>
 
         {/* Seating circle */}
@@ -399,6 +481,20 @@ export default function LobbyScreen() {
             })}
           </View>
         </View>
+
+        {isHost && seatedByPosition.size > 0 && (
+          <View className="items-center mt-4">
+            <TouchableOpacity
+              onPress={handleClearAllSeats}
+              activeOpacity={0.6}
+              className="px-3 py-1.5"
+            >
+              <Text className="text-wolf-red text-xs font-bold tracking-widest">
+                CLEAR ALL SEATS
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Unseated players */}
         {unseatedPlayers.length > 0 && (

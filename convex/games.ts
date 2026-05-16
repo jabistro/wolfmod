@@ -181,6 +181,81 @@ export const removePlayerFromSeat = mutation({
   },
 });
 
+export const clearAllSeats = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'lobby') {
+      throw new Error('Seats are locked once the game has started.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    const players = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    for (const p of players) {
+      if (p.seatPosition !== undefined) {
+        await ctx.db.patch(p._id, { seatPosition: undefined });
+      }
+    }
+  },
+});
+
+export const setPlayerCount = mutation({
+  args: {
+    gameId: v.id('games'),
+    playerCount: v.number(),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (args.playerCount < MIN_PLAYERS || args.playerCount > MAX_PLAYERS) {
+      throw new Error(`Player count must be ${MIN_PLAYERS}-${MAX_PLAYERS}.`);
+    }
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'lobby') {
+      throw new Error('Player count is locked once the game has started.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    const players = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    if (args.playerCount < players.length) {
+      throw new Error(
+        `${players.length} players have joined — remove some before lowering the count.`,
+      );
+    }
+
+    // Shrinking the table: any seat index outside the new range no longer
+    // exists, so unseat its occupant. The host re-seats them afterwards.
+    for (const p of players) {
+      if (
+        typeof p.seatPosition === 'number' &&
+        p.seatPosition >= args.playerCount
+      ) {
+        await ctx.db.patch(p._id, { seatPosition: undefined });
+      }
+    }
+
+    const patch: { playerCount: number; selectedRoles?: string[] } = {
+      playerCount: args.playerCount,
+    };
+    // Trim role selection if it now exceeds the new count. If it's short,
+    // leave it — the Start button already blocks until the host picks more.
+    if (game.selectedRoles.length > args.playerCount) {
+      patch.selectedRoles = game.selectedRoles.slice(0, args.playerCount);
+    }
+    await ctx.db.patch(args.gameId, patch);
+  },
+});
+
 export const setRoles = mutation({
   args: {
     gameId: v.id('games'),
