@@ -5,13 +5,15 @@ import {
 } from './_generated/server';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import {
   findCaller,
   requireHost,
   applyWinIfReached,
   isBotName,
   isTriggerRole,
+  dayConfigOf,
+  DAY_CONFIG_DEFAULTS,
 } from './helpers';
 import { enterStep } from './night';
 import {
@@ -21,9 +23,123 @@ import {
 } from './triggers';
 import { NIGHT_STEPS } from '../src/data/nightOrder';
 
-const DEFAULT_VOTE_TIMER_SEC = 5;
+// ───── Config mutation ─────────────────────────────────────────────────────
+//
+// Sets any subset of the day-phase config. Callable in lobby (initial
+// host setup) and during day (mid-game settings cog). Active clocks keep
+// their existing target; the host taps RESET on each clock to actually
+// pick up the new duration.
 
-// ───── Mutations ────────────────────────────────────────────────────────────
+export const setDayConfig = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    dayDurationSec: v.optional(v.number()),
+    accusationSec: v.optional(v.number()),
+    defenseSec: v.optional(v.number()),
+    voteTimerSec: v.optional(v.number()),
+    maxNominationsPerDay: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase === 'ended') {
+      throw new Error('Game is already over.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    const patch: Partial<Doc<'games'>> = {};
+    if (args.dayDurationSec !== undefined) {
+      if (args.dayDurationSec < 30) throw new Error('Day too short.');
+      patch.dayDurationSec = args.dayDurationSec;
+    }
+    if (args.accusationSec !== undefined) {
+      if (args.accusationSec < 5) throw new Error('Accusation too short.');
+      patch.accusationSec = args.accusationSec;
+    }
+    if (args.defenseSec !== undefined) {
+      if (args.defenseSec < 5) throw new Error('Defense too short.');
+      patch.defenseSec = args.defenseSec;
+    }
+    if (args.voteTimerSec !== undefined) {
+      if (args.voteTimerSec < 1) throw new Error('Vote too short.');
+      patch.voteTimerSec = args.voteTimerSec;
+    }
+    if (args.maxNominationsPerDay !== undefined) {
+      if (args.maxNominationsPerDay < 1) throw new Error('Need at least 1 nom.');
+      patch.maxNominationsPerDay = args.maxNominationsPerDay;
+    }
+    await ctx.db.patch(args.gameId, patch);
+  },
+});
+
+// ───── Day clock mutations ─────────────────────────────────────────────────
+
+export const pauseDayClock = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'day') throw new Error('Not currently in day.');
+    if (game.currentNomination) {
+      throw new Error('Day clock is already paused for a trial.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+    if (game.dayPausedRemainingMs !== undefined) return;
+    const remaining = Math.max(0, (game.dayEndsAt ?? 0) - Date.now());
+    await ctx.db.patch(args.gameId, { dayPausedRemainingMs: remaining });
+  },
+});
+
+export const resumeDayClock = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'day') throw new Error('Not currently in day.');
+    if (game.currentNomination) {
+      throw new Error('Cannot resume day clock while a trial is in flight.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+    const paused = game.dayPausedRemainingMs;
+    if (paused === undefined) return;
+    await ctx.db.patch(args.gameId, {
+      dayEndsAt: Date.now() + paused,
+      dayPausedRemainingMs: undefined,
+    });
+  },
+});
+
+export const resetDayClock = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'day') throw new Error('Not currently in day.');
+    if (game.currentNomination) {
+      throw new Error('Cannot reset day clock during a trial.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+    const cfg = dayConfigOf(game);
+    // Reset to a paused full duration (host explicitly resumes / decides
+    // when discussion starts again). Matches ModClock behavior.
+    await ctx.db.patch(args.gameId, {
+      dayEndsAt: Date.now() + cfg.dayDurationSec * 1000,
+      dayPausedRemainingMs: cfg.dayDurationSec * 1000,
+    });
+  },
+});
+
+// ───── Nomination flow ─────────────────────────────────────────────────────
 
 export const nominate = mutation({
   args: {
@@ -38,8 +154,20 @@ export const nominate = mutation({
     if (game.currentNomination) {
       throw new Error('A nomination is already active.');
     }
-
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    const cfg = dayConfigOf(game);
+    const dayExpired =
+      game.dayPausedRemainingMs === undefined &&
+      game.dayEndsAt !== undefined &&
+      Date.now() > game.dayEndsAt;
+    if (dayExpired) {
+      throw new Error('The day has ended — no more nominations.');
+    }
+    const nominationsUsed = game.nominationsThisDay ?? 0;
+    if (nominationsUsed >= cfg.maxNominationsPerDay) {
+      throw new Error('No nominations remain for today.');
+    }
 
     const target = await ctx.db.get(args.targetPlayerId);
     if (!target || target.gameId !== args.gameId) {
@@ -47,23 +175,201 @@ export const nominate = mutation({
     }
     if (!target.alive) throw new Error('Target is already eliminated.');
 
-    const voteTimerSec = game.voteTimerSec ?? DEFAULT_VOTE_TIMER_SEC;
-    const voteTimerMs = voteTimerSec * 1000;
-    const nominationIndex = game.nominationsThisDay ?? 0;
+    const accusationMs = cfg.accusationSec * 1000;
+    const nominationIndex = nominationsUsed;
+    const now = Date.now();
+
+    // Pause the day clock for the duration of the trial — capture remaining
+    // so it can be resumed if the trial concludes without a lynch.
+    const dayPatch: Partial<Doc<'games'>> = {};
+    if (game.dayPausedRemainingMs === undefined) {
+      dayPatch.dayPausedRemainingMs = Math.max(
+        0,
+        (game.dayEndsAt ?? now) - now,
+      );
+    }
 
     await ctx.db.patch(args.gameId, {
+      ...dayPatch,
       currentNomination: {
         nominatedPlayerId: args.targetPlayerId,
-        voteEndsAt: Date.now() + voteTimerMs,
-        resultsRevealed: false,
         nominationIndex,
+        subPhase: 'accusation' as const,
+        // Trial timer starts PAUSED at full duration. Host taps START to
+        // begin counting down. Matches ModClock UX where each trial sub-
+        // phase has an explicit "start" action.
+        subPhaseEndsAt: now + accusationMs,
+        subPhasePausedRemainingMs: accusationMs,
+        resultsRevealed: false,
       },
       nominationsThisDay: nominationIndex + 1,
     });
+  },
+});
 
-    // Dev convenience: bots auto-vote DIES so the lynch flow is testable with
-    // a single real player. Real games will never have bot players, so this
-    // is harmless. The nominee is excluded — they don't vote on themselves.
+// ───── Trial-clock mutations (accusation / defense / vote) ─────────────────
+
+export const startTrialClock = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'day') throw new Error('Not currently in day.');
+    const nom = game.currentNomination;
+    if (!nom) throw new Error('No active nomination.');
+    if (nom.subPhase === 'results') {
+      throw new Error('Trial is over — vote results revealed.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    if (nom.subPhasePausedRemainingMs === undefined) return; // already running
+    const remaining = Math.max(0, nom.subPhasePausedRemainingMs);
+    const newEndsAt = Date.now() + remaining;
+    await ctx.db.patch(args.gameId, {
+      currentNomination: {
+        ...nom,
+        subPhaseEndsAt: newEndsAt,
+        subPhasePausedRemainingMs: undefined,
+      },
+    });
+    // For the vote sub-phase, schedule (or re-schedule) the auto-tally. The
+    // scheduled tallyVote self-checks the current endsAt and no-ops on stale
+    // schedules, so it's safe to schedule multiples across pause/resume.
+    if (nom.subPhase === 'vote') {
+      await ctx.scheduler.runAfter(remaining, internal.day.tallyVote, {
+        gameId: args.gameId,
+        dayNumber: game.dayNumber,
+        nominationIndex: nom.nominationIndex,
+        expectedEndsAt: newEndsAt,
+      });
+    }
+  },
+});
+
+export const pauseTrialClock = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'day') throw new Error('Not currently in day.');
+    const nom = game.currentNomination;
+    if (!nom) throw new Error('No active nomination.');
+    if (nom.subPhase === 'results') return;
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    if (nom.subPhasePausedRemainingMs !== undefined) return; // already paused
+    const remaining = Math.max(0, nom.subPhaseEndsAt - Date.now());
+    await ctx.db.patch(args.gameId, {
+      currentNomination: {
+        ...nom,
+        subPhasePausedRemainingMs: remaining,
+      },
+    });
+  },
+});
+
+export const resetTrialClock = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'day') throw new Error('Not currently in day.');
+    const nom = game.currentNomination;
+    if (!nom) throw new Error('No active nomination.');
+    if (nom.subPhase === 'results') return;
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    const cfg = dayConfigOf(game);
+    const fullMs =
+      nom.subPhase === 'accusation'
+        ? cfg.accusationSec * 1000
+        : nom.subPhase === 'defense'
+          ? cfg.defenseSec * 1000
+          : cfg.voteTimerSec * 1000;
+    // Reset to paused-at-full — host explicitly starts the clock again.
+    await ctx.db.patch(args.gameId, {
+      currentNomination: {
+        ...nom,
+        subPhaseEndsAt: Date.now() + fullMs,
+        subPhasePausedRemainingMs: fullMs,
+      },
+    });
+  },
+});
+
+// ───── Sub-phase advance mutations ─────────────────────────────────────────
+
+export const endAccusation = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'day') throw new Error('Not currently in day.');
+    const nom = game.currentNomination;
+    if (!nom) throw new Error('No active nomination.');
+    if (nom.subPhase !== 'accusation') {
+      throw new Error('Not in accusation sub-phase.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    const cfg = dayConfigOf(game);
+    const defenseMs = cfg.defenseSec * 1000;
+    await ctx.db.patch(args.gameId, {
+      currentNomination: {
+        ...nom,
+        subPhase: 'defense' as const,
+        subPhaseEndsAt: Date.now() + defenseMs,
+        subPhasePausedRemainingMs: defenseMs,
+      },
+    });
+  },
+});
+
+export const endDefense = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'day') throw new Error('Not currently in day.');
+    const nom = game.currentNomination;
+    if (!nom) throw new Error('No active nomination.');
+    if (nom.subPhase !== 'defense') {
+      throw new Error('Not in defense sub-phase.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    const cfg = dayConfigOf(game);
+    const voteMs = cfg.voteTimerSec * 1000;
+    // Vote sub-phase enters paused so the host can announce "time to vote"
+    // before starting the countdown. Host taps START to kick off the vote
+    // (and seed the auto-tally schedule).
+    await ctx.db.patch(args.gameId, {
+      currentNomination: {
+        ...nom,
+        subPhase: 'vote' as const,
+        subPhaseEndsAt: Date.now() + voteMs,
+        subPhasePausedRemainingMs: voteMs,
+      },
+    });
+
+    // Dev convenience: bots auto-vote DIES so the lynch flow is testable
+    // with a single real player. Bots can't tap, so we record their votes
+    // at the moment the vote sub-phase opens. The nominee is excluded.
     const players = await ctx.db
       .query('players')
       .withIndex('by_game', q => q.eq('gameId', args.gameId))
@@ -72,27 +378,23 @@ export const nominate = mutation({
       p =>
         p.alive &&
         isBotName(p.name) &&
-        p._id !== args.targetPlayerId,
+        p._id !== nom.nominatedPlayerId,
     );
     const now = Date.now();
     for (const bot of aliveBots) {
       await ctx.db.insert('nominationVotes', {
         gameId: args.gameId,
         dayNumber: game.dayNumber,
-        nominationIndex,
+        nominationIndex: nom.nominationIndex,
         voterPlayerId: bot._id,
         vote: 'dies',
         votedAt: now,
       });
     }
-
-    await ctx.scheduler.runAfter(voteTimerMs, internal.day.tallyVote, {
-      gameId: args.gameId,
-      dayNumber: game.dayNumber,
-      nominationIndex,
-    });
   },
 });
+
+// ───── Vote casting ────────────────────────────────────────────────────────
 
 export const castVote = mutation({
   args: {
@@ -106,8 +408,10 @@ export const castVote = mutation({
     if (game.phase !== 'day') throw new Error('Not currently in day.');
     const nom = game.currentNomination;
     if (!nom) throw new Error('No active nomination.');
+    if (nom.subPhase !== 'vote') {
+      throw new Error('Voting has not opened yet.');
+    }
     if (nom.resultsRevealed) throw new Error('Voting has closed.');
-    if (Date.now() > nom.voteEndsAt) throw new Error('Voting has closed.');
 
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me) throw new Error('You are not in this game.');
@@ -143,11 +447,14 @@ export const castVote = mutation({
   },
 });
 
+// ───── Tally (scheduled, vote sub-phase only) ──────────────────────────────
+
 export const tallyVote = internalMutation({
   args: {
     gameId: v.id('games'),
     dayNumber: v.number(),
     nominationIndex: v.number(),
+    expectedEndsAt: v.number(),
   },
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
@@ -155,13 +462,16 @@ export const tallyVote = internalMutation({
     if (game.phase !== 'day') return;
     const nom = game.currentNomination;
     if (!nom) return;
+    if (nom.subPhase !== 'vote') return;
     if (nom.nominationIndex !== args.nominationIndex) return;
     if (game.dayNumber !== args.dayNumber) return;
     if (nom.resultsRevealed) return;
+    // Self-check: scheduled tally only fires for the schedule it was
+    // booked for. Host pause/reset cancels by changing subPhaseEndsAt.
+    if (nom.subPhaseEndsAt !== args.expectedEndsAt) return;
+    if (nom.subPhasePausedRemainingMs !== undefined) return;
+    if (Date.now() < nom.subPhaseEndsAt - 100) return;
 
-    // Compute lynch result. Aligned with the same math as
-    // continueGameAfterVote (eligible = alive - 1, no-votes default to LIVES,
-    // strict majority of DIES needed to lynch).
     const players = await ctx.db
       .query('players')
       .withIndex('by_game', q => q.eq('gameId', args.gameId))
@@ -181,11 +491,12 @@ export const tallyVote = internalMutation({
     const lives = eligibleCount - dies;
     const lynch = dies > lives;
 
-    // Reveal results + start the host's CONTINUE dwell. The dwell runs
-    // regardless of lynch so the host can't infer "trigger role fired"
-    // from a slow button-enable.
     await ctx.db.patch(args.gameId, {
-      currentNomination: { ...nom, resultsRevealed: true },
+      currentNomination: {
+        ...nom,
+        subPhase: 'results' as const,
+        resultsRevealed: true,
+      },
       voteDwellEndsAt: Date.now() + TRIGGER_DWELL_MS,
     });
 
@@ -210,14 +521,14 @@ export const tallyVote = internalMutation({
     });
 
     if (target.role && isTriggerRole(target.role)) {
-      // followUp='night' signals processTriggerQueue NOT to auto-finalize
-      // on queue-empty — the host's CONTINUE is the gate to night.
       await ctx.db.patch(args.gameId, { triggersFollowUp: 'night' });
       await enqueueTriggersForDeaths(ctx, args.gameId, [targetId]);
       await processTriggerQueue(ctx, args.gameId);
     }
   },
 });
+
+// ───── Continue past the result panel ──────────────────────────────────────
 
 export const continueGameAfterVote = mutation({
   args: {
@@ -234,10 +545,7 @@ export const continueGameAfterVote = mutation({
 
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
 
-    // Dwell lock: even on a no-lynch vote, we hold CONTINUE for the dwell
-    // so the host can't tell from button-timing whether a trigger fired.
-    // The lynch death + trigger queue (if any) were already applied in
-    // tallyVote; we just gate the transition here.
+    // Dwell + trigger locks (existing — preserves trigger-role cloak).
     const now = Date.now();
     if (game.voteDwellEndsAt && now < game.voteDwellEndsAt) {
       throw new Error('Continue is still locked.');
@@ -253,32 +561,60 @@ export const continueGameAfterVote = mutation({
     }
 
     const nominee = await ctx.db.get(nom.nominatedPlayerId as Id<'players'>);
-    // Lynch is encoded in the nominee's alive=false state (set in
-    // tallyVote). Trigger cascades during the day only kill OTHER players,
-    // so the nominee can only have died here from the lynch itself.
     const wasLynched = !!nominee && !nominee.alive;
 
-    await ctx.db.patch(args.gameId, {
+    // Clear nomination + dwell state regardless of result. If no lynch and
+    // day still has time AND noms still remain, resume the day clock from
+    // the pause we captured at nominate(). Otherwise leave the clock paused
+    // (or expired) — the discussion view will show "DAY IS OVER" until host
+    // taps BEGIN NIGHT.
+    const cfg = dayConfigOf(game);
+    const nominationsUsed = game.nominationsThisDay ?? 0;
+    const noNomsLeft = nominationsUsed >= cfg.maxNominationsPerDay;
+
+    const basePatch: Partial<Doc<'games'>> = {
       currentNomination: undefined,
       voteDwellEndsAt: undefined,
       triggersFollowUp: undefined,
       triggerAnnouncement: undefined,
-    });
+    };
 
-    if (!wasLynched) return;
+    if (wasLynched) {
+      // Day ends on lynch regardless of remaining time/noms.
+      await ctx.db.patch(args.gameId, basePatch);
+      const won = await applyWinIfReached(ctx, args.gameId);
+      if (won) return;
+      await ctx.db.patch(args.gameId, {
+        phase: 'night',
+        nightNumber: game.nightNumber + 1,
+      });
+      await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
+      return;
+    }
 
-    const won = await applyWinIfReached(ctx, args.gameId);
-    if (won) return;
-
-    await ctx.db.patch(args.gameId, {
-      phase: 'night',
-      nightNumber: game.nightNumber + 1,
-    });
-    await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
+    // No lynch. Resume the day clock if there's any reason to keep playing.
+    const dayClockRemaining = game.dayPausedRemainingMs ?? 0;
+    const dayHasTimeLeft = dayClockRemaining > 0;
+    if (dayHasTimeLeft && !noNomsLeft) {
+      await ctx.db.patch(args.gameId, {
+        ...basePatch,
+        dayEndsAt: now + dayClockRemaining,
+        dayPausedRemainingMs: undefined,
+      });
+    } else {
+      // Day is over (either out of time or out of nominations). Leave the
+      // day clock paused at whatever it has; discussion view will show
+      // "DAY IS OVER — BEGIN NIGHT WHEN READY".
+      await ctx.db.patch(args.gameId, {
+        ...basePatch,
+        dayEndsAt: now, // mark expired for clean client display
+        dayPausedRemainingMs: undefined,
+      });
+    }
   },
 });
 
-// ───── Query ────────────────────────────────────────────────────────────────
+// ───── Query ───────────────────────────────────────────────────────────────
 
 export const dayView = query({
   args: {
@@ -299,13 +635,16 @@ export const dayView = query({
     const playerById = new Map(players.map(p => [p._id, p]));
     const alive = players.filter(p => p.alive);
 
+    const cfg = dayConfigOf(game);
+    const nominationsUsed = game.nominationsThisDay ?? 0;
+    const nominationsRemaining = Math.max(
+      0,
+      cfg.maxNominationsPerDay - nominationsUsed,
+    );
+
     // Cascade deaths from THIS lynch (Hunter/HW shot, MD blast). The lynch
     // tally row uses cause='lynch' and is excluded — the lynchee is
-    // already shown in the result pill above the votes. We filter by
-    // resolvedAt >= the moment the lynch tally began (voteDwellEndsAt -
-    // TRIGGER_DWELL_MS) to avoid pulling in earlier cascade rows from
-    // the same nightNumber (e.g., a Hunter who died at night and shot
-    // someone during the morning trigger phase on this same day).
+    // already shown in the result pill above the votes.
     let cascadeDeaths: Array<{
       _id: Id<'players'>;
       name: string;
@@ -336,7 +675,9 @@ export const dayView = query({
 
     let nomination: {
       nominee: { _id: Id<'players'>; name: string } | null;
-      voteEndsAt: number;
+      subPhase: 'accusation' | 'defense' | 'vote' | 'results';
+      subPhaseEndsAt: number;
+      subPhasePausedRemainingMs: number | null;
       resultsRevealed: boolean;
       votedCount: number;
       eligibleCount: number;
@@ -372,8 +713,6 @@ export const dayView = query({
           if (v.vote === 'lives') livesVoters.push(voter.name);
           else diesVoters.push(voter.name);
         }
-        // Alive non-voters defaulted to LIVES — but the nominee doesn't vote
-        // and isn't counted on either side.
         const votedIds = new Set(allVotes.map(v => v.voterPlayerId));
         for (const p of alive) {
           if (p._id === nom.nominatedPlayerId) continue;
@@ -388,7 +727,9 @@ export const dayView = query({
         nominee: nominee
           ? { _id: nominee._id, name: nominee.name }
           : null,
-        voteEndsAt: nom.voteEndsAt,
+        subPhase: nom.subPhase,
+        subPhaseEndsAt: nom.subPhaseEndsAt,
+        subPhasePausedRemainingMs: nom.subPhasePausedRemainingMs ?? null,
         resultsRevealed: nom.resultsRevealed,
         votedCount: allVotes.length,
         eligibleCount,
@@ -409,6 +750,21 @@ export const dayView = query({
         playerCount: game.playerCount,
         voteDwellEndsAt: game.voteDwellEndsAt ?? null,
         pendingTriggerCount: game.pendingDeathTriggers?.length ?? 0,
+        // Day-clock state
+        dayEndsAt: game.dayEndsAt ?? null,
+        dayPausedRemainingMs: game.dayPausedRemainingMs ?? null,
+        // Nominations
+        nominationsUsed,
+        nominationsRemaining,
+        maxNominationsPerDay: cfg.maxNominationsPerDay,
+        // Full config (for the settings cog modal)
+        config: {
+          dayDurationSec: cfg.dayDurationSec,
+          accusationSec: cfg.accusationSec,
+          defenseSec: cfg.defenseSec,
+          voteTimerSec: cfg.voteTimerSec,
+          maxNominationsPerDay: cfg.maxNominationsPerDay,
+        },
       },
       me: {
         _id: me._id,
@@ -430,3 +786,7 @@ export const dayView = query({
     };
   },
 });
+
+// Re-export so other modules can use default if needed (no runtime use,
+// just type clarity for downstream).
+export { DAY_CONFIG_DEFAULTS };

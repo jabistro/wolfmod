@@ -49,6 +49,61 @@ export function isBotName(name: string): boolean {
   return /^Bot \d+$/.test(name);
 }
 
+// ───── Day-phase config defaults ───────────────────────────────────────────
+//
+// All four are stored as optional fields on the game record so a host can
+// adjust them per-game (lobby) and mid-game (settings cog). When unset,
+// these defaults apply.
+
+export type DayConfig = {
+  dayDurationSec: number;
+  accusationSec: number;
+  defenseSec: number;
+  voteTimerSec: number;
+  maxNominationsPerDay: number;
+};
+
+export const DAY_CONFIG_DEFAULTS: DayConfig = {
+  dayDurationSec: 180,
+  accusationSec: 30,
+  defenseSec: 30,
+  voteTimerSec: 5,
+  maxNominationsPerDay: 3,
+};
+
+export function dayConfigOf(game: Doc<'games'>): DayConfig {
+  return {
+    dayDurationSec: game.dayDurationSec ?? DAY_CONFIG_DEFAULTS.dayDurationSec,
+    accusationSec: game.accusationSec ?? DAY_CONFIG_DEFAULTS.accusationSec,
+    defenseSec: game.defenseSec ?? DAY_CONFIG_DEFAULTS.defenseSec,
+    voteTimerSec: game.voteTimerSec ?? DAY_CONFIG_DEFAULTS.voteTimerSec,
+    maxNominationsPerDay:
+      game.maxNominationsPerDay ?? DAY_CONFIG_DEFAULTS.maxNominationsPerDay,
+  };
+}
+
+/**
+ * Resets the day clock for a fresh day: dayEndsAt = now + dayDurationMs,
+ * clears any pause state, zeros the nomination counter, drops any stale
+ * currentNomination. Used wherever the engine transitions into the day
+ * phase (initial day 1 begin, beginDay from morning, finalizeTriggerPhase
+ * Case B).
+ */
+export async function initializeDayClock(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<void> {
+  const game = await ctx.db.get(gameId);
+  if (!game) return;
+  const cfg = dayConfigOf(game);
+  await ctx.db.patch(gameId, {
+    dayEndsAt: Date.now() + cfg.dayDurationSec * 1000,
+    dayPausedRemainingMs: undefined,
+    nominationsThisDay: 0,
+    currentNomination: undefined,
+  });
+}
+
 /**
  * Returns the winning team if the game is over given current player state,
  * else null. House-rule parity: actual wolves vs (alive players minus Minion

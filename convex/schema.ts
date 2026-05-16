@@ -29,27 +29,56 @@ export default defineSchema({
     createdAt: v.number(),
     endedAt: v.optional(v.number()),
 
-    // Day-phase configuration. voteTimerSec is the per-vote countdown
-    // (default 5, configurable in Settings later).
+    // Day-phase configuration. All optional — see defaults in helpers.ts.
+    // voteTimerSec is the per-vote countdown (default 5).
     voteTimerSec: v.optional(v.number()),
+    dayDurationSec: v.optional(v.number()),
+    accusationSec: v.optional(v.number()),
+    defenseSec: v.optional(v.number()),
+    maxNominationsPerDay: v.optional(v.number()),
     /**
-     * Wall-clock target for end-of-day display. Currently informational
-     * only — host explicitly transitions to night via BEGIN NIGHT.
+     * Wall-clock deadline (ms) for the day clock. Set when the day begins
+     * (host taps BEGIN DAY from reveal screen, or BEGIN DAY N from morning).
+     * When `now > dayEndsAt`, no new nominations can be started; host can
+     * still tap BEGIN NIGHT when the table is ready.
      */
     dayEndsAt: v.optional(v.number()),
     /**
-     * Active nomination state, if any. The host nominates a player and a
-     * vote runs until voteEndsAt; after a scheduled tally, resultsRevealed
-     * flips true and everyone sees the LIVES/DIES breakdown until the host
-     * taps CONTINUE GAME (which either lynches and ends day, or clears the
-     * nomination so day continues).
+     * When set, the day clock is paused — this value is the frozen
+     * remainingMs. Cleared on resume; `dayEndsAt = now + remainingMs`.
+     * Always set when a nomination is in flight (day clock pauses during
+     * trials).
+     */
+    dayPausedRemainingMs: v.optional(v.number()),
+    /**
+     * Active nomination state, if any. Walks through accusation → defense →
+     * vote → results. Only the vote sub-phase auto-advances on timer
+     * expire (schedules tallyVote). Accusation/defense advance on host
+     * action (END ACCUSATION / END DEFENSE). After CONTINUE GAME, the
+     * nomination is cleared and the day clock resumes.
      */
     currentNomination: v.optional(
       v.object({
         nominatedPlayerId: v.id('players'),
-        voteEndsAt: v.number(),
-        resultsRevealed: v.boolean(),
         nominationIndex: v.number(),
+        subPhase: v.union(
+          v.literal('accusation'),
+          v.literal('defense'),
+          v.literal('vote'),
+          v.literal('results'),
+        ),
+        /**
+         * Wall-clock deadline (ms) for the current sub-phase. While paused,
+         * this is meaningless — display uses subPhasePausedRemainingMs.
+         */
+        subPhaseEndsAt: v.number(),
+        /**
+         * When set, the sub-phase clock is paused. Initial state on a fresh
+         * nomination has this set to the full accusation duration so the
+         * host can START the timer when ready.
+         */
+        subPhasePausedRemainingMs: v.optional(v.number()),
+        resultsRevealed: v.boolean(),
       }),
     ),
     nominationsThisDay: v.optional(v.number()),

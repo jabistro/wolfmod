@@ -19,13 +19,16 @@ import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { SeatingCircle } from '../components/SeatingCircle';
+import TimersConfigModal from '../components/TimersConfigModal';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Day'>;
 type Route = RouteProp<RootStackParamList, 'Day'>;
 
 type Nomination = {
   nominee: { _id: Id<'players'>; name: string } | null;
-  voteEndsAt: number;
+  subPhase: 'accusation' | 'defense' | 'vote' | 'results';
+  subPhaseEndsAt: number;
+  subPhasePausedRemainingMs: number | null;
   resultsRevealed: boolean;
   votedCount: number;
   eligibleCount: number;
@@ -34,6 +37,58 @@ type Nomination = {
   myVote: 'lives' | 'dies' | null;
   iAmNominee: boolean;
 };
+
+type DayGame = {
+  _id: Id<'games'>;
+  phase: string;
+  dayNumber: number;
+  nightNumber: number;
+  winner: 'village' | 'wolf' | undefined;
+  playerCount: number;
+  voteDwellEndsAt: number | null;
+  pendingTriggerCount: number;
+  dayEndsAt: number | null;
+  dayPausedRemainingMs: number | null;
+  nominationsUsed: number;
+  nominationsRemaining: number;
+  maxNominationsPerDay: number;
+  config: {
+    dayDurationSec: number;
+    accusationSec: number;
+    defenseSec: number;
+    voteTimerSec: number;
+    maxNominationsPerDay: number;
+  };
+};
+
+function formatTime(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function useNow(intervalMs = 200): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(t);
+  }, [intervalMs]);
+  return now;
+}
+
+// Day-clock remaining ms (respects pause).
+function dayRemainingMs(game: DayGame, now: number): number {
+  if (game.dayPausedRemainingMs !== null) return game.dayPausedRemainingMs;
+  if (game.dayEndsAt === null) return 0;
+  return Math.max(0, game.dayEndsAt - now);
+}
+
+// Trial-clock remaining ms (respects pause).
+function trialRemainingMs(nom: Nomination, now: number): number {
+  if (nom.subPhasePausedRemainingMs !== null) return nom.subPhasePausedRemainingMs;
+  return Math.max(0, nom.subPhaseEndsAt - now);
+}
 
 export default function DayScreen() {
   const navigation = useNavigation<Nav>();
@@ -49,7 +104,6 @@ export default function DayScreen() {
 
   const beginNight = useMutation(api.night.beginNight);
 
-  // Phase-driven nav.
   const phase = view?.game.phase;
   useEffect(() => {
     if (phase === 'night') {
@@ -84,26 +138,33 @@ export default function DayScreen() {
   const isHost = me.isHost;
 
   if (currentNomination) {
-    if (currentNomination.resultsRevealed) {
+    const sp = currentNomination.subPhase;
+    if (sp === 'results' || currentNomination.resultsRevealed) {
       return (
         <ResultsView
-          gameId={game._id}
+          game={game}
           deviceClientId={deviceClientId}
-          dayNumber={game.dayNumber}
           isHost={isHost}
           nomination={currentNomination}
-          voteDwellEndsAt={game.voteDwellEndsAt}
-          pendingTriggerCount={game.pendingTriggerCount}
           cascadeDeaths={view.cascadeDeaths}
         />
       );
     }
+    if (sp === 'vote') {
+      return (
+        <VoteView
+          game={game}
+          deviceClientId={deviceClientId}
+          meAlive={me.alive}
+          isHost={isHost}
+          nomination={currentNomination}
+        />
+      );
+    }
     return (
-      <VoteView
-        gameId={game._id}
+      <TrialView
+        game={game}
         deviceClientId={deviceClientId}
-        dayNumber={game.dayNumber}
-        meAlive={me.alive}
         isHost={isHost}
         nomination={currentNomination}
       />
@@ -112,14 +173,12 @@ export default function DayScreen() {
 
   return (
     <DiscussionView
-      gameId={game._id}
+      game={game}
       deviceClientId={deviceClientId}
-      dayNumber={game.dayNumber}
       isHost={isHost}
       meAlive={me.alive}
       meId={me._id}
       alive={alive}
-      totalSeats={game.playerCount}
       onBeginNight={async () => {
         try {
           await beginNight({
@@ -137,49 +196,230 @@ export default function DayScreen() {
   );
 }
 
+// ───── Trial status bar ────────────────────────────────────────────────────
+//
+// Two-cell strip shown above the trial / vote / results focal content:
+// paused day-clock remaining on the left, nominations remaining on the
+// right. Visible to ALL phones so the table knows how much trial budget
+// is left at a glance.
+
+function TrialStatusBar({
+  dayRemMs,
+  nominationsRemaining,
+  maxNominationsPerDay,
+}: {
+  dayRemMs: number;
+  nominationsRemaining: number;
+  maxNominationsPerDay: number;
+}) {
+  return (
+    <View className="mx-4 mb-4 flex-row" style={{ gap: 10 }}>
+      <View
+        className="flex-1 bg-wolf-card rounded-xl flex-row items-center justify-between"
+        style={{ paddingVertical: 8, paddingHorizontal: 14 }}
+      >
+        <Text className="text-wolf-muted text-xs tracking-widest">
+          DAY (PAUSED)
+        </Text>
+        <Text
+          className="text-wolf-muted"
+          style={{ fontSize: 18, fontWeight: '600', fontVariant: ['tabular-nums'] }}
+        >
+          {formatTime(dayRemMs)}
+        </Text>
+      </View>
+      <View
+        className="bg-wolf-card rounded-xl flex-row items-center"
+        style={{ paddingVertical: 8, paddingHorizontal: 14, gap: 10 }}
+      >
+        <Text className="text-wolf-muted text-xs tracking-widest">
+          NOMS LEFT
+        </Text>
+        <Text
+          className="text-wolf-muted"
+          style={{ fontSize: 18, fontWeight: '600', fontVariant: ['tabular-nums'] }}
+        >
+          {nominationsRemaining}/{maxNominationsPerDay}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// ───── Header ──────────────────────────────────────────────────────────────
+
+function DayHeader({
+  dayNumber,
+  mode,
+  showCog,
+  onCogPress,
+}: {
+  dayNumber: number;
+  mode: string;
+  showCog?: boolean;
+  onCogPress?: () => void;
+}) {
+  return (
+    <View className="px-4 pt-10 pb-3" style={{ position: 'relative' }}>
+      <View className="items-center">
+        <Text className="text-wolf-muted text-xs tracking-widest">
+          DAY {dayNumber}
+        </Text>
+        <Text className="text-wolf-accent text-3xl font-extrabold tracking-widest mt-1">
+          {mode}
+        </Text>
+      </View>
+      {showCog && (
+        <TouchableOpacity
+          onPress={onCogPress}
+          style={{ position: 'absolute', right: 16, top: 40, padding: 8 }}
+        >
+          <Text style={{ color: '#8A8590', fontSize: 22 }}>⚙</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+// ───── Day clock bar (above seating circle in DiscussionView) ──────────────
+
+function DayClockBar({
+  game,
+  isHost,
+  deviceClientId,
+  dayOver,
+}: {
+  game: DayGame;
+  isHost: boolean;
+  deviceClientId: string;
+  dayOver: boolean;
+}) {
+  const now = useNow();
+  const pauseDay = useMutation(api.day.pauseDayClock);
+  const resumeDay = useMutation(api.day.resumeDayClock);
+  const resetDay = useMutation(api.day.resetDayClock);
+  const [busy, setBusy] = useState<'toggle' | 'reset' | null>(null);
+
+  const paused = game.dayPausedRemainingMs !== null;
+  const remaining = dayRemainingMs(game, now);
+  const color = dayOver
+    ? '#B03A2E'
+    : remaining <= 10000
+      ? '#D4A017'
+      : '#F0EDE8';
+
+  async function toggle() {
+    if (dayOver) return;
+    setBusy('toggle');
+    try {
+      if (paused) {
+        await resumeDay({ gameId: game._id, callerDeviceClientId: deviceClientId });
+      } else {
+        await pauseDay({ gameId: game._id, callerDeviceClientId: deviceClientId });
+      }
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function reset() {
+    setBusy('reset');
+    try {
+      await resetDay({ gameId: game._id, callerDeviceClientId: deviceClientId });
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <View
+      className="mx-4 mb-3 bg-wolf-card rounded-xl flex-row items-center"
+      style={{ paddingVertical: 10, paddingHorizontal: 16 }}
+    >
+      <View className="flex-1">
+        <Text className="text-wolf-muted text-xs tracking-widest">
+          {dayOver ? 'DAY OVER' : paused ? 'DAY (PAUSED)' : 'DAY'}
+        </Text>
+        <Text
+          className="font-extrabold"
+          style={{ color, fontSize: 28, fontVariant: ['tabular-nums'] }}
+        >
+          {formatTime(remaining)}
+        </Text>
+      </View>
+      {isHost && !dayOver && (
+        <View className="flex-row" style={{ gap: 8 }}>
+          <TouchableOpacity
+            onPress={toggle}
+            disabled={busy !== null}
+            className="bg-wolf-surface rounded-full items-center justify-center"
+            style={{ width: 40, height: 40, opacity: busy === 'toggle' ? 0.4 : 1 }}
+          >
+            <Text className="text-wolf-text text-base">{paused ? '▶' : '⏸'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={reset}
+            disabled={busy !== null}
+            className="bg-wolf-surface rounded-full items-center justify-center"
+            style={{ width: 40, height: 40, opacity: busy === 'reset' ? 0.4 : 1 }}
+          >
+            <Text className="text-wolf-text text-base">↺</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+}
+
 // ───── Discussion view ─────────────────────────────────────────────────────
 
 function DiscussionView({
-  gameId,
+  game,
   deviceClientId,
-  dayNumber,
   isHost,
   meAlive,
   meId,
   alive,
-  totalSeats,
   onBeginNight,
 }: {
-  gameId: Id<'games'>;
+  game: DayGame;
   deviceClientId: string;
-  dayNumber: number;
   isHost: boolean;
   meAlive: boolean;
   meId: Id<'players'>;
   alive: Array<{ _id: Id<'players'>; name: string; seatPosition?: number }>;
-  totalSeats: number;
   onBeginNight: () => Promise<void>;
 }) {
   const insets = useSafeAreaInsets();
+  const now = useNow();
   const nominate = useMutation(api.day.nominate);
   const [confirmTarget, setConfirmTarget] = useState<{
     id: Id<'players'>;
     name: string;
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [cogOpen, setCogOpen] = useState(false);
+
+  const dayRemMs = dayRemainingMs(game, now);
+  const dayExpired = dayRemMs <= 0;
+  const noNomsLeft = game.nominationsRemaining <= 0;
+  const dayOver = dayExpired || noNomsLeft;
 
   async function handleBeginVote() {
     if (!confirmTarget) return;
     setSubmitting(true);
     try {
       await nominate({
-        gameId,
+        gameId: game._id,
         callerDeviceClientId: deviceClientId,
         targetPlayerId: confirmTarget.id,
       });
       setConfirmTarget(null);
     } catch (e) {
-      Alert.alert('Could not start vote', e instanceof Error ? e.message : String(e));
+      Alert.alert('Could not put on trial', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -187,27 +427,63 @@ function DiscussionView({
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
-      <DayHeader dayNumber={dayNumber} mode="DISCUSSION" />
+      <DayHeader
+        dayNumber={game.dayNumber}
+        mode="DISCUSSION"
+        showCog={isHost}
+        onCogPress={() => setCogOpen(true)}
+      />
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24, alignItems: 'center' }}>
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest my-3">
+      <DayClockBar
+        game={game}
+        isHost={isHost}
+        deviceClientId={deviceClientId}
+        dayOver={dayOver}
+      />
+
+      <View className="flex-row justify-center" style={{ gap: 18, marginBottom: 4 }}>
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest">
           {alive.length} ALIVE
         </Text>
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+          NOMS LEFT: {game.nominationsRemaining}/{game.maxNominationsPerDay}
+        </Text>
+      </View>
+
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24, alignItems: 'center' }}>
         <SeatingCircle
-          totalSeats={totalSeats}
+          totalSeats={game.playerCount}
           players={alive}
           meId={meId}
           onPress={
-            isHost
+            isHost && !dayOver
               ? p => setConfirmTarget({ id: p._id, name: p.name })
               : undefined
           }
         />
-        {isHost && (
+        {dayOver ? (
+          <View
+            className="mt-6 rounded-xl px-5 py-4"
+            style={{ borderWidth: 1, borderColor: '#3A3A48', backgroundColor: '#1A1A24' }}
+          >
+            <Text className="text-wolf-accent text-sm font-extrabold tracking-widest text-center">
+              {dayExpired && noNomsLeft
+                ? 'DAY OVER — TIME AND NOMINATIONS UP'
+                : dayExpired
+                  ? 'DAY OVER — TIME IS UP'
+                  : 'DAY OVER — NO NOMINATIONS LEFT'}
+            </Text>
+            <Text className="text-wolf-muted text-xs text-center mt-1">
+              {isHost
+                ? 'Tap BEGIN NIGHT when the table is ready.'
+                : 'Waiting for the host to begin night.'}
+            </Text>
+          </View>
+        ) : isHost ? (
           <Text className="text-wolf-muted text-xs text-center mt-4">
-            Tap a player to nominate them.
+            Tap a player to put them on trial.
           </Text>
-        )}
+        ) : null}
         {!meAlive && (
           <Text className="text-wolf-muted text-xs text-center mt-4 italic">
             You are out of the game — spectating.
@@ -247,7 +523,7 @@ function DiscussionView({
         </View>
       )}
 
-      {/* Confirm/begin-vote modal — gap for the host to make the verbal call */}
+      {/* Confirm / put-on-trial modal */}
       <Modal
         visible={!!confirmTarget}
         transparent
@@ -264,14 +540,14 @@ function DiscussionView({
           }}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
-            VOTE ON
+            PUT ON TRIAL
           </Text>
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {confirmTarget?.name.toUpperCase()}
           </Text>
           <Text className="text-wolf-muted text-sm text-center mb-10">
-            Tell the table the rules ("you have a few seconds, vote LIVES or DIES"),
-            then start the vote.
+            Announce to the table that this player is on trial, then start
+            the accusation timer when the accuser is ready.
           </Text>
           <View className="flex-row" style={{ gap: 14 }}>
             <TouchableOpacity
@@ -294,53 +570,246 @@ function DiscussionView({
                 <ActivityIndicator color="#0F0F14" />
               ) : (
                 <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  BEGIN VOTE
+                  ON TRIAL
                 </Text>
               )}
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
+
+      <TimersConfigModal
+        visible={cogOpen}
+        onClose={() => setCogOpen(false)}
+        gameId={game._id}
+        deviceClientId={deviceClientId}
+        initial={game.config}
+      />
     </SafeAreaView>
   );
 }
 
-// ───── Vote view (during the timer) ────────────────────────────────────────
+// ───── Trial view (accusation / defense) ───────────────────────────────────
+
+function TrialView({
+  game,
+  deviceClientId,
+  isHost,
+  nomination,
+}: {
+  game: DayGame;
+  deviceClientId: string;
+  isHost: boolean;
+  nomination: Nomination;
+}) {
+  const insets = useSafeAreaInsets();
+  const now = useNow();
+  const startClock = useMutation(api.day.startTrialClock);
+  const pauseClock = useMutation(api.day.pauseTrialClock);
+  const resetClock = useMutation(api.day.resetTrialClock);
+  const endAccusation = useMutation(api.day.endAccusation);
+  const endDefense = useMutation(api.day.endDefense);
+  const [busy, setBusy] = useState<'toggle' | 'reset' | 'advance' | null>(null);
+  const [cogOpen, setCogOpen] = useState(false);
+
+  const isAccusation = nomination.subPhase === 'accusation';
+  const phaseLabel = isAccusation ? 'ACCUSATION' : 'DEFENSE';
+  const remaining = trialRemainingMs(nomination, now);
+  const paused = nomination.subPhasePausedRemainingMs !== null;
+  const expired = !paused && remaining <= 0;
+  const color = expired ? '#B03A2E' : '#F0EDE8';
+
+  async function toggleClock() {
+    if (!isHost) return;
+    setBusy('toggle');
+    try {
+      if (paused) {
+        await startClock({ gameId: game._id, callerDeviceClientId: deviceClientId });
+      } else {
+        await pauseClock({ gameId: game._id, callerDeviceClientId: deviceClientId });
+      }
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function reset() {
+    setBusy('reset');
+    try {
+      await resetClock({ gameId: game._id, callerDeviceClientId: deviceClientId });
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function advance() {
+    setBusy('advance');
+    try {
+      if (isAccusation) {
+        await endAccusation({
+          gameId: game._id,
+          callerDeviceClientId: deviceClientId,
+        });
+      } else {
+        await endDefense({
+          gameId: game._id,
+          callerDeviceClientId: deviceClientId,
+        });
+      }
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Paused day clock display (small, top of screen).
+  const dayRemMs = dayRemainingMs(game, now);
+
+  return (
+    <SafeAreaView className="flex-1 bg-wolf-bg">
+      <DayHeader
+        dayNumber={game.dayNumber}
+        mode="ON TRIAL"
+        showCog={isHost}
+        onCogPress={() => setCogOpen(true)}
+      />
+
+      <View className="items-center mb-2">
+        <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
+          {nomination.nominee?.name.toUpperCase() ?? '—'}
+        </Text>
+      </View>
+
+      <TrialStatusBar
+        dayRemMs={dayRemMs}
+        nominationsRemaining={game.nominationsRemaining}
+        maxNominationsPerDay={game.maxNominationsPerDay}
+      />
+
+      <Pressable
+        onPress={isHost ? toggleClock : undefined}
+        className="flex-1 items-center justify-center px-6"
+      >
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+          {phaseLabel}
+        </Text>
+        {isHost && (
+          <Text className="text-wolf-muted text-xs tracking-widest mt-1">
+            {paused
+              ? remaining === (isAccusation ? game.config.accusationSec : game.config.defenseSec) * 1000
+                ? 'TAP TO START'
+                : 'TAP TO RESUME'
+              : 'TAP TO PAUSE'}
+          </Text>
+        )}
+        <Text
+          className="font-extrabold"
+          style={{
+            color,
+            fontSize: 100,
+            fontVariant: ['tabular-nums'],
+            marginTop: 12,
+          }}
+        >
+          {formatTime(remaining)}
+        </Text>
+        {isHost && (
+          <TouchableOpacity
+            onPress={reset}
+            disabled={busy !== null}
+            style={{ marginTop: 22, opacity: busy === 'reset' ? 0.4 : 1 }}
+            className="bg-wolf-card rounded-full items-center justify-center"
+          >
+            <View
+              style={{
+                width: 48,
+                height: 48,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Text className="text-wolf-text text-xl">↺</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+      </Pressable>
+
+      <View
+        style={{
+          paddingHorizontal: 24,
+          paddingBottom: Math.max(insets.bottom, 16) + 16,
+        }}
+      >
+        {isHost ? (
+          <TouchableOpacity
+            onPress={advance}
+            disabled={busy !== null}
+            style={{ opacity: busy === 'advance' ? 0.4 : 1 }}
+            className="bg-wolf-accent rounded-xl py-5 items-center"
+          >
+            {busy === 'advance' ? (
+              <ActivityIndicator color="#0F0F14" />
+            ) : (
+              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                {isAccusation ? 'END ACCUSATION' : 'END DEFENSE'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <Text className="text-wolf-muted text-xs tracking-widest text-center">
+            {isAccusation ? 'ACCUSER IS SPEAKING' : 'ACCUSED IS DEFENDING'}
+          </Text>
+        )}
+      </View>
+
+      <TimersConfigModal
+        visible={cogOpen}
+        onClose={() => setCogOpen(false)}
+        gameId={game._id}
+        deviceClientId={deviceClientId}
+        initial={game.config}
+      />
+    </SafeAreaView>
+  );
+}
+
+// ───── Vote view ───────────────────────────────────────────────────────────
 
 function VoteView({
-  gameId,
+  game,
   deviceClientId,
-  dayNumber,
   meAlive,
   isHost,
   nomination,
 }: {
-  gameId: Id<'games'>;
+  game: DayGame;
   deviceClientId: string;
-  dayNumber: number;
   meAlive: boolean;
   isHost: boolean;
   nomination: Nomination;
 }) {
   const insets = useSafeAreaInsets();
+  const now = useNow();
+  const startClock = useMutation(api.day.startTrialClock);
+  const pauseClock = useMutation(api.day.pauseTrialClock);
+  const resetClock = useMutation(api.day.resetTrialClock);
   const castVote = useMutation(api.day.castVote);
   const [submitting, setSubmitting] = useState<'lives' | 'dies' | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [busy, setBusy] = useState<'toggle' | 'reset' | null>(null);
+  const [cogOpen, setCogOpen] = useState(false);
 
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 200);
-    return () => clearInterval(t);
-  }, []);
-
-  const remainingMs = Math.max(0, nomination.voteEndsAt - now);
-  const remainingSec = Math.ceil(remainingMs / 1000);
+  const remaining = trialRemainingMs(nomination, now);
+  const paused = nomination.subPhasePausedRemainingMs !== null;
 
   async function handleVote(vote: 'lives' | 'dies') {
     if (!meAlive) return;
     setSubmitting(vote);
     try {
       await castVote({
-        gameId,
+        gameId: game._id,
         callerDeviceClientId: deviceClientId,
         vote,
       });
@@ -351,9 +820,46 @@ function VoteView({
     }
   }
 
+  async function toggleClock() {
+    if (!isHost) return;
+    setBusy('toggle');
+    try {
+      if (paused) {
+        await startClock({ gameId: game._id, callerDeviceClientId: deviceClientId });
+      } else {
+        await pauseClock({ gameId: game._id, callerDeviceClientId: deviceClientId });
+      }
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function reset() {
+    setBusy('reset');
+    try {
+      await resetClock({ gameId: game._id, callerDeviceClientId: deviceClientId });
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
-      <DayHeader dayNumber={dayNumber} mode="VOTING" />
+      <DayHeader
+        dayNumber={game.dayNumber}
+        mode="TIME TO VOTE"
+        showCog={isHost}
+        onCogPress={() => setCogOpen(true)}
+      />
+
+      <TrialStatusBar
+        dayRemMs={dayRemainingMs(game, now)}
+        nominationsRemaining={game.nominationsRemaining}
+        maxNominationsPerDay={game.maxNominationsPerDay}
+      />
 
       <View className="flex-1 px-6 items-center justify-center">
         <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
@@ -363,17 +869,43 @@ function VoteView({
           {nomination.nominee?.name.toUpperCase() ?? '—'}
         </Text>
 
-        <View className="items-center mb-8">
+        <Pressable onPress={isHost ? toggleClock : undefined} className="items-center mb-8">
           <Text
-            className="text-wolf-accent text-7xl font-extrabold"
-            style={{ fontVariant: ['tabular-nums'] }}
+            className="text-wolf-accent font-extrabold"
+            style={{ fontSize: 72, fontVariant: ['tabular-nums'] }}
           >
-            {remainingSec}
+            {Math.ceil(remaining / 1000)}
           </Text>
           <Text className="text-wolf-muted text-xs tracking-widest mt-1">
-            SECONDS
+            {paused
+              ? isHost
+                ? 'TAP TO START VOTE'
+                : 'WAITING FOR HOST TO START VOTE'
+              : 'SECONDS'}
           </Text>
-        </View>
+        </Pressable>
+
+        {isHost && (
+          <View className="flex-row mb-4" style={{ gap: 12 }}>
+            <TouchableOpacity
+              onPress={reset}
+              disabled={busy !== null}
+              style={{ opacity: busy === 'reset' ? 0.4 : 1 }}
+              className="bg-wolf-card rounded-full items-center justify-center"
+            >
+              <View
+                style={{
+                  width: 40,
+                  height: 40,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text className="text-wolf-text text-lg">↺</Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <Text className="text-wolf-muted text-xs tracking-widest mb-2">
           {nomination.votedCount} / {nomination.eligibleCount} VOTED
@@ -397,7 +929,7 @@ function VoteView({
           <View className="flex-row mt-6" style={{ gap: 14 }}>
             <TouchableOpacity
               onPress={() => handleVote('lives')}
-              disabled={!!submitting}
+              disabled={!!submitting || paused}
               className="rounded-2xl px-12 py-8 items-center"
               style={{
                 backgroundColor:
@@ -405,7 +937,7 @@ function VoteView({
                 borderWidth: 2,
                 borderColor:
                   nomination.myVote === 'lives' ? '#5BA0E5' : '#2A2A38',
-                opacity: submitting === 'dies' ? 0.4 : 1,
+                opacity: paused ? 0.4 : submitting === 'dies' ? 0.4 : 1,
               }}
             >
               <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
@@ -414,7 +946,7 @@ function VoteView({
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => handleVote('dies')}
-              disabled={!!submitting}
+              disabled={!!submitting || paused}
               className="rounded-2xl px-12 py-8 items-center"
               style={{
                 backgroundColor:
@@ -422,7 +954,7 @@ function VoteView({
                 borderWidth: 2,
                 borderColor:
                   nomination.myVote === 'dies' ? '#B03A2E' : '#2A2A38',
-                opacity: submitting === 'lives' ? 0.4 : 1,
+                opacity: paused ? 0.4 : submitting === 'lives' ? 0.4 : 1,
               }}
             >
               <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
@@ -445,32 +977,40 @@ function VoteView({
         }}
       >
         <Text className="text-wolf-muted text-xs tracking-widest">
-          {isHost ? 'HOST — RESULTS POST WHEN TIMER ENDS' : 'WAITING FOR TIMER'}
+          {paused
+            ? isHost
+              ? 'TAP TIMER TO START THE VOTE'
+              : 'WAITING FOR HOST'
+            : isHost
+              ? 'RESULTS POST WHEN TIMER ENDS'
+              : 'WAITING FOR TIMER'}
         </Text>
       </View>
+
+      <TimersConfigModal
+        visible={cogOpen}
+        onClose={() => setCogOpen(false)}
+        gameId={game._id}
+        deviceClientId={deviceClientId}
+        initial={game.config}
+      />
     </SafeAreaView>
   );
 }
 
-// ───── Results view (post-vote) ────────────────────────────────────────────
+// ───── Results view ────────────────────────────────────────────────────────
 
 function ResultsView({
-  gameId,
+  game,
   deviceClientId,
-  dayNumber,
   isHost,
   nomination,
-  voteDwellEndsAt,
-  pendingTriggerCount,
   cascadeDeaths,
 }: {
-  gameId: Id<'games'>;
+  game: DayGame;
   deviceClientId: string;
-  dayNumber: number;
   isHost: boolean;
   nomination: Nomination;
-  voteDwellEndsAt: number | null;
-  pendingTriggerCount: number;
   cascadeDeaths: Array<{
     _id: Id<'players'>;
     name: string;
@@ -480,18 +1020,11 @@ function ResultsView({
   const insets = useSafeAreaInsets();
   const continueGame = useMutation(api.day.continueGameAfterVote);
   const [submitting, setSubmitting] = useState(false);
-  const [now, setNow] = useState(Date.now());
+  const now = useNow();
 
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 200);
-    return () => clearInterval(t);
-  }, []);
-
-  // Read trigger state for the extra CONTINUE lock during in-flight
-  // announcement pulses. The cascade panel below shows the cumulative
-  // result persistently, so we don't render the transient banner here.
+  // Mid-flight trigger announcement window (existing behavior).
   const triggerView = useQuery(api.triggers.triggerView, {
-    gameId,
+    gameId: game._id,
     deviceClientId,
   });
   const announcement = triggerView?.game.announcement ?? null;
@@ -502,21 +1035,17 @@ function ResultsView({
   const diesCount = nomination.diesVoters.length;
   const lynch = diesCount > livesCount;
 
-  // CONTINUE is locked until the dwell expires AND any trigger queue
-  // empties AND any in-flight announcement finishes displaying. Cloak:
-  // every vote (lynch or not, trigger or not) holds the host's button
-  // for at least the dwell so timing leaks no info.
   const dwellRemainingMs =
-    voteDwellEndsAt != null ? Math.max(0, voteDwellEndsAt - now) : 0;
+    game.voteDwellEndsAt != null ? Math.max(0, game.voteDwellEndsAt - now) : 0;
   const dwellActive = dwellRemainingMs > 0;
-  const triggerActive = pendingTriggerCount > 0;
+  const triggerActive = game.pendingTriggerCount > 0;
   const continueLocked = dwellActive || triggerActive || announcementActive;
 
   async function handleContinue() {
     setSubmitting(true);
     try {
       await continueGame({
-        gameId,
+        gameId: game._id,
         callerDeviceClientId: deviceClientId,
       });
     } catch (e) {
@@ -528,7 +1057,13 @@ function ResultsView({
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
-      <DayHeader dayNumber={dayNumber} mode="VOTE RESULT" />
+      <DayHeader dayNumber={game.dayNumber} mode="VOTE RESULT" />
+
+      <TrialStatusBar
+        dayRemMs={dayRemainingMs(game, now)}
+        nominationsRemaining={game.nominationsRemaining}
+        maxNominationsPerDay={game.maxNominationsPerDay}
+      />
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
         <View className="items-center mt-2 mb-6">
@@ -585,11 +1120,6 @@ function ResultsView({
           </View>
         </View>
 
-        {/* Persistent cascade panel: any deaths triggered by the lynchee's
-            dying breath (Hunter shot, MD blast). Stays visible until the
-            host taps CONTINUE so the village absorbs them in full. Role
-            identity isn't named — cause is folded into a generic
-            "ELIMINATED" line. */}
         {cascadeDeaths.length > 0 ? (
           <View
             className="mt-6 rounded-2xl px-5 py-5"
@@ -654,11 +1184,10 @@ function ResultsView({
         )}
       </View>
 
-      {/* Private trigger picker for the lynched Hunter / HW / MD. Floats
-          on top of the ResultsView so non-actors keep seeing the vote
-          breakdown unchanged. */}
+      {/* Lynch trigger overlay — unchanged (Hunter / Hunter Wolf / MD picker
+          for the just-lynched player). */}
       <LynchTriggerOverlay
-        gameId={gameId}
+        gameId={game._id}
         deviceClientId={deviceClientId}
       />
     </SafeAreaView>
@@ -666,12 +1195,6 @@ function ResultsView({
 }
 
 // ───── Lynch trigger overlay ───────────────────────────────────────────────
-//
-// Reads `triggers.triggerView`. When the local player is the head of the
-// trigger queue (which only happens to the player who just got lynched, or
-// to a cascade victim), render the appropriate picker as a Modal. All
-// other players see no UI change — the dwell countdown on the host's
-// CONTINUE button is the only signal the table gets.
 
 function LynchTriggerOverlay({
   gameId,
@@ -684,16 +1207,9 @@ function LynchTriggerOverlay({
     gameId,
     deviceClientId,
   });
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 250);
-    return () => clearInterval(t);
-  }, []);
+  const now = useNow(250);
 
   if (!view || !view.head || !view.head.isMe) return null;
-  // Suppress the picker during an active announcement — queue is paused
-  // for everyone, including the next actor, while the village reads the
-  // current result.
   const ann = view.game.announcement;
   if (ann && now < ann.endsAt) return null;
 
@@ -724,11 +1240,7 @@ function LynchTriggerOverlay({
 }
 
 function CountdownText({ deadline }: { deadline: number | null }) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 200);
-    return () => clearInterval(t);
-  }, []);
+  const now = useNow();
   if (deadline === null) return null;
   const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
   return (
@@ -986,20 +1498,5 @@ function MadDestroyerModal({
         )}
       </View>
     </Modal>
-  );
-}
-
-// ───── Header ──────────────────────────────────────────────────────────────
-
-function DayHeader({ dayNumber, mode }: { dayNumber: number; mode: string }) {
-  return (
-    <View className="px-4 pt-10 pb-3 items-center">
-      <Text className="text-wolf-muted text-xs tracking-widest">
-        DAY {dayNumber}
-      </Text>
-      <Text className="text-wolf-accent text-3xl font-extrabold tracking-widest mt-1">
-        {mode}
-      </Text>
-    </View>
   );
 }

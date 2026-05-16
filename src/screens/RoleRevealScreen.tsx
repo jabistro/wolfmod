@@ -45,6 +45,8 @@ export default function RoleRevealScreen() {
       : 'skip',
   );
   const confirmReveal = useMutation(api.games.confirmRoleReveal);
+  const beginDayFromReveal = useMutation(api.games.beginDayFromReveal);
+  const [beginningDay, setBeginningDay] = useState(false);
 
   const [isPressed, setIsPressed] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -114,7 +116,7 @@ export default function RoleRevealScreen() {
     );
   }
 
-  const { game, me, visibleTeammates, confirmedCount, totalPlayers } = reveal;
+  const { game, me, visibleTeammates, confirmedCount, totalPlayers, allConfirmed } = reveal;
 
   if (game.phase !== 'reveal' && game.phase !== 'lobby') {
     return (
@@ -169,7 +171,24 @@ export default function RoleRevealScreen() {
     }
   }
 
-  // After this player has confirmed: waiting screen until everyone else confirms.
+  // After this player has confirmed: waiting screen until everyone else
+  // confirms. Once everyone has confirmed, the host gets a BEGIN DAY 1
+  // button; non-hosts wait for the host to tap it.
+  async function handleBeginDay() {
+    if (!deviceClientId) return;
+    setBeginningDay(true);
+    try {
+      await beginDayFromReveal({
+        gameId: game._id,
+        callerDeviceClientId: deviceClientId,
+      });
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBeginningDay(false);
+    }
+  }
+
   if (isConfirmed) {
     return (
       <SafeAreaView className="flex-1 bg-wolf-bg">
@@ -183,10 +202,43 @@ export default function RoleRevealScreen() {
           >
             {confirmedCount} / {totalPlayers}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mt-12">
-            Waiting for the others to confirm their roles…
-          </Text>
-          <ActivityIndicator color="#D4A017" style={{ marginTop: 24 }} />
+          {allConfirmed ? (
+            me.isHost ? (
+              <View className="items-center mt-12 w-full" style={{ paddingHorizontal: 24 }}>
+                <Text className="text-wolf-muted text-sm text-center mb-4">
+                  Everyone has their role. Start the game when the table is ready.
+                </Text>
+                <TouchableOpacity
+                  onPress={handleBeginDay}
+                  disabled={beginningDay}
+                  style={{ opacity: beginningDay ? 0.4 : 1, width: '100%' }}
+                  className="bg-wolf-accent rounded-xl py-5 items-center"
+                >
+                  {beginningDay ? (
+                    <ActivityIndicator color="#0F0F14" />
+                  ) : (
+                    <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                      BEGIN DAY 1
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <>
+                <Text className="text-wolf-muted text-sm text-center mt-12">
+                  Waiting for the host to begin Day 1…
+                </Text>
+                <ActivityIndicator color="#D4A017" style={{ marginTop: 24 }} />
+              </>
+            )
+          ) : (
+            <>
+              <Text className="text-wolf-muted text-sm text-center mt-12">
+                Waiting for the others to confirm their roles…
+              </Text>
+              <ActivityIndicator color="#D4A017" style={{ marginTop: 24 }} />
+            </>
+          )}
         </View>
       </SafeAreaView>
     );

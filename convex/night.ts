@@ -13,6 +13,7 @@ import {
   isBotName,
   isTriggerRole,
   recordWinIfReached,
+  initializeDayClock,
 } from './helpers';
 import {
   enqueueTriggersForDeaths,
@@ -2159,6 +2160,7 @@ export const beginDay = mutation({
       phase: 'day',
       dayNumber: game.dayNumber + 1,
     });
+    await initializeDayClock(ctx, args.gameId);
   },
 });
 

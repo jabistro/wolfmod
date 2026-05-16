@@ -2,7 +2,13 @@ import { mutation, query, type MutationCtx } from './_generated/server';
 import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import { isWolfTeam, teamForRole } from '../src/data/v1Roles';
-import { findCaller, requireHost, isBotName } from './helpers';
+import {
+  findCaller,
+  requireHost,
+  isBotName,
+  initializeDayClock,
+  DAY_CONFIG_DEFAULTS,
+} from './helpers';
 
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I, O
 const ROOM_CODE_LENGTH = 4;
@@ -368,24 +374,40 @@ export const confirmRoleReveal = mutation({
     if (me.revealedAt !== undefined) return;
 
     await ctx.db.patch(me._id, { revealedAt: Date.now() });
+    // Phase advances to 'day' only when the host explicitly taps BEGIN DAY 1
+    // (see `beginDayFromReveal`). Auto-transitioning would start the day
+    // clock — and possibly night actions later — before everyone has put
+    // their phones face-down. Host-gating gives the table a clean "ready?"
+    // beat.
+  },
+});
 
-    // If everyone has now confirmed, advance to the night phase.
+/**
+ * Host gate from reveal → day 1. Verifies all players (or bots) have
+ * confirmed their role, then starts the day clock.
+ */
+export const beginDayFromReveal = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'reveal') throw new Error('Not in reveal phase.');
+
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
     const players = await ctx.db
       .query('players')
       .withIndex('by_game', q => q.eq('gameId', args.gameId))
       .collect();
-    const stillPending = players.some(
-      p => p._id !== me._id && p.revealedAt === undefined,
-    );
-    if (!stillPending) {
-      // Game starts on Day 1 — there's no Night 0. Players just learned their
-      // roles in reveal; day 1 is for setup/discussion and the host kicks off
-      // night 1 manually when ready.
-      await ctx.db.patch(args.gameId, {
-        phase: 'day',
-        dayNumber: 1,
-      });
+    const stillPending = players.some(p => p.revealedAt === undefined);
+    if (stillPending) {
+      throw new Error('Not all players have confirmed their role yet.');
     }
+    await ctx.db.patch(args.gameId, { phase: 'day', dayNumber: 1 });
+    await initializeDayClock(ctx, args.gameId);
   },
 });
 
@@ -440,10 +462,12 @@ export const revealView = query({
         role: me.role,
         seatPosition: me.seatPosition,
         revealedAt: me.revealedAt,
+        isHost: me.isHost,
       },
       visibleTeammates,
       confirmedCount,
       totalPlayers: players.length,
+      allConfirmed: confirmedCount === players.length,
     };
   },
 });
@@ -528,6 +552,17 @@ export const lobbyView = query({
         playerCount: game.playerCount,
         phase: game.phase,
         selectedRoles: game.selectedRoles,
+        // Day-phase config (lobby timers modal reads these).
+        dayDurationSec:
+          game.dayDurationSec ?? DAY_CONFIG_DEFAULTS.dayDurationSec,
+        accusationSec:
+          game.accusationSec ?? DAY_CONFIG_DEFAULTS.accusationSec,
+        defenseSec: game.defenseSec ?? DAY_CONFIG_DEFAULTS.defenseSec,
+        voteTimerSec:
+          game.voteTimerSec ?? DAY_CONFIG_DEFAULTS.voteTimerSec,
+        maxNominationsPerDay:
+          game.maxNominationsPerDay ??
+          DAY_CONFIG_DEFAULTS.maxNominationsPerDay,
       },
       players: players.map(p => ({
         _id: p._id,

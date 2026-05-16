@@ -14,6 +14,7 @@ import {
   recordWinIfReached,
   applyWinIfReached,
   triggerVisibility,
+  initializeDayClock,
   type TriggerRole,
 } from './helpers';
 import { isWolfTeam } from '../src/data/v1Roles';
@@ -332,6 +333,7 @@ async function finalizeTriggerPhase(
     const won = await applyWinIfReached(ctx, gameId);
     if (won) return;
     await ctx.db.patch(gameId, { phase: 'day', dayNumber: game.dayNumber + 1 });
+    await initializeDayClock(ctx, gameId);
     return;
   }
   // followUp === 'night': post-lynch trigger flow. End the day → next night.

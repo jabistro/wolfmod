@@ -21,6 +21,7 @@ import { useDeviceId } from '../hooks/useDeviceId';
 import { V1_ROLES } from '../data/v1Roles';
 import { ROLES, CATEGORIES, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
+import TimersConfigModal from '../components/TimersConfigModal';
 
 // Build the category map for v1 roles once. The role selection modal uses
 // this to power its team tabs (Villagers / Wolves / Team Wolf / Solo) so
@@ -108,6 +109,7 @@ export default function LobbyScreen() {
 
   const [seatModalIndex, setSeatModalIndex] = useState<number | null>(null);
   const [rolesModalOpen, setRolesModalOpen] = useState(false);
+  const [timersModalOpen, setTimersModalOpen] = useState(false);
   const [draftCounts, setDraftCounts] = useState<Record<string, number>>({});
   const [roleFilter, setRoleFilter] = useState<RoleCategory>('villagers');
   const rolesPagerRef = useRef<ScrollView | null>(null);
@@ -543,6 +545,36 @@ export default function LobbyScreen() {
           )}
         </View>
 
+        {/* Timers section */}
+        <View className="px-6 mt-6">
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
+            TIMERS
+          </Text>
+          {isHost ? (
+            <TouchableOpacity
+              onPress={() => setTimersModalOpen(true)}
+              className="bg-wolf-card rounded-xl px-4 py-4"
+              activeOpacity={0.75}
+            >
+              <Text className="text-wolf-text text-sm">
+                {Math.floor(game.dayDurationSec / 60)}:
+                {(game.dayDurationSec % 60).toString().padStart(2, '0')} day ·{' '}
+                {game.accusationSec}s acc · {game.defenseSec}s def ·{' '}
+                {game.voteTimerSec}s vote · {game.maxNominationsPerDay} noms
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <View className="bg-wolf-card rounded-xl px-4 py-4">
+              <Text className="text-wolf-text text-sm">
+                {Math.floor(game.dayDurationSec / 60)}:
+                {(game.dayDurationSec % 60).toString().padStart(2, '0')} day ·{' '}
+                {game.accusationSec}s acc · {game.defenseSec}s def ·{' '}
+                {game.voteTimerSec}s vote · {game.maxNominationsPerDay} noms
+              </Text>
+            </View>
+          )}
+        </View>
+
         {/* Dev-only: fill empty seats with bots so the start button can be tested
             without 30 phones. Hidden in production builds (__DEV__ === false). */}
         {__DEV__ && isHost && players.length < game.playerCount && (
@@ -885,6 +917,25 @@ export default function LobbyScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Timers config modal (host only). Sets day-phase clocks and the
+          nomination budget. Mutation rejects non-host callers, so we still
+          guard against opening for non-hosts above. */}
+      {deviceClientId && (
+        <TimersConfigModal
+          visible={timersModalOpen}
+          onClose={() => setTimersModalOpen(false)}
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          initial={{
+            dayDurationSec: game.dayDurationSec,
+            accusationSec: game.accusationSec,
+            defenseSec: game.defenseSec,
+            voteTimerSec: game.voteTimerSec,
+            maxNominationsPerDay: game.maxNominationsPerDay,
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
