@@ -575,9 +575,11 @@ export default function LobbyScreen() {
           )}
         </View>
 
-        {/* Dev-only: fill empty seats with bots so the start button can be tested
-            without 30 phones. Hidden in production builds (__DEV__ === false). */}
-        {__DEV__ && isHost && players.length < game.playerCount && (
+        {/* Visible in local dev (__DEV__) or playtest builds that opt in via
+            EXPO_PUBLIC_ALLOW_BOTS. Unset that EAS env var before real release. */}
+        {(__DEV__ || process.env.EXPO_PUBLIC_ALLOW_BOTS === 'true') &&
+          isHost &&
+          players.length < game.playerCount && (
           <View className="px-6 mt-6">
             <TouchableOpacity
               onPress={handleSeedBots}
