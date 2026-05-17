@@ -803,6 +803,7 @@ function VoteView({
 
   const remaining = trialRemainingMs(nomination, now);
   const paused = nomination.subPhasePausedRemainingMs !== null;
+  const notStartedYet = paused && remaining === game.config.voteTimerSec * 1000;
 
   async function handleVote(vote: 'lives' | 'dies') {
     if (!meAlive) return;
@@ -869,7 +870,10 @@ function VoteView({
           {nomination.nominee?.name.toUpperCase() ?? '—'}
         </Text>
 
-        <Pressable onPress={isHost ? toggleClock : undefined} className="items-center mb-8">
+        <Pressable
+          onPress={isHost && !notStartedYet ? toggleClock : undefined}
+          className="items-center mb-8"
+        >
           <Text
             className="text-wolf-accent font-extrabold"
             style={{ fontSize: 72, fontVariant: ['tabular-nums'] }}
@@ -878,9 +882,11 @@ function VoteView({
           </Text>
           <Text className="text-wolf-muted text-xs tracking-widest mt-1">
             {paused
-              ? isHost
-                ? 'TAP TO START VOTE'
-                : 'WAITING FOR HOST TO START VOTE'
+              ? notStartedYet
+                ? 'SECONDS'
+                : isHost
+                  ? 'TAP TO RESUME'
+                  : 'WAITING FOR HOST'
               : 'SECONDS'}
           </Text>
         </Pressable>
@@ -973,18 +979,33 @@ function VoteView({
         style={{
           paddingHorizontal: 24,
           paddingBottom: Math.max(insets.bottom, 16) + 16,
-          alignItems: 'center',
+          alignItems: isHost && notStartedYet ? 'stretch' : 'center',
         }}
       >
-        <Text className="text-wolf-muted text-xs tracking-widest">
-          {paused
-            ? isHost
-              ? 'TAP TIMER TO START THE VOTE'
-              : 'WAITING FOR HOST'
-            : isHost
-              ? 'RESULTS POST WHEN TIMER ENDS'
-              : 'WAITING FOR TIMER'}
-        </Text>
+        {isHost && notStartedYet ? (
+          <TouchableOpacity
+            onPress={toggleClock}
+            disabled={busy !== null}
+            style={{ opacity: busy === 'toggle' ? 0.4 : 1 }}
+            className="bg-wolf-accent rounded-xl py-5 items-center"
+          >
+            {busy === 'toggle' ? (
+              <ActivityIndicator color="#0F0F14" />
+            ) : (
+              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                BEGIN VOTE
+              </Text>
+            )}
+          </TouchableOpacity>
+        ) : (
+          <Text className="text-wolf-muted text-xs tracking-widest">
+            {paused
+              ? 'WAITING FOR HOST'
+              : isHost
+                ? 'RESULTS POST WHEN TIMER ENDS'
+                : 'WAITING FOR TIMER'}
+          </Text>
+        )}
       </View>
 
       <TimersConfigModal
