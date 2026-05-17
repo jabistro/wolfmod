@@ -41,4 +41,4 @@ yarn-error.*
 /android
 
 # convex
-convex/_generated/
+convex/_generated/ai/
