@@ -2192,8 +2192,25 @@ export const nightView = query({
       isMyStep = actors.some(a => a._id === me._id);
     }
 
-    // Wolf-step live state: only visible to wolves (so non-wolves can't peek
-    // at who's been chosen). `blocked` is true when a Diseased was eaten
+    // Ghost-spectator perspective: dead players mirror exactly what the alive
+    // actor of the current step sees. `actorForRole` returns me when I'm the
+    // alive actor for a role, or the alive actor when I'm dead and the step
+    // matches. Returning undefined means this role's data is not visible to
+    // this viewer.
+    const stepActors: Player[] = step ? activePlayersForStep(step, alive) : [];
+    const actorForRole = (
+      roleName: string,
+      stepName: NightStep,
+    ): Player | undefined => {
+      if (me.alive && me.role === roleName) return me;
+      if (!me.alive && step === stepName) {
+        return stepActors.find(a => a.role === roleName);
+      }
+      return undefined;
+    };
+
+    // Wolf-step live state: visible to alive wolves and to dead spectators
+    // during the wolves step. `blocked` is true when a Diseased was eaten
     // last night — wolves see a sickened-pack view in place of the picker.
     let wolfState:
       | {
@@ -2207,7 +2224,10 @@ export const nightView = query({
           blocked: boolean;
         }
       | null = null;
-    if (step === 'wolves' && me.role && isWolfTeam(me.role)) {
+    const wolfPerspective =
+      step === 'wolves' &&
+      ((me.alive && me.role && isWolfTeam(me.role)) || !me.alive);
+    if (wolfPerspective) {
       const aliveWolves = alive.filter(p => p.role && isWolfTeam(p.role));
       wolfState = {
         wolves: aliveWolves.map(w => ({
@@ -2221,20 +2241,26 @@ export const nightView = query({
       };
     }
 
-    // Seer's running history of checks (only visible to the Seer).
+    // Seer's running history of checks. Visible to the alive Seer always,
+    // and to dead spectators only during the seer step (so the ghost view
+    // shows exactly what the Seer's screen shows right now).
     let seerHistory: Array<{
       nightNumber: number;
       targetName: string;
       team: 'wolf' | 'villager';
     }> | null = null;
-    if (me.role === 'Seer') {
+    const seerActor = actorForRole('Seer', 'seer');
+    if (seerActor) {
       const checks = await ctx.db
         .query('nightActions')
         .withIndex('by_game_night', q => q.eq('gameId', args.gameId))
         .collect();
       const playerById = new Map(players.map(p => [p._id, p]));
       seerHistory = checks
-        .filter(c => c.actorPlayerId === me._id && c.actionType === 'seer_check')
+        .filter(
+          c =>
+            c.actorPlayerId === seerActor._id && c.actionType === 'seer_check',
+        )
         .sort((a, b) => a.nightNumber - b.nightNumber)
         .map(c => ({
           nightNumber: c.nightNumber,
@@ -2256,7 +2282,8 @@ export const nightView = query({
         team: 'wolf' | 'village';
       }>;
     } | null = null;
-    if (me.role === 'Paranormal Investigator') {
+    const piActor = actorForRole('Paranormal Investigator', 'pi');
+    if (piActor) {
       const playerById = new Map(players.map(p => [p._id, p]));
       const allActions = await ctx.db
         .query('nightActions')
@@ -2264,7 +2291,7 @@ export const nightView = query({
         .collect();
       const myCheckHistory = allActions
         .filter(
-          a => a.actorPlayerId === me._id && a.actionType === 'pi_check',
+          a => a.actorPlayerId === piActor._id && a.actionType === 'pi_check',
         )
         .sort((a, b) => a.nightNumber - b.nightNumber)
         .map(a => ({
@@ -2276,12 +2303,12 @@ export const nightView = query({
         }));
       const hasActedThisNight = allActions.some(
         a =>
-          a.actorPlayerId === me._id &&
+          a.actorPlayerId === piActor._id &&
           a.nightNumber === game.nightNumber &&
           (a.actionType === 'pi_check' || a.actionType === 'pi_skip'),
       );
       piState = {
-        piUsed: !!me.roleState?.piUsed,
+        piUsed: !!piActor.roleState?.piUsed,
         hasActedThisNight,
         history: myCheckHistory,
       };
@@ -2303,7 +2330,8 @@ export const nightView = query({
         sameTeam: 'same' | 'different';
       }>;
     } | null = null;
-    if (me.role === 'Mentalist') {
+    const mentalistActor = actorForRole('Mentalist', 'mentalist');
+    if (mentalistActor) {
       const playerById = new Map(players.map(p => [p._id, p]));
       const allActions = await ctx.db
         .query('nightActions')
@@ -2312,7 +2340,8 @@ export const nightView = query({
       const myChecks = allActions
         .filter(
           a =>
-            a.actorPlayerId === me._id && a.actionType === 'mentalist_check',
+            a.actorPlayerId === mentalistActor._id &&
+            a.actionType === 'mentalist_check',
         )
         .sort((a, b) => a.nightNumber - b.nightNumber);
       const history = myChecks.map(a => {
@@ -2329,7 +2358,7 @@ export const nightView = query({
           sameTeam: (a.result?.sameTeam as 'same' | 'different') ?? 'different',
         };
       });
-      const lastTargets = (me.roleState?.mentalistLastTargets ??
+      const lastTargets = (mentalistActor.roleState?.mentalistLastTargets ??
         []) as Id<'players'>[];
       const lockedTargets = lastTargets
         .map(id => playerById.get(id))
@@ -2337,12 +2366,13 @@ export const nightView = query({
         .map(p => ({ _id: p._id, name: p.name }));
       const hasActedThisNight = allActions.some(
         a =>
-          a.actorPlayerId === me._id &&
+          a.actorPlayerId === mentalistActor._id &&
           a.nightNumber === game.nightNumber &&
           (a.actionType === 'mentalist_check' ||
             a.actionType === 'mentalist_skip'),
       );
-      const noValidTargets = mentalistValidPool(me, alive).length < 2;
+      const noValidTargets =
+        mentalistValidPool(mentalistActor, alive).length < 2;
       mentalistState = {
         hasActedThisNight,
         noValidTargets,
@@ -2362,11 +2392,13 @@ export const nightView = query({
       poisonedTonight: boolean;
       hasActedThisNight: boolean;
       tonightVictim: { _id: Id<'players'>; name: string } | null;
+      tonightPoisonTarget: { _id: Id<'players'>; name: string } | null;
     } | null = null;
-    if (me.role === 'Witch') {
+    const witchActor = actorForRole('Witch', 'witch');
+    if (witchActor) {
       const playerById = new Map(players.map(p => [p._id, p]));
-      const saveUsed = !!me.roleState?.witchSaveUsed;
-      const poisonUsed = !!me.roleState?.witchPoisonUsed;
+      const saveUsed = !!witchActor.roleState?.witchSaveUsed;
+      const poisonUsed = !!witchActor.roleState?.witchPoisonUsed;
       const myActions = await ctx.db
         .query('nightActions')
         .withIndex('by_game_night', q =>
@@ -2374,13 +2406,16 @@ export const nightView = query({
         )
         .collect();
       const savedTonight = myActions.some(
-        a => a.actorPlayerId === me._id && a.actionType === 'witch_save',
+        a =>
+          a.actorPlayerId === witchActor._id && a.actionType === 'witch_save',
       );
       const poisonedTonight = myActions.some(
-        a => a.actorPlayerId === me._id && a.actionType === 'witch_poison',
+        a =>
+          a.actorPlayerId === witchActor._id && a.actionType === 'witch_poison',
       );
       const hasActedThisNight = myActions.some(
-        a => a.actorPlayerId === me._id && a.actionType === 'witch_done',
+        a =>
+          a.actorPlayerId === witchActor._id && a.actionType === 'witch_done',
       );
       let tonightVictim: { _id: Id<'players'>; name: string } | null = null;
       if (!saveUsed) {
@@ -2391,6 +2426,23 @@ export const nightView = query({
           if (victim) tonightVictim = { _id: victim._id, name: victim.name };
         }
       }
+      let tonightPoisonTarget:
+        | { _id: Id<'players'>; name: string }
+        | null = null;
+      if (poisonedTonight) {
+        const poisonAction = myActions.find(
+          a =>
+            a.actorPlayerId === witchActor._id &&
+            a.actionType === 'witch_poison',
+        );
+        const targetId = poisonAction?.targetPlayerId;
+        if (targetId) {
+          const target = playerById.get(targetId);
+          if (target) {
+            tonightPoisonTarget = { _id: target._id, name: target.name };
+          }
+        }
+      }
       witchState = {
         saveUsed,
         poisonUsed,
@@ -2398,27 +2450,44 @@ export const nightView = query({
         poisonedTonight,
         hasActedThisNight,
         tonightVictim,
+        tonightPoisonTarget,
       };
     }
 
     // Reviler-only state. Solo antagonist; same shape as revealerState.
     let revilerState: {
       hasActedThisNight: boolean;
+      tonightShot: { _id: Id<'players'>; name: string } | null;
+      tonightSkipped: boolean;
     } | null = null;
-    if (me.role === 'Reviler') {
+    const revilerActor = actorForRole('Reviler', 'reviler');
+    if (revilerActor) {
+      const playerById = new Map(players.map(p => [p._id, p]));
       const myActions = await ctx.db
         .query('nightActions')
         .withIndex('by_game_night', q =>
           q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
         )
         .collect();
+      const shotAction = myActions.find(
+        a =>
+          a.actorPlayerId === revilerActor._id &&
+          a.actionType === 'reviler_shot',
+      );
+      const skipAction = myActions.find(
+        a =>
+          a.actorPlayerId === revilerActor._id &&
+          a.actionType === 'reviler_skip',
+      );
+      let tonightShot: { _id: Id<'players'>; name: string } | null = null;
+      if (shotAction?.targetPlayerId) {
+        const t = playerById.get(shotAction.targetPlayerId);
+        if (t) tonightShot = { _id: t._id, name: t.name };
+      }
       revilerState = {
-        hasActedThisNight: myActions.some(
-          a =>
-            a.actorPlayerId === me._id &&
-            (a.actionType === 'reviler_shot' ||
-              a.actionType === 'reviler_skip'),
-        ),
+        hasActedThisNight: !!(shotAction || skipAction),
+        tonightShot,
+        tonightSkipped: !!skipAction,
       };
     }
 
@@ -2426,21 +2495,37 @@ export const nightView = query({
     // hasActedThisNight drives the locked waiting view.
     let revealerState: {
       hasActedThisNight: boolean;
+      tonightShot: { _id: Id<'players'>; name: string } | null;
+      tonightSkipped: boolean;
     } | null = null;
-    if (me.role === 'Revealer') {
+    const revealerActor = actorForRole('Revealer', 'revealer');
+    if (revealerActor) {
+      const playerById = new Map(players.map(p => [p._id, p]));
       const myActions = await ctx.db
         .query('nightActions')
         .withIndex('by_game_night', q =>
           q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
         )
         .collect();
+      const shotAction = myActions.find(
+        a =>
+          a.actorPlayerId === revealerActor._id &&
+          a.actionType === 'revealer_shot',
+      );
+      const skipAction = myActions.find(
+        a =>
+          a.actorPlayerId === revealerActor._id &&
+          a.actionType === 'revealer_skip',
+      );
+      let tonightShot: { _id: Id<'players'>; name: string } | null = null;
+      if (shotAction?.targetPlayerId) {
+        const t = playerById.get(shotAction.targetPlayerId);
+        if (t) tonightShot = { _id: t._id, name: t.name };
+      }
       revealerState = {
-        hasActedThisNight: myActions.some(
-          a =>
-            a.actorPlayerId === me._id &&
-            (a.actionType === 'revealer_shot' ||
-              a.actionType === 'revealer_skip'),
-        ),
+        hasActedThisNight: !!(shotAction || skipAction),
+        tonightShot,
+        tonightSkipped: !!skipAction,
       };
     }
 
@@ -2450,22 +2535,38 @@ export const nightView = query({
     let huntressState: {
       huntressUsed: boolean;
       hasActedThisNight: boolean;
+      tonightShot: { _id: Id<'players'>; name: string } | null;
+      tonightSkipped: boolean;
     } | null = null;
-    if (me.role === 'Huntress') {
+    const huntressActor = actorForRole('Huntress', 'huntress');
+    if (huntressActor) {
+      const playerById = new Map(players.map(p => [p._id, p]));
       const myActions = await ctx.db
         .query('nightActions')
         .withIndex('by_game_night', q =>
           q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
         )
         .collect();
+      const shotAction = myActions.find(
+        a =>
+          a.actorPlayerId === huntressActor._id &&
+          a.actionType === 'huntress_shot',
+      );
+      const skipAction = myActions.find(
+        a =>
+          a.actorPlayerId === huntressActor._id &&
+          a.actionType === 'huntress_skip',
+      );
+      let tonightShot: { _id: Id<'players'>; name: string } | null = null;
+      if (shotAction?.targetPlayerId) {
+        const t = playerById.get(shotAction.targetPlayerId);
+        if (t) tonightShot = { _id: t._id, name: t.name };
+      }
       huntressState = {
-        huntressUsed: !!me.roleState?.huntressUsed,
-        hasActedThisNight: myActions.some(
-          a =>
-            a.actorPlayerId === me._id &&
-            (a.actionType === 'huntress_shot' ||
-              a.actionType === 'huntress_skip'),
-        ),
+        huntressUsed: !!huntressActor.roleState?.huntressUsed,
+        hasActedThisNight: !!(shotAction || skipAction),
+        tonightShot,
+        tonightSkipped: !!skipAction,
       };
     }
 
@@ -2477,9 +2578,11 @@ export const nightView = query({
       lastProtectedPlayerId: Id<'players'> | null;
       lastProtectedName: string | null;
       hasActedThisNight: boolean;
+      tonightProtected: { _id: Id<'players'>; name: string } | null;
     } | null = null;
-    if (me.role === 'Bodyguard') {
-      const lastProtected = me.roleState?.bgLastProtected as
+    const bgActor = actorForRole('Bodyguard', 'bodyguard');
+    if (bgActor) {
+      const lastProtected = bgActor.roleState?.bgLastProtected as
         | Id<'players'>
         | undefined;
       const playerById = new Map(players.map(p => [p._id, p]));
@@ -2489,15 +2592,24 @@ export const nightView = query({
           q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
         )
         .collect();
+      let tonightProtected:
+        | { _id: Id<'players'>; name: string }
+        | null = null;
+      const protectAction = myActions.find(
+        a => a.actorPlayerId === bgActor._id && a.actionType === 'bg_protect',
+      );
+      if (protectAction?.targetPlayerId) {
+        const t = playerById.get(protectAction.targetPlayerId);
+        if (t) tonightProtected = { _id: t._id, name: t.name };
+      }
       bgState = {
-        selfProtectUsed: !!me.roleState?.bgSelfProtectUsed,
+        selfProtectUsed: !!bgActor.roleState?.bgSelfProtectUsed,
         lastProtectedPlayerId: lastProtected ?? null,
         lastProtectedName: lastProtected
           ? playerById.get(lastProtected)?.name ?? null
           : null,
-        hasActedThisNight: myActions.some(
-          a => a.actorPlayerId === me._id && a.actionType === 'bg_protect',
-        ),
+        hasActedThisNight: !!protectAction,
+        tonightProtected,
       };
     }
 
@@ -2506,12 +2618,19 @@ export const nightView = query({
       name: string;
       seatPosition?: number;
     }> = [];
-    if (isMyStep && step) {
+    // Ghost spectators see the same targetable pool the step's actor sees.
+    const targetablesViewer: Player | undefined = isMyStep
+      ? me
+      : !me.alive
+        ? stepActors[0]
+        : undefined;
+    if (targetablesViewer && step) {
+      const v = targetablesViewer;
       let pool: Player[] = [];
       if (step === 'wolves') {
         pool = alive.filter(p => !isWolfTeam(p.role || ''));
       } else if (step === 'seer') {
-        pool = alive.filter(p => p._id !== me._id);
+        pool = alive.filter(p => p._id !== v._id);
       } else if (step === 'pi') {
         // House rules: PI can pick anyone, including themselves (the trio
         // would still include their two neighbors). Just alive.
@@ -2519,30 +2638,30 @@ export const nightView = query({
       } else if (step === 'mentalist') {
         // Mentalist cannot read themselves and cannot pick anyone they
         // compared last night (house rule: no back-to-back targets).
-        pool = mentalistValidPool(me, alive);
+        pool = mentalistValidPool(v, alive);
       } else if (step === 'witch') {
         // Poison targets — alive, non-self.
-        pool = alive.filter(p => p._id !== me._id);
+        pool = alive.filter(p => p._id !== v._id);
       } else if (step === 'bodyguard') {
-        const lastProtected = me.roleState?.bgLastProtected as
+        const lastProtected = v.roleState?.bgLastProtected as
           | Id<'players'>
           | undefined;
-        const selfUsed = !!me.roleState?.bgSelfProtectUsed;
+        const selfUsed = !!v.roleState?.bgSelfProtectUsed;
         pool = alive.filter(p => {
           if (lastProtected && p._id === lastProtected) return false;
-          if (p._id === me._id && selfUsed) return false;
+          if (p._id === v._id && selfUsed) return false;
           return true;
         });
       } else if (step === 'huntress') {
         // House rule: no self-shot.
-        pool = alive.filter(p => p._id !== me._id);
+        pool = alive.filter(p => p._id !== v._id);
       } else if (step === 'revealer') {
         // House rule: no self-shot.
-        pool = alive.filter(p => p._id !== me._id);
+        pool = alive.filter(p => p._id !== v._id);
       } else if (step === 'reviler') {
         // House rule: no self-shot. Reviler is blind to roles — they may
         // pick anyone alive, and the morning resolves whether it's a hit.
-        pool = alive.filter(p => p._id !== me._id);
+        pool = alive.filter(p => p._id !== v._id);
       }
       targetables = pool
         .sort((a, b) => (a.seatPosition ?? 0) - (b.seatPosition ?? 0))

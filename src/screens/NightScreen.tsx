@@ -113,28 +113,17 @@ export default function NightScreen() {
     );
   }
 
-  if (!me.alive) {
-    // Dead-player spectator placeholder; richer view comes when nights have
-    // more roles acting.
-    return (
-      <SafeAreaView className="flex-1 bg-wolf-bg">
-        <NightHeader nightNumber={game.nightNumber} stepLabel={stepLabel} dead />
-        <View className="flex-1 items-center justify-center px-8">
-          <Text className="text-wolf-muted text-sm text-center">
-            You are out of the game. The night unfolds without you.
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  const isGhost = !me.alive;
 
-  return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
-      <NightHeader nightNumber={game.nightNumber} stepLabel={stepLabel} />
-
-      {isMyStep && game.nightStep === 'wolves' && wolfState && (
+  // The picker tree gates on `nightStep === 'X' && XState` rather than
+  // `isMyStep`, because XState is server-populated only for the role's actor
+  // (alive) or for dead spectators viewing that step. This lets ghosts mirror
+  // exactly what the alive actor sees, with the wrapper below disabling taps.
+  const pickerTree = (
+    <>
+      {game.nightStep === 'wolves' && wolfState && (
         wolfState.blocked ? (
-          <WolvesBlockedView wolves={wolfState.wolves} />
+          <WolvesBlockedView wolves={wolfState.wolves} isGhost={isGhost} />
         ) : (
           <WolvesPicker
             gameId={game._id}
@@ -144,11 +133,12 @@ export default function NightScreen() {
             totalSeats={game.playerCount}
             meId={me._id}
             wolves={wolfState.wolves}
+            isGhost={isGhost}
           />
         )
       )}
 
-      {isMyStep && game.nightStep === 'seer' && (
+      {game.nightStep === 'seer' && seerHistory != null && (
         <SeerPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -156,12 +146,13 @@ export default function NightScreen() {
           targetables={targetables}
           totalSeats={game.playerCount}
           meId={me._id}
-          history={seerHistory ?? []}
+          history={seerHistory}
           nightNumber={game.nightNumber}
+          isGhost={isGhost}
         />
       )}
 
-      {isMyStep && game.nightStep === 'pi' && piState && (
+      {game.nightStep === 'pi' && piState && (
         <PIPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -170,10 +161,11 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           meId={me._id}
           piState={piState}
+          isGhost={isGhost}
         />
       )}
 
-      {isMyStep && game.nightStep === 'mentalist' && mentalistState && (
+      {game.nightStep === 'mentalist' && mentalistState && (
         <MentalistPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -183,10 +175,11 @@ export default function NightScreen() {
           meId={me._id}
           mentalistState={mentalistState}
           nightNumber={game.nightNumber}
+          isGhost={isGhost}
         />
       )}
 
-      {isMyStep && game.nightStep === 'witch' && witchState && (
+      {game.nightStep === 'witch' && witchState && (
         <WitchPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -195,10 +188,11 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           meId={me._id}
           witchState={witchState}
+          isGhost={isGhost}
         />
       )}
 
-      {isMyStep && game.nightStep === 'bodyguard' && bgState && (
+      {game.nightStep === 'bodyguard' && bgState && (
         <BodyguardPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -207,10 +201,11 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           bgState={bgState}
           meId={me._id}
+          isGhost={isGhost}
         />
       )}
 
-      {isMyStep && game.nightStep === 'huntress' && huntressState && (
+      {game.nightStep === 'huntress' && huntressState && (
         <HuntressPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -219,10 +214,11 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           huntressState={huntressState}
           meId={me._id}
+          isGhost={isGhost}
         />
       )}
 
-      {isMyStep && game.nightStep === 'revealer' && revealerState && (
+      {game.nightStep === 'revealer' && revealerState && (
         <RevealerPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -231,10 +227,11 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           revealerState={revealerState}
           meId={me._id}
+          isGhost={isGhost}
         />
       )}
 
-      {isMyStep && game.nightStep === 'reviler' && revilerState && (
+      {game.nightStep === 'reviler' && revilerState && (
         <RevilerPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -243,14 +240,74 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           revilerState={revilerState}
           meId={me._id}
+          isGhost={isGhost}
         />
       )}
+    </>
+  );
 
-      {!isMyStep && (
-        <WaitingView role={me.role} stepLabel={stepLabel} history={seerHistory} />
+  // True when one of the picker conditionals will actually render something
+  // for a ghost spectator. Used to fall back to a "waiting on X" view during
+  // brief windows when a step is active but no actor state is populated
+  // (e.g. role's actor is dead and the engine is dwelling for cloak).
+  const hasPickerForGhost = !!(
+    (game.nightStep === 'wolves' && wolfState) ||
+    (game.nightStep === 'seer' && seerHistory != null) ||
+    (game.nightStep === 'pi' && piState) ||
+    (game.nightStep === 'mentalist' && mentalistState) ||
+    (game.nightStep === 'witch' && witchState) ||
+    (game.nightStep === 'bodyguard' && bgState) ||
+    (game.nightStep === 'huntress' && huntressState) ||
+    (game.nightStep === 'revealer' && revealerState) ||
+    (game.nightStep === 'reviler' && revilerState)
+  );
+
+  return (
+    <SafeAreaView className="flex-1 bg-wolf-bg">
+      <NightHeader
+        nightNumber={game.nightNumber}
+        stepLabel={stepLabel}
+        dead={!me.alive}
+      />
+
+      {me.alive ? (
+        <>
+          {pickerTree}
+          {!isMyStep && (
+            <WaitingView
+              role={me.role}
+              stepLabel={stepLabel}
+              history={seerHistory}
+            />
+          )}
+        </>
+      ) : (
+        <View
+          className="flex-1"
+          pointerEvents="none"
+          style={{ opacity: 0.85 }}
+        >
+          {!game.nightStep ? (
+            <View className="flex-1 items-center justify-center px-8">
+              <Text className="text-wolf-muted text-sm text-center">
+                You are out of the game. The night unfolds without you.
+              </Text>
+            </View>
+          ) : hasPickerForGhost ? (
+            pickerTree
+          ) : (
+            <View className="flex-1 items-center justify-center px-8">
+              <ActivityIndicator color="#D4A017" />
+              <Text className="text-wolf-muted text-sm text-center mt-6">
+                {stepLabel ? `${stepLabel}…` : 'The night unfolds…'}
+              </Text>
+            </View>
+          )}
+        </View>
       )}
 
-      {me.isHost &&
+      {me.alive &&
+        me.isHost &&
         game.nightStep != null &&
         view.game.skipEligibleAt != null &&
         now > view.game.skipEligibleAt && (
@@ -361,11 +418,12 @@ function NightHeader({
       <Text className="text-wolf-muted text-xs tracking-widest">
         NIGHT {nightNumber}
       </Text>
-      {dead ? (
-        <Text className="text-wolf-red text-base font-bold tracking-widest mt-1">
+      {dead && (
+        <Text className="text-wolf-red text-xs font-bold tracking-widest mt-0.5">
           SPECTATING
         </Text>
-      ) : stepLabel ? (
+      )}
+      {stepLabel ? (
         <Text className="text-wolf-text text-base font-bold tracking-widest mt-1 text-center">
           {stepLabel.toUpperCase()}
         </Text>
@@ -383,6 +441,7 @@ function NightHeader({
 
 function WolvesBlockedView({
   wolves,
+  isGhost,
 }: {
   wolves: Array<{
     _id: Id<'players'>;
@@ -390,6 +449,7 @@ function WolvesBlockedView({
     role: string;
     isMe: boolean;
   }>;
+  isGhost?: boolean;
 }) {
   return (
     <View className="flex-1 px-6 pt-2 pb-8">
@@ -404,7 +464,7 @@ function WolvesBlockedView({
 
       <View className="bg-wolf-card rounded-xl px-4 py-3">
         <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-          YOUR PACK
+          {isGhost ? 'THE PACK' : 'YOUR PACK'}
         </Text>
         {wolves.map(w => (
           <View
@@ -432,6 +492,7 @@ function WolvesPicker({
   totalSeats,
   meId,
   wolves,
+  isGhost,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
@@ -446,6 +507,7 @@ function WolvesPicker({
     isMe: boolean;
     currentVote?: Id<'players'>;
   }>;
+  isGhost?: boolean;
 }) {
   const submitVote = useMutation(api.night.submitWolfVote);
   const [submitting, setSubmitting] = useState(false);
@@ -477,13 +539,15 @@ function WolvesPicker({
         <Text className="text-wolf-text text-base text-center mt-2 mb-4">
           {consensus
             ? 'Consensus reached. Sealing the kill…'
-            : 'Tap a player to vote. All wolves must agree.'}
+            : isGhost
+              ? 'The wolves are voting. They must agree.'
+              : 'Tap a player to vote. All wolves must agree.'}
         </Text>
 
         {/* Wolf-pack awareness panel */}
         <View className="bg-wolf-card rounded-xl px-4 py-3 mb-5">
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-            YOUR PACK
+            {isGhost ? 'THE PACK' : 'YOUR PACK'}
           </Text>
           {wolves.map(w => {
             const targetName = w.currentVote
@@ -539,6 +603,7 @@ function SeerPicker({
   meId,
   history,
   nightNumber,
+  isGhost,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
@@ -552,6 +617,7 @@ function SeerPicker({
     team: 'wolf' | 'villager';
   }>;
   nightNumber: number;
+  isGhost?: boolean;
 }) {
   const alreadyChecked = history.some(h => h.nightNumber === nightNumber);
   const submitCheck = useMutation(api.night.submitSeerCheck);
@@ -629,13 +695,13 @@ function SeerPicker({
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
           <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
-            Your check is in. Waiting for the night to settle…
+            {isGhost ? "The Seer's check is in. Waiting for the night to settle…" : 'Your check is in. Waiting for the night to settle…'}
           </Text>
         </View>
         {history.length > 0 && (
           <View className="bg-wolf-card rounded-xl px-4 py-3">
             <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-              YOUR CHECKS
+              {isGhost ? "THE SEER'S CHECKS" : 'YOUR CHECKS'}
             </Text>
             {history.map((h, i) => (
               <View key={i} className="flex-row justify-between py-1">
@@ -660,13 +726,15 @@ function SeerPicker({
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
         <Text className="text-wolf-text text-base text-center mt-2 mb-4">
-          Choose a player to investigate.
+          {isGhost
+            ? 'The Seer is investigating…'
+            : 'Choose a player to investigate.'}
         </Text>
 
         {history.length > 0 && (
           <View className="bg-wolf-card rounded-xl px-4 py-3 mb-5">
             <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-              YOUR CHECKS
+              {isGhost ? "THE SEER'S CHECKS" : 'YOUR CHECKS'}
             </Text>
             {history.map((h, i) => (
               <View key={i} className="flex-row justify-between py-1">
@@ -814,6 +882,7 @@ function PIPicker({
   totalSeats,
   meId,
   piState,
+  isGhost,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
@@ -830,6 +899,7 @@ function PIPicker({
       team: 'wolf' | 'village';
     }>;
   };
+  isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const submitCheck = useMutation(api.night.submitPICheck);
@@ -919,14 +989,16 @@ function PIPicker({
             {piState.history.length > 0 &&
             piState.history[piState.history.length - 1]?.nightNumber !==
               undefined
-              ? 'Your check is in. Waiting for the night to settle…'
+              ? isGhost
+                ? "The PI's check is in. Waiting for the night to settle…"
+                : 'Your check is in. Waiting for the night to settle…'
               : 'Saved for later. Waiting for the night to settle…'}
           </Text>
         </View>
         {piState.history.length > 0 && (
           <View className="bg-wolf-card rounded-xl px-4 py-3">
             <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-              YOUR CHECK
+              {isGhost ? "THE PI'S CHECK" : 'YOUR CHECK'}
             </Text>
             {piState.history.map((h, i) => (
               <View key={i} className="flex-row justify-between py-1">
@@ -951,8 +1023,9 @@ function PIPicker({
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
         <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          One-time investigation. Pick a target to read them and their two
-          neighbors as a group.
+          {isGhost
+            ? 'The PI is reading a player + their two neighbors as a group.'
+            : 'One-time investigation. Pick a target to read them and their two neighbors as a group.'}
         </Text>
 
         <View style={{ alignItems: 'center' }}>
@@ -972,23 +1045,25 @@ function PIPicker({
         </View>
       </ScrollView>
 
-      <View
-        className="px-6"
-        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-      >
-        <TouchableOpacity
-          onPress={handleSkip}
-          disabled={submitting || !!pendingTarget || !!pendingResult}
-          style={{
-            opacity: submitting || pendingTarget || pendingResult ? 0.4 : 1,
-          }}
-          className="bg-wolf-card rounded-xl py-4 items-center"
+      {!isGhost && (
+        <View
+          className="px-6"
+          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
         >
-          <Text className="text-wolf-muted text-base font-bold tracking-widest">
-            SAVE FOR LATER
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            onPress={handleSkip}
+            disabled={submitting || !!pendingTarget || !!pendingResult}
+            style={{
+              opacity: submitting || pendingTarget || pendingResult ? 0.4 : 1,
+            }}
+            className="bg-wolf-card rounded-xl py-4 items-center"
+          >
+            <Text className="text-wolf-muted text-base font-bold tracking-widest">
+              SAVE FOR LATER
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Confirmation overlay */}
       {pendingTarget && !pendingResult && (
@@ -1099,6 +1174,7 @@ function MentalistPicker({
   meId,
   mentalistState,
   nightNumber,
+  isGhost,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
@@ -1118,6 +1194,7 @@ function MentalistPicker({
     }>;
   };
   nightNumber: number;
+  isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const submitCheck = useMutation(api.night.submitMentalistCheck);
@@ -1211,8 +1288,12 @@ function MentalistPicker({
           </Text>
           <Text className="text-wolf-muted text-sm text-center mt-3 px-6">
             {lockedNames.length > 0
-              ? `Last night you read ${lockedNames.join(' & ')}, and they can't be picked back-to-back.`
-              : 'You need at least two valid targets to read.'}
+              ? isGhost
+                ? `Last night the Mentalist read ${lockedNames.join(' & ')}, and they can't be picked back-to-back.`
+                : `Last night you read ${lockedNames.join(' & ')}, and they can't be picked back-to-back.`
+              : isGhost
+                ? 'The Mentalist needs at least two valid targets to read.'
+                : 'You need at least two valid targets to read.'}
           </Text>
           <Text className="text-wolf-muted text-xs text-center mt-4 px-6">
             Passing for the night…
@@ -1229,7 +1310,9 @@ function MentalistPicker({
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
           <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
-            Your comparison is in. Waiting for the night to settle…
+            {isGhost
+              ? "The Mentalist's comparison is in. Waiting for the night to settle…"
+              : 'Your comparison is in. Waiting for the night to settle…'}
           </Text>
         </View>
         {last && (
@@ -1258,7 +1341,9 @@ function MentalistPicker({
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
         <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          Pick two players. You'll be told whether they share a team.
+          {isGhost
+            ? 'The Mentalist is comparing two players to see if they share a team.'
+            : "Pick two players. You'll be told whether they share a team."}
         </Text>
 
         {mentalistState.lockedTargets.length > 0 && (
@@ -1275,7 +1360,7 @@ function MentalistPicker({
         {mentalistState.history.length > 0 && (
           <View className="bg-wolf-card rounded-xl px-4 py-3 mb-4">
             <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-              YOUR READINGS
+              {isGhost ? "THE MENTALIST'S READINGS" : 'YOUR READINGS'}
             </Text>
             {mentalistState.history.map((h, i) => (
               <View key={i} className="py-1">
@@ -1310,33 +1395,37 @@ function MentalistPicker({
           />
         </View>
 
-        <View className="bg-wolf-card rounded-xl px-4 py-3 mt-4">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-            YOUR PICKS ({picks.length} / 2)
-          </Text>
-          <Text className="text-wolf-text text-sm">
-            {picks.length === 0
-              ? 'Tap a player to select them.'
-              : picks.map(p => p.name).join(' & ')}
-          </Text>
-        </View>
+        {!isGhost && (
+          <View className="bg-wolf-card rounded-xl px-4 py-3 mt-4">
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
+              {`YOUR PICKS (${picks.length} / 2)`}
+            </Text>
+            <Text className="text-wolf-text text-sm">
+              {picks.length === 0
+                ? 'Tap a player to select them.'
+                : picks.map(p => p.name).join(' & ')}
+            </Text>
+          </View>
+        )}
       </ScrollView>
 
-      <View
-        className="px-6"
-        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-      >
-        <TouchableOpacity
-          onPress={() => setConfirmOpen(true)}
-          disabled={picks.length !== 2 || submitting}
-          style={{ opacity: picks.length === 2 ? 1 : 0.4 }}
-          className="bg-wolf-accent rounded-xl py-5 items-center"
+      {!isGhost && (
+        <View
+          className="px-6"
+          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
         >
-          <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-            CONFIRM
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            onPress={() => setConfirmOpen(true)}
+            disabled={picks.length !== 2 || submitting}
+            style={{ opacity: picks.length === 2 ? 1 : 0.4 }}
+            className="bg-wolf-accent rounded-xl py-5 items-center"
+          >
+            <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+              CONFIRM
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Confirmation overlay */}
       {confirmOpen && (
@@ -1450,6 +1539,7 @@ function WitchPicker({
   totalSeats,
   meId,
   witchState,
+  isGhost,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
@@ -1464,7 +1554,9 @@ function WitchPicker({
     poisonedTonight: boolean;
     hasActedThisNight: boolean;
     tonightVictim: { _id: Id<'players'>; name: string } | null;
+    tonightPoisonTarget: { _id: Id<'players'>; name: string } | null;
   };
+  isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const submitSave = useMutation(api.night.submitWitchSave);
@@ -1526,8 +1618,16 @@ function WitchPicker({
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
           <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
-            Your turn is over. Waiting for the night to settle…
+            {isGhost
+              ? "The Witch's turn is over. Waiting for the night to settle…"
+              : 'Your turn is over. Waiting for the night to settle…'}
           </Text>
+          {witchState.tonightPoisonTarget && (
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4">
+              <Text className="text-wolf-red font-bold">POISONED:</Text>{' '}
+              {witchState.tonightPoisonTarget.name}
+            </Text>
+          )}
         </View>
       </View>
     );
@@ -1548,8 +1648,9 @@ function WitchPicker({
           </Text>
           {witchState.saveUsed ? (
             <Text className="text-wolf-muted text-sm italic">
-              You can no longer see the wolves' victim — your save potion is
-              spent.
+              {isGhost
+                ? "The wolves' victim is hidden — the Witch's save potion is spent."
+                : "You can no longer see the wolves' victim — your save potion is spent."}
             </Text>
           ) : witchState.tonightVictim ? (
             <Text className="text-wolf-text text-2xl font-bold tracking-widest">
@@ -1610,29 +1711,36 @@ function WitchPicker({
                   ? 'POISON POTION USED'
                   : 'USE POISON'}
             </Text>
+            {witchState.tonightPoisonTarget && (
+              <Text className="text-wolf-text text-sm mt-1">
+                → {witchState.tonightPoisonTarget.name}
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
       </ScrollView>
 
-      <View
-        className="px-6"
-        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-      >
-        <TouchableOpacity
-          onPress={handleDone}
-          disabled={submitting}
-          style={{ opacity: submitting ? 0.4 : 1 }}
-          className="bg-wolf-accent rounded-xl py-5 items-center"
+      {!isGhost && (
+        <View
+          className="px-6"
+          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
         >
-          {submitting ? (
-            <ActivityIndicator color="#0F0F14" />
-          ) : (
-            <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-              I'M DONE
-            </Text>
-          )}
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            onPress={handleDone}
+            disabled={submitting}
+            style={{ opacity: submitting ? 0.4 : 1 }}
+            className="bg-wolf-accent rounded-xl py-5 items-center"
+          >
+            {submitting ? (
+              <ActivityIndicator color="#0F0F14" />
+            ) : (
+              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                I'M DONE
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Save confirmation */}
       {confirmSave && (
@@ -1797,6 +1905,7 @@ function BodyguardPicker({
   totalSeats,
   bgState,
   meId,
+  isGhost,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
@@ -1808,8 +1917,10 @@ function BodyguardPicker({
     lastProtectedPlayerId: Id<'players'> | null;
     lastProtectedName: string | null;
     hasActedThisNight: boolean;
+    tonightProtected: { _id: Id<'players'>; name: string } | null;
   };
   meId: Id<'players'>;
+  isGhost?: boolean;
 }) {
   const submitProtect = useMutation(api.night.submitBGProtect);
   const [submitting, setSubmitting] = useState(false);
@@ -1841,8 +1952,18 @@ function BodyguardPicker({
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
           <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
-            Your protection is in. Waiting for the night to settle…
+            {isGhost
+              ? "The Bodyguard's protection is in. Waiting for the night to settle…"
+              : 'Your protection is in. Waiting for the night to settle…'}
           </Text>
+          {bgState.tonightProtected && (
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4">
+              <Text style={{ color: '#5BA0E5' }} className="font-bold">
+                PROTECTED:
+              </Text>{' '}
+              {bgState.tonightProtected.name}
+            </Text>
+          )}
         </View>
       </View>
     );
@@ -1852,16 +1973,24 @@ function BodyguardPicker({
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
         <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          Choose a player to protect tonight.
+          {isGhost
+            ? 'The Bodyguard is choosing who to protect tonight.'
+            : 'Choose a player to protect tonight.'}
         </Text>
         <View className="bg-wolf-card rounded-xl px-4 py-3 mb-4">
           <Text className="text-wolf-muted text-xs leading-5">
             {bgState.lastProtectedName
-              ? `Last night: ${bgState.lastProtectedName}. You cannot pick the same player two nights in a row.\n`
+              ? isGhost
+                ? `Last night: ${bgState.lastProtectedName}. Cannot pick the same player two nights in a row.\n`
+                : `Last night: ${bgState.lastProtectedName}. You cannot pick the same player two nights in a row.\n`
               : ''}
             {bgState.selfProtectUsed
-              ? 'Your one self-protect has already been used.'
-              : 'You may protect yourself once per game.'}
+              ? isGhost
+                ? "The Bodyguard's one self-protect has already been used."
+                : 'Your one self-protect has already been used.'
+              : isGhost
+                ? 'The Bodyguard may protect themselves once per game.'
+                : 'You may protect yourself once per game.'}
           </Text>
         </View>
 
@@ -1895,6 +2024,7 @@ function HuntressPicker({
   totalSeats,
   huntressState,
   meId,
+  isGhost,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
@@ -1904,8 +2034,11 @@ function HuntressPicker({
   huntressState: {
     huntressUsed: boolean;
     hasActedThisNight: boolean;
+    tonightShot: { _id: Id<'players'>; name: string } | null;
+    tonightSkipped: boolean;
   };
   meId: Id<'players'>;
+  isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const submitShot = useMutation(api.night.submitHuntressShot);
@@ -1963,6 +2096,18 @@ function HuntressPicker({
           <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
             Waiting for the night to settle…
           </Text>
+          {huntressState.tonightShot ? (
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4">
+              <Text style={{ color: '#E07070' }} className="font-bold">
+                SHOT:
+              </Text>{' '}
+              {huntressState.tonightShot.name}
+            </Text>
+          ) : huntressState.tonightSkipped ? (
+            <Text className="text-wolf-muted text-sm text-center mt-4 px-4 italic">
+              Saved the shot for later.
+            </Text>
+          ) : null}
         </View>
       </View>
     );
@@ -1972,7 +2117,9 @@ function HuntressPicker({
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
         <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          One-time shot. Pick a target to shoot, or save it for later.
+          {isGhost
+            ? 'The Huntress is deciding whether to take her one shot.'
+            : 'One-time shot. Pick a target to shoot, or save it for later.'}
         </Text>
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
@@ -1991,21 +2138,23 @@ function HuntressPicker({
         </View>
       </ScrollView>
 
-      <View
-        className="px-6"
-        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-      >
-        <TouchableOpacity
-          onPress={handleSkip}
-          disabled={submitting || !!pendingTarget}
-          style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
-          className="bg-wolf-card rounded-xl py-4 items-center"
+      {!isGhost && (
+        <View
+          className="px-6"
+          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
         >
-          <Text className="text-wolf-muted text-base font-bold tracking-widest">
-            SAVE FOR LATER
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            onPress={handleSkip}
+            disabled={submitting || !!pendingTarget}
+            style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+            className="bg-wolf-card rounded-xl py-4 items-center"
+          >
+            <Text className="text-wolf-muted text-base font-bold tracking-widest">
+              SAVE FOR LATER
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {pendingTarget && (
         <View
@@ -2076,6 +2225,7 @@ function RevealerPicker({
   totalSeats,
   revealerState,
   meId,
+  isGhost,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
@@ -2084,8 +2234,11 @@ function RevealerPicker({
   totalSeats: number;
   revealerState: {
     hasActedThisNight: boolean;
+    tonightShot: { _id: Id<'players'>; name: string } | null;
+    tonightSkipped: boolean;
   };
   meId: Id<'players'>;
+  isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const submitShot = useMutation(api.night.submitRevealerShot);
@@ -2143,6 +2296,18 @@ function RevealerPicker({
           <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
             Waiting for the night to settle…
           </Text>
+          {revealerState.tonightShot ? (
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4">
+              <Text style={{ color: '#D4A017' }} className="font-bold">
+                REVEALED:
+              </Text>{' '}
+              {revealerState.tonightShot.name}
+            </Text>
+          ) : revealerState.tonightSkipped ? (
+            <Text className="text-wolf-muted text-sm text-center mt-4 px-4 italic">
+              Passed tonight.
+            </Text>
+          ) : null}
         </View>
       </View>
     );
@@ -2152,7 +2317,9 @@ function RevealerPicker({
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
         <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          Pick a wolf to reveal them. If they aren't a wolf, you die instead.
+          {isGhost
+            ? "The Revealer is choosing whether to reveal a wolf. They die if they miss."
+            : "Pick a wolf to reveal them. If they aren't a wolf, you die instead."}
         </Text>
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
@@ -2171,21 +2338,23 @@ function RevealerPicker({
         </View>
       </ScrollView>
 
-      <View
-        className="px-6"
-        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-      >
-        <TouchableOpacity
-          onPress={handleSkip}
-          disabled={submitting || !!pendingTarget}
-          style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
-          className="bg-wolf-card rounded-xl py-4 items-center"
+      {!isGhost && (
+        <View
+          className="px-6"
+          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
         >
-          <Text className="text-wolf-muted text-base font-bold tracking-widest">
-            PASS TONIGHT
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            onPress={handleSkip}
+            disabled={submitting || !!pendingTarget}
+            style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+            className="bg-wolf-card rounded-xl py-4 items-center"
+          >
+            <Text className="text-wolf-muted text-base font-bold tracking-widest">
+              PASS TONIGHT
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {pendingTarget && (
         <View
@@ -2256,6 +2425,7 @@ function RevilerPicker({
   totalSeats,
   revilerState,
   meId,
+  isGhost,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
@@ -2264,8 +2434,11 @@ function RevilerPicker({
   totalSeats: number;
   revilerState: {
     hasActedThisNight: boolean;
+    tonightShot: { _id: Id<'players'>; name: string } | null;
+    tonightSkipped: boolean;
   };
   meId: Id<'players'>;
+  isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const submitShot = useMutation(api.night.submitRevilerShot);
@@ -2323,6 +2496,18 @@ function RevilerPicker({
           <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
             Waiting for the night to settle…
           </Text>
+          {revilerState.tonightShot ? (
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4">
+              <Text style={{ color: '#B03A2E' }} className="font-bold">
+                REVILED:
+              </Text>{' '}
+              {revilerState.tonightShot.name}
+            </Text>
+          ) : revilerState.tonightSkipped ? (
+            <Text className="text-wolf-muted text-sm text-center mt-4 px-4 italic">
+              Passed tonight.
+            </Text>
+          ) : null}
         </View>
       </View>
     );
@@ -2332,7 +2517,9 @@ function RevilerPicker({
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
         <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          Pick a special villager to revile them. If they aren't one, you die instead.
+          {isGhost
+            ? "The Reviler is choosing whether to revile a special villager. They die if they miss."
+            : "Pick a special villager to revile them. If they aren't one, you die instead."}
         </Text>
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
@@ -2351,21 +2538,23 @@ function RevilerPicker({
         </View>
       </ScrollView>
 
-      <View
-        className="px-6"
-        style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-      >
-        <TouchableOpacity
-          onPress={handleSkip}
-          disabled={submitting || !!pendingTarget}
-          style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
-          className="bg-wolf-card rounded-xl py-4 items-center"
+      {!isGhost && (
+        <View
+          className="px-6"
+          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
         >
-          <Text className="text-wolf-muted text-base font-bold tracking-widest">
-            PASS TONIGHT
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity
+            onPress={handleSkip}
+            disabled={submitting || !!pendingTarget}
+            style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+            className="bg-wolf-card rounded-xl py-4 items-center"
+          >
+            <Text className="text-wolf-muted text-base font-bold tracking-widest">
+              PASS TONIGHT
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {pendingTarget && (
         <View
