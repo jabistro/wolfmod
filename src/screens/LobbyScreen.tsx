@@ -847,7 +847,11 @@ export default function LobbyScreen() {
                     <ScrollView
                       key={cat.key}
                       style={{ width: rolesPagerWidth }}
-                      contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 16 }}
+                      contentContainerStyle={{
+                        paddingHorizontal: 24,
+                        paddingTop: 16,
+                        paddingBottom: 16 + insets.bottom,
+                      }}
                     >
                       {filtered.length === 0 ? (
                         <View className="py-10 items-center">
