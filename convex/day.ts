@@ -26,9 +26,11 @@ import { NIGHT_STEPS } from '../src/data/nightOrder';
 // ───── Config mutation ─────────────────────────────────────────────────────
 //
 // Sets any subset of the day-phase config. Callable in lobby (initial
-// host setup) and during day (mid-game settings cog). Active clocks keep
-// their existing target; the host taps RESET on each clock to actually
-// pick up the new duration.
+// host setup) and during day (mid-game settings cog). When a duration
+// changes mid-game, the matching in-flight timer is reset to the full new
+// value (preserving paused vs. running state). This is what host expects
+// when they save in the cog — the new number shows up on the table now,
+// not on the next day/trial.
 
 export const setDayConfig = mutation({
   args: {
@@ -69,7 +71,65 @@ export const setDayConfig = mutation({
       if (args.maxNominationsPerDay < 1) throw new Error('Need at least 1 nom.');
       patch.maxNominationsPerDay = args.maxNominationsPerDay;
     }
+
+    const now = Date.now();
+
+    // Reset the in-flight day clock if the day length changed during day
+    // phase. Whether the clock is paused (during a trial, or host-paused)
+    // or running, replace its remaining with the full new duration.
+    if (args.dayDurationSec !== undefined && game.phase === 'day') {
+      const fullDayMs = args.dayDurationSec * 1000;
+      if (game.dayPausedRemainingMs !== undefined) {
+        patch.dayPausedRemainingMs = fullDayMs;
+      } else if (game.dayEndsAt !== undefined) {
+        patch.dayEndsAt = now + fullDayMs;
+      }
+    }
+
+    // Reset the in-flight trial sub-phase clock if the duration for the
+    // current sub-phase changed. accusation/defense/vote each have their
+    // own field; results sub-phase has no clock to reset.
+    const nom = game.currentNomination;
+    let voteRescheduleEndsAt: number | null = null;
+    if (nom && nom.subPhase !== 'results') {
+      const matchingNewSec =
+        nom.subPhase === 'accusation'
+          ? args.accusationSec
+          : nom.subPhase === 'defense'
+            ? args.defenseSec
+            : args.voteTimerSec;
+      if (matchingNewSec !== undefined) {
+        const fullMs = matchingNewSec * 1000;
+        const newEndsAt = now + fullMs;
+        const wasPaused = nom.subPhasePausedRemainingMs !== undefined;
+        patch.currentNomination = {
+          ...nom,
+          subPhaseEndsAt: wasPaused ? nom.subPhaseEndsAt : newEndsAt,
+          subPhasePausedRemainingMs: wasPaused ? fullMs : undefined,
+        };
+        // Re-schedule the vote auto-tally for the new endsAt. The previous
+        // schedule self-checks subPhaseEndsAt and no-ops on stale fires.
+        // Skip when paused — resume will schedule its own.
+        if (nom.subPhase === 'vote' && !wasPaused) {
+          voteRescheduleEndsAt = newEndsAt;
+        }
+      }
+    }
+
     await ctx.db.patch(args.gameId, patch);
+
+    if (voteRescheduleEndsAt !== null && nom) {
+      await ctx.scheduler.runAfter(
+        voteRescheduleEndsAt - now,
+        internal.day.tallyVote,
+        {
+          gameId: args.gameId,
+          dayNumber: game.dayNumber,
+          nominationIndex: nom.nominationIndex,
+          expectedEndsAt: voteRescheduleEndsAt,
+        },
+      );
+    }
   },
 });
 

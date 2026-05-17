@@ -17,6 +17,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { SeatingCircle } from '../components/SeatingCircle';
+import { TRIGGER_DWELL_MS } from '../../convex/triggers';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Triggers'>;
 type Route = RouteProp<RootStackParamList, 'Triggers'>;
@@ -166,13 +167,24 @@ function AnnouncementView({ lines }: { lines: readonly string[] }) {
 }
 
 function Countdown({ deadline }: { deadline: number | null }) {
-  const [now, setNow] = useState(Date.now());
+  // Tick state forces re-renders; `Date.now()` is read inline so a query update
+  // arriving between ticks doesn't compute remaining against a stale `now`
+  // (which would `Math.ceil` up to duration+1 for a frame and look like the
+  // timer ticked upward before counting down).
+  const [, setTick] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 200);
+    const t = setInterval(() => setTick(n => (n + 1) % 1_000_000), 200);
     return () => clearInterval(t);
   }, []);
   if (deadline === null) return null;
-  const remaining = Math.max(0, Math.ceil((deadline - now) / 1000));
+  // Clamp the visible remaining to the configured dwell so client/server clock
+  // skew can't push `Math.ceil` one tick above the duration for the first
+  // frame after the deadline arrives (which presented as a brief upward tick).
+  const remainingMs = Math.max(
+    0,
+    Math.min(TRIGGER_DWELL_MS, deadline - Date.now()),
+  );
+  const remaining = Math.ceil(remainingMs / 1000);
   return (
     <Text
       className="text-wolf-accent text-7xl font-extrabold"

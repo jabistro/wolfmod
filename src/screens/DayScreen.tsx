@@ -68,26 +68,51 @@ function formatTime(ms: number): string {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+// Returns a fresh `Date.now()` on every render while a ticking interval forces
+// re-renders. Reading `Date.now()` inline (rather than from state) avoids a
+// stale-now bug: when a Convex query pushes a fresh `dayEndsAt` between ticks,
+// the component re-renders before the interval has updated state — so a
+// state-cached `now` would be a few hundred ms behind, making `endsAt - now`
+// larger than the true remaining and `Math.ceil` round up to `duration + 1`
+// for one frame. That presented as the timer ticking UP before counting down.
 function useNow(intervalMs = 200): number {
-  const [now, setNow] = useState(Date.now());
+  const [, setTick] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), intervalMs);
+    const t = setInterval(() => setTick(n => (n + 1) % 1_000_000), intervalMs);
     return () => clearInterval(t);
   }, [intervalMs]);
-  return now;
+  return Date.now();
 }
 
-// Day-clock remaining ms (respects pause).
+// Day-clock remaining ms (respects pause). Clamped at the configured max so
+// client/server clock skew can't produce a "tick up" on first arrival —
+// without the clamp, a client clock behind the server's makes `endsAt - now`
+// exceed the duration, and `Math.ceil` in `formatTime` rounds up to one
+// second over the configured value for the first frame.
 function dayRemainingMs(game: DayGame, now: number): number {
   if (game.dayPausedRemainingMs !== null) return game.dayPausedRemainingMs;
   if (game.dayEndsAt === null) return 0;
-  return Math.max(0, game.dayEndsAt - now);
+  const maxMs = game.config.dayDurationSec * 1000;
+  return Math.max(0, Math.min(maxMs, game.dayEndsAt - now));
 }
 
-// Trial-clock remaining ms (respects pause).
-function trialRemainingMs(nom: Nomination, now: number): number {
+// Trial-clock remaining ms (respects pause). Same skew-clamp as above; cap
+// is the per-subphase configured duration.
+function trialRemainingMs(
+  nom: Nomination,
+  game: DayGame,
+  now: number,
+): number {
   if (nom.subPhasePausedRemainingMs !== null) return nom.subPhasePausedRemainingMs;
-  return Math.max(0, nom.subPhaseEndsAt - now);
+  const maxMs =
+    nom.subPhase === 'accusation'
+      ? game.config.accusationSec * 1000
+      : nom.subPhase === 'defense'
+        ? game.config.defenseSec * 1000
+        : nom.subPhase === 'vote'
+          ? game.config.voteTimerSec * 1000
+          : Infinity;
+  return Math.max(0, Math.min(maxMs, nom.subPhaseEndsAt - now));
 }
 
 export default function DayScreen() {
@@ -614,7 +639,7 @@ function TrialView({
 
   const isAccusation = nomination.subPhase === 'accusation';
   const phaseLabel = isAccusation ? 'ACCUSATION' : 'DEFENSE';
-  const remaining = trialRemainingMs(nomination, now);
+  const remaining = trialRemainingMs(nomination, game, now);
   const paused = nomination.subPhasePausedRemainingMs !== null;
   const expired = !paused && remaining <= 0;
   const color = expired ? '#B03A2E' : '#F0EDE8';
@@ -801,7 +826,7 @@ function VoteView({
   const [busy, setBusy] = useState<'toggle' | 'reset' | null>(null);
   const [cogOpen, setCogOpen] = useState(false);
 
-  const remaining = trialRemainingMs(nomination, now);
+  const remaining = trialRemainingMs(nomination, game, now);
   const paused = nomination.subPhasePausedRemainingMs !== null;
   const notStartedYet = paused && remaining === game.config.voteTimerSec * 1000;
 
