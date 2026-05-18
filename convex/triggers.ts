@@ -15,6 +15,7 @@ import {
   applyWinIfReached,
   triggerVisibility,
   initializeDayClock,
+  flagCubDeathIfApplicable,
   type TriggerRole,
 } from './helpers';
 import { isWolfTeam } from '../src/data/v1Roles';
@@ -204,6 +205,9 @@ async function applyTriggerDeath(
     result,
     resolvedAt: Date.now(),
   });
+  // Wolf Cub vengeance: if the cub died from a Hunter/HW shot or an MD
+  // cascade, remaining wolves get 2 kills on the next wolves step.
+  await flagCubDeathIfApplicable(ctx, gameId, [targetId]);
   return true;
 }
 

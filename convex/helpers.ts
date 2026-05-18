@@ -49,6 +49,29 @@ export function isBotName(name: string): boolean {
   return /^Bot \d+$/.test(name);
 }
 
+/**
+ * If any of the just-died player ids belonged to a Wolf Cub, flip the
+ * `wolfCubVengeance` flag on the game. Called from every site that applies
+ * deaths (morning resolution, lynch tally, trigger cascades) so the flag
+ * fires regardless of how the cub died. The flag is honored at the next
+ * wolves step (2 kills) and cleared at the start of the next morning
+ * resolution.
+ */
+export async function flagCubDeathIfApplicable(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  justDiedIds: Id<'players'>[],
+): Promise<void> {
+  if (justDiedIds.length === 0) return;
+  for (const id of justDiedIds) {
+    const p = await ctx.db.get(id);
+    if (p?.role === 'Wolf Cub') {
+      await ctx.db.patch(gameId, { wolfCubVengeance: true });
+      return;
+    }
+  }
+}
+
 // ───── Day-phase config defaults ───────────────────────────────────────────
 //
 // All four are stored as optional fields on the game record so a host can

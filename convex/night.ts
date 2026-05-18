@@ -3,6 +3,7 @@ import {
   mutation,
   query,
   type MutationCtx,
+  type QueryCtx,
 } from './_generated/server';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
@@ -14,6 +15,7 @@ import {
   isTriggerRole,
   recordWinIfReached,
   initializeDayClock,
+  flagCubDeathIfApplicable,
 } from './helpers';
 import {
   enqueueTriggersForDeaths,
@@ -131,7 +133,7 @@ function stepIsInGame(step: NightStep, selectedRoles: string[]): boolean {
 // ───── Step completion ──────────────────────────────────────────────────────
 
 async function getNightActions(
-  ctx: MutationCtx,
+  ctx: MutationCtx | QueryCtx,
   gameId: Id<'games'>,
   nightNumber: number,
   actionType?: string,
@@ -143,6 +145,27 @@ async function getNightActions(
     )
     .collect();
   return actionType ? all.filter(a => a.actionType === actionType) : all;
+}
+
+/**
+ * How many wolf kills the wolves step must record before completing.
+ *
+ * Normal night: 1. Wolf Cub vengeance night (cub died sometime before this
+ * night's wolves step): 2. Clamped to the number of alive non-wolves so a
+ * 1-target board doesn't hang. Diseased blocking is checked separately —
+ * when blocked, the step uses a `wolf_blocked` row and this helper isn't
+ * consulted.
+ */
+function computeRequiredKills(
+  game: Doc<'games'>,
+  alivePlayers: Player[],
+): number {
+  const aliveNonWolves = alivePlayers.filter(
+    p => p.role && !isWolfTeam(p.role),
+  ).length;
+  if (aliveNonWolves === 0) return 0;
+  const base = game.wolfCubVengeance ? 2 : 1;
+  return Math.min(base, aliveNonWolves);
 }
 
 async function isStepComplete(
@@ -157,8 +180,6 @@ async function isStepComplete(
       // Defensive: if no wolves alive, the step is vacuously complete. In
       // practice this should be caught by the win-condition first.
       if (actors.length === 0) return true;
-      const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
-      if (kills.length > 0) return true;
       // Diseased carryover: enterStep inserted a wolf_blocked row instead of
       // letting wolves pick — that also completes the step.
       const blocked = await getNightActions(
@@ -167,7 +188,19 @@ async function isStepComplete(
         nightNumber,
         'wolf_blocked',
       );
-      return blocked.length > 0;
+      if (blocked.length > 0) return true;
+      const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
+      const game = await ctx.db.get(gameId);
+      if (!game) return kills.length > 0;
+      const allPlayers = await ctx.db
+        .query('players')
+        .withIndex('by_game', q => q.eq('gameId', gameId))
+        .collect();
+      const required = computeRequiredKills(
+        game,
+        allPlayers.filter(p => p.alive),
+      );
+      return kills.length >= required;
     }
     case 'seer': {
       const checks = await getNightActions(ctx, gameId, nightNumber, 'seer_check');
@@ -284,22 +317,34 @@ async function autoResolveStep(
   const now = Date.now();
   switch (step) {
     case 'wolves': {
+      const game = await ctx.db.get(gameId);
+      const required = game
+        ? computeRequiredKills(game, alivePlayers)
+        : 1;
+      if (required === 0) return;
       const candidates = alivePlayers.filter(p => !isWolfTeam(p.role || ''));
-      const target = pickRandom(candidates);
-      if (!target) return;
+      // Pick `required` distinct random victims. Shuffle by sort + random.
+      const shuffled = [...candidates].sort(() => Math.random() - 0.5);
+      const picks = shuffled.slice(0, required);
+      if (picks.length === 0) return;
+      // Bot wolf votes get pointed at the FIRST pick so the picker UI shows
+      // a clean consensus snapshot if anyone refreshes mid-resolve. (The
+      // second kill is recorded directly as a wolf_kill row.)
       for (const wolf of actors) {
         await ctx.db.patch(wolf._id, {
-          roleState: { ...(wolf.roleState ?? {}), wolfVote: target._id },
+          roleState: { ...(wolf.roleState ?? {}), wolfVote: picks[0]._id },
         });
       }
-      await ctx.db.insert('nightActions', {
-        gameId,
-        nightNumber,
-        actorPlayerId: actors[0]._id,
-        actionType: 'wolf_kill',
-        targetPlayerId: target._id,
-        resolvedAt: now,
-      });
+      for (const victim of picks) {
+        await ctx.db.insert('nightActions', {
+          gameId,
+          nightNumber,
+          actorPlayerId: actors[0]._id,
+          actionType: 'wolf_kill',
+          targetPlayerId: victim._id,
+          resolvedAt: now,
+        });
+      }
       return;
     }
     case 'seer': {
@@ -478,6 +523,14 @@ async function resolveMorning(
   if (gameAtStart?.wolvesBlockedNextNight) {
     await ctx.db.patch(gameId, { wolvesBlockedNextNight: false });
   }
+  // Reset Wolf Cub vengeance. The flag was honored when wolves entered
+  // their step tonight (requiredKills = 2); we consume it here whether or
+  // not it was actually used. If the cub dies tonight (or via a death
+  // trigger cascade in the same morning), `flagCubDeathIfApplicable`
+  // below sets it back on for the following night.
+  if (gameAtStart?.wolfCubVengeance) {
+    await ctx.db.patch(gameId, { wolfCubVengeance: false });
+  }
 
   // Build a set of death candidates from every kill source recorded for the
   // night, then filter through protection (BG, future: Tough Guy, etc.) and
@@ -644,6 +697,12 @@ async function resolveMorning(
     await ctx.db.patch(gameId, { wolvesBlockedNextNight: true });
     break;
   }
+
+  // Wolf Cub trigger. If the cub died from any source this morning,
+  // remaining wolves get 2 kills next night. The flag sits alongside the
+  // Diseased flag — at the next wolves step, Diseased block takes priority
+  // (vengeance is wasted in that case, per house rules).
+  await flagCubDeathIfApplicable(ctx, gameId, newDeadIds);
 
   // Persist PI usage across nights — once they investigate, they're spent
   // for the rest of the game.
@@ -1044,6 +1103,36 @@ export const submitWolfVote = mutation({
     if (isWolfTeam(target.role || '')) {
       throw new Error('Wolves cannot kill each other.');
     }
+    // On a Wolf Cub vengeance night the wolves pick TWO victims sequentially.
+    // Reject voting for someone who was already locked in as kill #1, and
+    // reject any vote once the night's kill quota has already been met (the
+    // step is just waiting for its dwell to expire).
+    const existingKills = await getNightActions(
+      ctx,
+      args.gameId,
+      game.nightNumber,
+      'wolf_kill',
+    );
+    const allPlayers = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    const requiredKillsNow = computeRequiredKills(
+      game,
+      allPlayers.filter(p => p.alive),
+    );
+    if (existingKills.length >= requiredKillsNow) {
+      throw new Error("Tonight's kills are already sealed.");
+    }
+    const lockedTargets = new Set<string>(
+      existingKills
+        .map(k => k.targetPlayerId as Id<'players'> | undefined)
+        .filter((id): id is Id<'players'> => !!id)
+        .map(id => id as unknown as string),
+    );
+    if (lockedTargets.has(args.targetPlayerId as unknown as string)) {
+      throw new Error('That player is already a kill target tonight.');
+    }
 
     await ctx.db.patch(me._id, {
       roleState: { ...(me.roleState ?? {}), wolfVote: args.targetPlayerId },
@@ -1090,8 +1179,26 @@ export const submitWolfVote = mutation({
         targetPlayerId: args.targetPlayerId,
         resolvedAt: Date.now(),
       });
-      // Try to advance immediately. If the dwell hasn't elapsed yet,
+      // Wolf Cub vengeance: if more kills are still required, reset every
+      // wolf's wolfVote so the picker re-prompts for the next target. Do
+      // NOT advance the step. Otherwise (required kills satisfied), try
+      // to advance immediately — if the dwell hasn't elapsed yet,
       // maybeAdvance is a no-op and the scheduled dwellTick handles it.
+      const required = computeRequiredKills(
+        game,
+        refreshed.filter(p => p.alive),
+      );
+      const killsNow = existingKills.length + 1;
+      if (killsNow < required) {
+        for (const w of wolvesNow) {
+          if (w.roleState && 'wolfVote' in w.roleState) {
+            const next = { ...w.roleState };
+            delete next.wolfVote;
+            await ctx.db.patch(w._id, { roleState: next });
+          }
+        }
+        return;
+      }
       await maybeAdvance(ctx, args.gameId);
     }
   },
@@ -1788,6 +1895,10 @@ export const submitWitchSave = mutation({
   args: {
     gameId: v.id('games'),
     callerDeviceClientId: v.string(),
+    // Which of tonight's wolf victims to save. On a normal night there's
+    // only one, but on a Wolf Cub vengeance night there are two — the
+    // potion saves exactly one (no two-for-one).
+    targetPlayerId: v.id('players'),
   },
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
@@ -1814,22 +1925,32 @@ export const submitWitchSave = mutation({
       throw new Error('Your turn is already over.');
     }
 
-    // Save target = the wolf's chosen victim for tonight.
+    // Save target must be one of the wolves' chosen victims for tonight.
     const kills = await getNightActions(
       ctx,
       args.gameId,
       game.nightNumber,
       'wolf_kill',
     );
-    const victimId = kills[0]?.targetPlayerId;
-    if (!victimId) throw new Error('No victim to save tonight.');
+    const victimIds = new Set<string>(
+      kills
+        .map(k => k.targetPlayerId as Id<'players'> | undefined)
+        .filter((id): id is Id<'players'> => !!id)
+        .map(id => id as unknown as string),
+    );
+    if (victimIds.size === 0) {
+      throw new Error('No victim to save tonight.');
+    }
+    if (!victimIds.has(args.targetPlayerId as unknown as string)) {
+      throw new Error('Target is not a wolf victim tonight.');
+    }
 
     await ctx.db.insert('nightActions', {
       gameId: args.gameId,
       nightNumber: game.nightNumber,
       actorPlayerId: me._id,
       actionType: 'witch_save',
-      targetPlayerId: victimId,
+      targetPlayerId: args.targetPlayerId,
       resolvedAt: Date.now(),
     });
   },
@@ -2212,6 +2333,9 @@ export const nightView = query({
     // Wolf-step live state: visible to alive wolves and to dead spectators
     // during the wolves step. `blocked` is true when a Diseased was eaten
     // last night — wolves see a sickened-pack view in place of the picker.
+    // `requiredKills` and `killsSoFar` together signal a Wolf Cub vengeance
+    // night: when the cub died before this night, requiredKills is 2 and
+    // the picker walks the wolves through two sequential targets.
     let wolfState:
       | {
           wolves: Array<{
@@ -2222,6 +2346,8 @@ export const nightView = query({
             currentVote?: Id<'players'>;
           }>;
           blocked: boolean;
+          requiredKills: number;
+          killsSoFar: Array<{ targetId: Id<'players'>; targetName: string }>;
         }
       | null = null;
     const wolfPerspective =
@@ -2229,6 +2355,23 @@ export const nightView = query({
       ((me.alive && me.role && isWolfTeam(me.role)) || !me.alive);
     if (wolfPerspective) {
       const aliveWolves = alive.filter(p => p.role && isWolfTeam(p.role));
+      const required = computeRequiredKills(game, alive);
+      const killRows = await getNightActions(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        'wolf_kill',
+      );
+      const killsSoFar: Array<{
+        targetId: Id<'players'>;
+        targetName: string;
+      }> = [];
+      for (const k of killRows) {
+        const tid = k.targetPlayerId as Id<'players'> | undefined;
+        if (!tid) continue;
+        const t = players.find(p => p._id === tid);
+        if (t) killsSoFar.push({ targetId: tid, targetName: t.name });
+      }
       wolfState = {
         wolves: aliveWolves.map(w => ({
           _id: w._id,
@@ -2238,6 +2381,8 @@ export const nightView = query({
           currentVote: w.roleState?.wolfVote as Id<'players'> | undefined,
         })),
         blocked: !!game.wolvesBlockedNextNight,
+        requiredKills: required,
+        killsSoFar,
       };
     }
 
@@ -2381,17 +2526,18 @@ export const nightView = query({
       };
     }
 
-    // Witch-only state. Tonight's victim is hidden once save has been used
+    // Witch-only state. Tonight's victims are hidden once save has been used
     // (per house rules — after using save, witch no longer sees the wolf
-    // victim). savedTonight/poisonedTonight track in-progress decisions so
-    // the picker can hide each button independently.
+    // victim). On a Wolf Cub vengeance night there are TWO victims; the
+    // potion saves exactly one. savedTonight/poisonedTonight track
+    // in-progress decisions so the picker can hide each button independently.
     let witchState: {
       saveUsed: boolean;
       poisonUsed: boolean;
       savedTonight: boolean;
       poisonedTonight: boolean;
       hasActedThisNight: boolean;
-      tonightVictim: { _id: Id<'players'>; name: string } | null;
+      tonightVictims: Array<{ _id: Id<'players'>; name: string }>;
       tonightPoisonTarget: { _id: Id<'players'>; name: string } | null;
     } | null = null;
     const witchActor = actorForRole('Witch', 'witch');
@@ -2417,13 +2563,16 @@ export const nightView = query({
         a =>
           a.actorPlayerId === witchActor._id && a.actionType === 'witch_done',
       );
-      let tonightVictim: { _id: Id<'players'>; name: string } | null = null;
+      const tonightVictims: Array<{ _id: Id<'players'>; name: string }> = [];
       if (!saveUsed) {
         const kills = myActions.filter(a => a.actionType === 'wolf_kill');
-        const victimId = kills[0]?.targetPlayerId;
-        if (victimId) {
+        for (const k of kills) {
+          const victimId = k.targetPlayerId as Id<'players'> | undefined;
+          if (!victimId) continue;
           const victim = playerById.get(victimId);
-          if (victim) tonightVictim = { _id: victim._id, name: victim.name };
+          if (victim) {
+            tonightVictims.push({ _id: victim._id, name: victim.name });
+          }
         }
       }
       let tonightPoisonTarget:
@@ -2449,7 +2598,7 @@ export const nightView = query({
         savedTonight,
         poisonedTonight,
         hasActedThisNight,
-        tonightVictim,
+        tonightVictims,
         tonightPoisonTarget,
       };
     }

@@ -23,6 +23,7 @@ export const V1_ROLES = [
   'Werewolf',
   'Wolf Man',
   'Hunter Wolf',
+  'Wolf Cub',
   // Solo / wolf-aligned
   'Minion',
   'Reviler',
@@ -36,10 +37,15 @@ export function isV1Role(name: string): name is V1Role {
 
 /**
  * Roles that wake with the wolves at night and see each other (with their
- * specific roles) during the role-reveal setup. v2 will add Alpha Wolf and
- * Wolf Cub here. The Minion knows who's on this list but is not on it.
+ * specific roles) during the role-reveal setup. v2 will add Alpha Wolf
+ * here. The Minion knows who's on this list but is not on it.
  */
-export const WOLF_TEAM_ROLES = ['Werewolf', 'Wolf Man', 'Hunter Wolf'] as const;
+export const WOLF_TEAM_ROLES = [
+  'Werewolf',
+  'Wolf Man',
+  'Hunter Wolf',
+  'Wolf Cub',
+] as const;
 
 export function isWolfTeam(role: string): boolean {
   return (WOLF_TEAM_ROLES as readonly string[]).includes(role);

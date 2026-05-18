@@ -93,6 +93,17 @@ export default defineSchema({
     wolvesBlockedNextNight: v.optional(v.boolean()),
 
     /**
+     * Carryover from a Wolf Cub death. Flipped on whenever a Wolf Cub
+     * player dies (any cause — wolf can't kill teammate, but lynch, witch
+     * poison, hunter shot, MD cascade, etc. all qualify). Read at the
+     * following night's wolves step: while set, `requiredKills` is 2
+     * instead of 1. Diseased block takes priority — if both flags are
+     * set, the night is blocked and the vengeance is wasted. Cleared at
+     * the start of the next morning resolution.
+     */
+    wolfCubVengeance: v.optional(v.boolean()),
+
+    /**
      * Death-trigger queue. Populated when Hunter / Hunter Wolf / Mad
      * Destroyer dies (overnight or via lynch). Ordered Hunter/HW first
      * (public — their death is announced), MD last (silent — MD's role

@@ -14,6 +14,7 @@ import {
   isTriggerRole,
   dayConfigOf,
   DAY_CONFIG_DEFAULTS,
+  flagCubDeathIfApplicable,
 } from './helpers';
 import { enterStep } from './night';
 import {
@@ -579,6 +580,8 @@ export const tallyVote = internalMutation({
       result: { cause: 'lynch', phase: 'day', dayNumber: game.dayNumber },
       resolvedAt: Date.now(),
     });
+    // Wolf Cub vengeance: lynching the cub triggers 2 wolf kills next night.
+    await flagCubDeathIfApplicable(ctx, args.gameId, [targetId]);
 
     if (target.role && isTriggerRole(target.role)) {
       await ctx.db.patch(args.gameId, { triggersFollowUp: 'night' });

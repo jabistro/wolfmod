@@ -135,6 +135,8 @@ export default function NightScreen() {
             totalSeats={game.playerCount}
             meId={me._id}
             wolves={wolfState.wolves}
+            requiredKills={wolfState.requiredKills}
+            killsSoFar={wolfState.killsSoFar}
             isGhost={isGhost}
           />
         )
@@ -546,6 +548,8 @@ function WolvesPicker({
   totalSeats,
   meId,
   wolves,
+  requiredKills,
+  killsSoFar,
   isGhost,
 }: {
   gameId: Id<'games'>;
@@ -561,6 +565,8 @@ function WolvesPicker({
     isMe: boolean;
     currentVote?: Id<'players'>;
   }>;
+  requiredKills: number;
+  killsSoFar: Array<{ targetId: Id<'players'>; targetName: string }>;
   isGhost?: boolean;
 }) {
   const submitVote = useMutation(api.night.submitWolfVote);
@@ -570,6 +576,18 @@ function WolvesPicker({
   const consensus =
     wolves.length > 0 &&
     wolves.every(w => w.currentVote && w.currentVote === wolves[0].currentVote);
+  const vengeance = requiredKills > 1;
+  const allKillsLocked = killsSoFar.length >= requiredKills;
+  const killNumber = killsSoFar.length + 1;
+  // Hide already-locked-in victims from the picker for kill #2.
+  const lockedIds = new Set<string>(
+    killsSoFar.map(k => k.targetId as unknown as string),
+  );
+  const selectableForThisKill = new Set(
+    targetables
+      .map(t => t._id as unknown as string)
+      .filter(id => !lockedIds.has(id)),
+  );
 
   async function handleVote(targetId: Id<'players'>) {
     if (submitting) return;
@@ -590,12 +608,35 @@ function WolvesPicker({
   return (
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
+        {vengeance && (
+          <View className="bg-wolf-card rounded-xl px-4 py-3 mb-3 border border-wolf-red">
+            <Text className="text-wolf-red text-xs font-bold tracking-widest text-center">
+              WOLF CUB VENGEANCE
+            </Text>
+            <Text className="text-wolf-text text-sm text-center mt-1">
+              {allKillsLocked
+                ? `${requiredKills} KILLS LOCKED`
+                : `KILL ${killNumber} OF ${requiredKills}`}
+            </Text>
+            {killsSoFar.length > 0 && (
+              <Text className="text-wolf-muted text-xs text-center mt-2">
+                {allKillsLocked ? 'Victims: ' : 'Already taken: '}
+                <Text className="text-wolf-accent">
+                  {killsSoFar.map(k => k.targetName).join(', ')}
+                </Text>
+              </Text>
+            )}
+          </View>
+        )}
+
         <Text className="text-wolf-text text-base text-center mt-2 mb-4">
-          {consensus
-            ? 'Consensus reached. Sealing the kill…'
-            : isGhost
-              ? 'The wolves are voting. They must agree.'
-              : 'Tap a player to vote. All wolves must agree.'}
+          {allKillsLocked
+            ? 'Sealing the night…'
+            : consensus
+              ? 'Consensus reached. Sealing the kill…'
+              : isGhost
+                ? 'The wolves are voting. They must agree.'
+                : 'Tap a player to vote. All wolves must agree.'}
         </Text>
 
         {/* Wolf-pack awareness panel */}
@@ -635,9 +676,11 @@ function WolvesPicker({
             players={alivePlayers}
             meId={meId}
             selectedId={myVote}
-            selectableIds={new Set(targetables.map(t => t._id as unknown as string))}
+            selectableIds={selectableForThisKill}
             onPress={
-              !submitting && !consensus ? p => handleVote(p._id) : undefined
+              !submitting && !consensus && !allKillsLocked
+                ? p => handleVote(p._id)
+                : undefined
             }
           />
         </View>
@@ -1607,7 +1650,7 @@ function WitchPicker({
     savedTonight: boolean;
     poisonedTonight: boolean;
     hasActedThisNight: boolean;
-    tonightVictim: { _id: Id<'players'>; name: string } | null;
+    tonightVictims: Array<{ _id: Id<'players'>; name: string }>;
     tonightPoisonTarget: { _id: Id<'players'>; name: string } | null;
   };
   isGhost?: boolean;
@@ -1618,7 +1661,14 @@ function WitchPicker({
   const submitDone = useMutation(api.night.submitWitchDone);
 
   const [submitting, setSubmitting] = useState(false);
-  const [confirmSave, setConfirmSave] = useState(false);
+  // When there are 2 victims, confirmSave holds the chosen one (witch must
+  // pick which to save — no two-for-one). Null = closed; object = open with
+  // that victim queued.
+  const [confirmSave, setConfirmSave] = useState<{
+    id: Id<'players'>;
+    name: string;
+  } | null>(null);
+  const [savePickerOpen, setSavePickerOpen] = useState(false);
   const [poisonPickerOpen, setPoisonPickerOpen] = useState(false);
   const [confirmPoison, setConfirmPoison] = useState<{
     id: Id<'players'>;
@@ -1626,10 +1676,15 @@ function WitchPicker({
   } | null>(null);
 
   async function handleSave() {
+    if (!confirmSave) return;
     setSubmitting(true);
     try {
-      await submitSave({ gameId, callerDeviceClientId: deviceClientId });
-      setConfirmSave(false);
+      await submitSave({
+        gameId,
+        callerDeviceClientId: deviceClientId,
+        targetPlayerId: confirmSave.id,
+      });
+      setConfirmSave(null);
     } catch (e) {
       showAlert('Could not save', e instanceof Error ? e.message : String(e));
     } finally {
@@ -1687,18 +1742,27 @@ function WitchPicker({
     );
   }
 
+  const victims = witchState.tonightVictims;
   const canSave =
-    !witchState.saveUsed &&
-    !witchState.savedTonight &&
-    witchState.tonightVictim !== null;
+    !witchState.saveUsed && !witchState.savedTonight && victims.length > 0;
   const canPoison = !witchState.poisonUsed && !witchState.poisonedTonight;
+  // Single-victim path: tap "USE SAVE POTION" goes straight to the
+  // confirmation modal with that victim queued. Multi-victim (vengeance):
+  // tap opens a picker so the witch chooses one (no two-for-one).
+  function openSaveFlow() {
+    if (victims.length === 1) {
+      setConfirmSave({ id: victims[0]._id, name: victims[0].name });
+    } else if (victims.length > 1) {
+      setSavePickerOpen(true);
+    }
+  }
 
   return (
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
         <View className="bg-wolf-card rounded-xl px-4 py-3 mt-2 mb-4">
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1">
-            TONIGHT'S VICTIM
+            {victims.length > 1 ? "TONIGHT'S VICTIMS" : "TONIGHT'S VICTIM"}
           </Text>
           {witchState.saveUsed ? (
             <Text className="text-wolf-muted text-sm italic">
@@ -1706,10 +1770,22 @@ function WitchPicker({
                 ? "The wolves' victim is hidden — the Witch's save potion is spent."
                 : "You can no longer see the wolves' victim — your save potion is spent."}
             </Text>
-          ) : witchState.tonightVictim ? (
-            <Text className="text-wolf-text text-2xl font-bold tracking-widest">
-              {witchState.tonightVictim.name.toUpperCase()}
-            </Text>
+          ) : victims.length > 0 ? (
+            <View style={{ gap: 4 }}>
+              {victims.map(v => (
+                <Text
+                  key={v._id}
+                  className="text-wolf-text text-2xl font-bold tracking-widest"
+                >
+                  {v.name.toUpperCase()}
+                </Text>
+              ))}
+              {victims.length > 1 && (
+                <Text className="text-wolf-muted text-xs mt-1">
+                  Your save potion can only spare one.
+                </Text>
+              )}
+            </View>
           ) : (
             <Text className="text-wolf-muted text-sm italic">
               No victim tonight.
@@ -1722,7 +1798,7 @@ function WitchPicker({
         </Text>
         <View style={{ gap: 10 }}>
           <TouchableOpacity
-            onPress={() => setConfirmSave(true)}
+            onPress={openSaveFlow}
             disabled={!canSave || submitting}
             activeOpacity={0.75}
             className="bg-wolf-card rounded-xl px-4 py-4"
@@ -1796,6 +1872,57 @@ function WitchPicker({
         </View>
       )}
 
+      {/* Save victim picker (vengeance night — choose which to save) */}
+      <Modal
+        visible={savePickerOpen && !confirmSave}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSavePickerOpen(false)}
+      >
+        <Pressable
+          onPress={() => setSavePickerOpen(false)}
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <Pressable
+            onPress={e => e.stopPropagation()}
+            className="bg-wolf-surface rounded-2xl w-full p-6"
+          >
+            <Text className="text-wolf-text text-lg font-bold mb-1 text-center">
+              Save which victim?
+            </Text>
+            <Text className="text-wolf-muted text-xs text-center mb-4">
+              Your potion can only spare one.
+            </Text>
+            <View style={{ gap: 10 }}>
+              {victims.map(v => (
+                <TouchableOpacity
+                  key={v._id}
+                  onPress={() => {
+                    setConfirmSave({ id: v._id, name: v.name });
+                    setSavePickerOpen(false);
+                  }}
+                  className="bg-wolf-card rounded-xl py-4 items-center"
+                  style={{ borderWidth: 1, borderColor: '#5BA0E5' }}
+                >
+                  <Text className="text-wolf-text text-lg font-bold tracking-widest">
+                    {v.name.toUpperCase()}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity onPress={() => setSavePickerOpen(false)} className="mt-3 py-2">
+              <Text className="text-wolf-muted text-center">Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Save confirmation */}
       {confirmSave && (
         <View
@@ -1815,14 +1942,14 @@ function WitchPicker({
             SAVE
           </Text>
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
-            {witchState.tonightVictim?.name.toUpperCase()}
+            {confirmSave.name.toUpperCase()}
           </Text>
           <Text className="text-wolf-muted text-sm text-center mb-10">
             This is your only save potion.
           </Text>
           <View className="flex-row" style={{ gap: 14 }}>
             <TouchableOpacity
-              onPress={() => setConfirmSave(false)}
+              onPress={() => setConfirmSave(null)}
               disabled={submitting}
               className="bg-wolf-card rounded-xl py-4 px-10"
               style={{ borderWidth: 1, borderColor: '#3A3A48' }}
