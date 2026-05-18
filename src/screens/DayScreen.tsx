@@ -391,7 +391,12 @@ function DayClockBar({
             className="bg-wolf-surface rounded-full items-center justify-center"
             style={{ width: 40, height: 40, opacity: busy === 'reset' ? 0.4 : 1 }}
           >
-            <Text className="text-wolf-text text-base">↺</Text>
+            <Text
+              className="text-wolf-text text-base"
+              style={{ lineHeight: 16, marginTop: -2, includeFontPadding: false }}
+            >
+              ↺
+            </Text>
           </TouchableOpacity>
         </View>
       )}
@@ -756,7 +761,12 @@ function TrialView({
                 justifyContent: 'center',
               }}
             >
-              <Text className="text-wolf-text text-xl">↺</Text>
+              <Text
+                className="text-wolf-text text-xl"
+                style={{ lineHeight: 20, marginTop: -3, includeFontPadding: false }}
+              >
+                ↺
+              </Text>
             </View>
           </TouchableOpacity>
         )}
@@ -932,7 +942,12 @@ function VoteView({
                   justifyContent: 'center',
                 }}
               >
-                <Text className="text-wolf-text text-lg">↺</Text>
+                <Text
+                  className="text-wolf-text text-lg"
+                  style={{ lineHeight: 18, marginTop: -2, includeFontPadding: false }}
+                >
+                  ↺
+                </Text>
               </View>
             </TouchableOpacity>
           </View>
