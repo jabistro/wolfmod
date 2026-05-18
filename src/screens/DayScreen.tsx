@@ -19,6 +19,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { SeatingCircle } from '../components/SeatingCircle';
 import TimersConfigModal from '../components/TimersConfigModal';
+import BuildModal from '../components/BuildModal';
 import { showAlert } from '../components/ThemedAlert';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Day'>;
@@ -45,6 +46,7 @@ type DayGame = {
   nightNumber: number;
   winner: 'village' | 'wolf' | undefined;
   playerCount: number;
+  selectedRoles: string[];
   voteDwellEndsAt: number | null;
   pendingTriggerCount: number;
   dayEndsAt: number | null;
@@ -278,11 +280,13 @@ function DayHeader({
   mode,
   showCog,
   onCogPress,
+  onBuildPress,
 }: {
   dayNumber: number;
   mode: string;
   showCog?: boolean;
   onCogPress?: () => void;
+  onBuildPress?: () => void;
 }) {
   return (
     <View className="px-4 pt-10 pb-3" style={{ position: 'relative' }}>
@@ -294,14 +298,35 @@ function DayHeader({
           {mode}
         </Text>
       </View>
-      {showCog && (
-        <TouchableOpacity
-          onPress={onCogPress}
-          style={{ position: 'absolute', right: 16, top: 40, padding: 8 }}
-        >
-          <Text style={{ color: '#8A8590', fontSize: 22 }}>⚙</Text>
-        </TouchableOpacity>
-      )}
+      <View
+        style={{
+          position: 'absolute',
+          right: 16,
+          top: 40,
+          flexDirection: 'row',
+          alignItems: 'center',
+        }}
+      >
+        {showCog && (
+          <TouchableOpacity onPress={onCogPress} style={{ padding: 8 }}>
+            <Text style={{ color: '#8A8590', fontSize: 22 }}>⚙</Text>
+          </TouchableOpacity>
+        )}
+        {onBuildPress && (
+          <TouchableOpacity onPress={onBuildPress} style={{ padding: 8 }}>
+            <Text
+              style={{
+                color: '#8A8590',
+                fontSize: 12,
+                fontWeight: '700',
+                letterSpacing: 2,
+              }}
+            >
+              BUILD
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 }
@@ -432,6 +457,7 @@ function DiscussionView({
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [cogOpen, setCogOpen] = useState(false);
+  const [buildOpen, setBuildOpen] = useState(false);
 
   const dayRemMs = dayRemainingMs(game, now);
   const dayExpired = dayRemMs <= 0;
@@ -462,6 +488,7 @@ function DiscussionView({
         mode="DISCUSSION"
         showCog={isHost}
         onCogPress={() => setCogOpen(true)}
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       <DayClockBar
@@ -615,6 +642,12 @@ function DiscussionView({
         deviceClientId={deviceClientId}
         initial={game.config}
       />
+
+      <BuildModal
+        visible={buildOpen}
+        onClose={() => setBuildOpen(false)}
+        selectedRoles={game.selectedRoles}
+      />
     </SafeAreaView>
   );
 }
@@ -641,6 +674,7 @@ function TrialView({
   const endDefense = useMutation(api.day.endDefense);
   const [busy, setBusy] = useState<'toggle' | 'reset' | 'advance' | null>(null);
   const [cogOpen, setCogOpen] = useState(false);
+  const [buildOpen, setBuildOpen] = useState(false);
 
   const isAccusation = nomination.subPhase === 'accusation';
   const phaseLabel = isAccusation ? 'ACCUSATION' : 'DEFENSE';
@@ -705,6 +739,7 @@ function TrialView({
         mode="ON TRIAL"
         showCog={isHost}
         onCogPress={() => setCogOpen(true)}
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       <View className="items-center mb-2">
@@ -807,6 +842,12 @@ function TrialView({
         deviceClientId={deviceClientId}
         initial={game.config}
       />
+
+      <BuildModal
+        visible={buildOpen}
+        onClose={() => setBuildOpen(false)}
+        selectedRoles={game.selectedRoles}
+      />
     </SafeAreaView>
   );
 }
@@ -835,6 +876,7 @@ function VoteView({
   const [submitting, setSubmitting] = useState<'lives' | 'dies' | null>(null);
   const [busy, setBusy] = useState<'toggle' | 'reset' | null>(null);
   const [cogOpen, setCogOpen] = useState(false);
+  const [buildOpen, setBuildOpen] = useState(false);
 
   const remaining = trialRemainingMs(nomination, game, now);
   const paused = nomination.subPhasePausedRemainingMs !== null;
@@ -889,6 +931,7 @@ function VoteView({
         mode="TIME TO VOTE"
         showCog={isHost}
         onCogPress={() => setCogOpen(true)}
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       <TrialStatusBar
@@ -1055,6 +1098,12 @@ function VoteView({
         deviceClientId={deviceClientId}
         initial={game.config}
       />
+
+      <BuildModal
+        visible={buildOpen}
+        onClose={() => setBuildOpen(false)}
+        selectedRoles={game.selectedRoles}
+      />
     </SafeAreaView>
   );
 }
@@ -1082,6 +1131,7 @@ function ResultsView({
   const insets = useSafeAreaInsets();
   const continueGame = useMutation(api.day.continueGameAfterVote);
   const [submitting, setSubmitting] = useState(false);
+  const [buildOpen, setBuildOpen] = useState(false);
   const now = useNow();
 
   // Mid-flight trigger announcement window (existing behavior).
@@ -1119,7 +1169,11 @@ function ResultsView({
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
-      <DayHeader dayNumber={game.dayNumber} mode="VOTE RESULT" />
+      <DayHeader
+        dayNumber={game.dayNumber}
+        mode="VOTE RESULT"
+        onBuildPress={() => setBuildOpen(true)}
+      />
 
       <TrialStatusBar
         dayRemMs={dayRemainingMs(game, now)}
@@ -1293,6 +1347,12 @@ function ResultsView({
       <LynchTriggerOverlay
         gameId={game._id}
         deviceClientId={deviceClientId}
+      />
+
+      <BuildModal
+        visible={buildOpen}
+        onClose={() => setBuildOpen(false)}
+        selectedRoles={game.selectedRoles}
       />
     </SafeAreaView>
   );

@@ -826,6 +826,7 @@ export const dayView = query({
         nightNumber: game.nightNumber,
         winner: game.winner,
         playerCount: game.playerCount,
+        selectedRoles: game.selectedRoles,
         voteDwellEndsAt: game.voteDwellEndsAt ?? null,
         pendingTriggerCount: game.pendingDeathTriggers?.length ?? 0,
         // Day-clock state
