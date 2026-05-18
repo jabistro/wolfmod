@@ -1,5 +1,5 @@
 import { mutation, query, type MutationCtx } from './_generated/server';
-import { v } from 'convex/values';
+import { v, ConvexError } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import { isWolfTeam, teamForRole } from '../src/data/v1Roles';
 import {
@@ -95,8 +95,8 @@ export const joinGame = mutation({
       .query('games')
       .withIndex('by_room_code', q => q.eq('roomCode', code))
       .first();
-    if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'lobby') throw new Error('Game has already started.');
+    if (!game) throw new ConvexError("No game with that code. Double-check it with the host.");
+    if (game.phase !== 'lobby') throw new ConvexError('Game has already started.');
 
     // Reconnect: same device already in this game
     const existing = await ctx.db
@@ -110,17 +110,17 @@ export const joinGame = mutation({
     }
 
     const trimmedName = args.name.trim();
-    if (!trimmedName) throw new Error('Name is required.');
+    if (!trimmedName) throw new ConvexError('Name is required.');
 
     const players = await ctx.db
       .query('players')
       .withIndex('by_game', q => q.eq('gameId', game._id))
       .collect();
     if (players.length >= game.playerCount) {
-      throw new Error('Game is full.');
+      throw new ConvexError('Game is full.');
     }
     if (players.some(p => p.name.toLowerCase() === trimmedName.toLowerCase())) {
-      throw new Error('Name already taken in this game.');
+      throw new ConvexError('Name already taken in this game.');
     }
 
     const now = Date.now();

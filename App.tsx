@@ -1,11 +1,16 @@
 import './global.css';
 import { useState } from 'react';
+import { LogBox } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ConvexProvider, ConvexReactClient } from 'convex/react';
+
+// Convex's client always logs mutation/query failures via console.error, which surfaces
+// as a dev-only LogBox toast even when the screen has already handled the error inline.
+LogBox.ignoreLogs([/^\[CONVEX /]);
 import HomeScreen from './src/screens/HomeScreen';
 import RolesScreen from './src/screens/RolesScreen';
 import ClockSetupScreen from './src/screens/ClockSetupScreen';

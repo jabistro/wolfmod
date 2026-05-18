@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   TextInput,
   SafeAreaView,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -13,11 +12,23 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useMutation } from 'convex/react';
+import { ConvexError } from 'convex/values';
 import { api } from '../../convex/_generated/api';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 
 type Nav = StackNavigationProp<RootStackParamList, 'JoinGame'>;
+
+function cleanJoinError(e: unknown): string {
+  if (e instanceof ConvexError) {
+    return typeof e.data === 'string' ? e.data : 'Could not join the game.';
+  }
+  // Convex wraps regular Errors with "[CONVEX M(...)] Server Error\nUncaught Error: <msg>\n at ..."
+  const raw = e instanceof Error ? e.message : String(e);
+  const m = raw.match(/Uncaught Error:\s*([^\n]+)/);
+  if (m) return m[1].trim();
+  return 'Could not join the game.';
+}
 
 export default function JoinGameScreen() {
   const navigation = useNavigation<Nav>();
@@ -27,18 +38,20 @@ export default function JoinGameScreen() {
   const [roomCode, setRoomCode] = useState('');
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   async function handleJoin() {
     if (!deviceClientId) return;
     const code = roomCode.trim().toUpperCase();
     if (code.length !== 4) {
-      Alert.alert('Invalid code', 'Room code is 4 letters.');
+      setErrorMsg('Room code is 4 letters.');
       return;
     }
     if (!name.trim()) {
-      Alert.alert('Name required', 'Please enter your name.');
+      setErrorMsg('Please enter your name.');
       return;
     }
+    setErrorMsg(null);
     setSubmitting(true);
     try {
       const result = await joinGame({
@@ -48,8 +61,7 @@ export default function JoinGameScreen() {
       });
       navigation.replace('Lobby', { gameId: result.gameId });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('Could not join', msg);
+      setErrorMsg(cleanJoinError(e));
     } finally {
       setSubmitting(false);
     }
@@ -80,7 +92,10 @@ export default function JoinGameScreen() {
             <Text className="text-wolf-muted text-xs font-bold tracking-widest">ROOM CODE</Text>
             <TextInput
               value={roomCode}
-              onChangeText={t => setRoomCode(t.toUpperCase())}
+              onChangeText={t => {
+                setRoomCode(t.toUpperCase());
+                if (errorMsg) setErrorMsg(null);
+              }}
               placeholder="ABCD"
               placeholderTextColor="#5A5560"
               autoCapitalize="characters"
@@ -95,7 +110,10 @@ export default function JoinGameScreen() {
             <Text className="text-wolf-muted text-xs font-bold tracking-widest">YOUR NAME</Text>
             <TextInput
               value={name}
-              onChangeText={setName}
+              onChangeText={t => {
+                setName(t);
+                if (errorMsg) setErrorMsg(null);
+              }}
               placeholder="Enter your name"
               placeholderTextColor="#5A5560"
               autoCapitalize="words"
@@ -104,6 +122,21 @@ export default function JoinGameScreen() {
               className="bg-wolf-card text-wolf-text rounded-xl px-4 py-4 text-lg"
             />
           </View>
+
+          {errorMsg ? (
+            <View
+              className="rounded-xl px-4 py-3"
+              style={{
+                backgroundColor: 'rgba(176, 58, 46, 0.12)',
+                borderWidth: 1,
+                borderColor: '#B03A2E',
+              }}
+            >
+              <Text className="text-wolf-red text-sm font-semibold text-center">
+                {errorMsg}
+              </Text>
+            </View>
+          ) : null}
 
           <TouchableOpacity
             onPress={handleJoin}
