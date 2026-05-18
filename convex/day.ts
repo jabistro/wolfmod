@@ -576,7 +576,7 @@ export const tallyVote = internalMutation({
       actorPlayerId: undefined,
       actionType: 'death',
       targetPlayerId: targetId,
-      result: { cause: 'lynch' },
+      result: { cause: 'lynch', phase: 'day', dayNumber: game.dayNumber },
       resolvedAt: Date.now(),
     });
 

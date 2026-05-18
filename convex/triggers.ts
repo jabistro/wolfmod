@@ -184,6 +184,16 @@ async function applyTriggerDeath(
 ): Promise<boolean> {
   const target = await ctx.db.get(targetId);
   if (!target || !target.alive) return false;
+  // followUp === 'night' means the trigger is cascading from a lynch on the
+  // current day; everything else (morning / day) is a night-source cascade.
+  const game = await ctx.db.get(gameId);
+  const result: Record<string, unknown> = { cause };
+  if (game?.triggersFollowUp === 'night') {
+    result.phase = 'day';
+    result.dayNumber = game.dayNumber;
+  } else {
+    result.phase = 'night';
+  }
   await ctx.db.patch(targetId, { alive: false });
   await ctx.db.insert('nightActions', {
     gameId,
@@ -191,7 +201,7 @@ async function applyTriggerDeath(
     actorPlayerId: undefined,
     actionType: 'death',
     targetPlayerId: targetId,
-    result: { cause },
+    result,
     resolvedAt: Date.now(),
   });
   return true;

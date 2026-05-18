@@ -679,9 +679,27 @@ export const endGameView = query({
     const deathKey = (night: number, id: Id<'players'>) => `${night}:${id}`;
     const deaths = new Set<string>();
     const delayedWounds = new Set<string>();
+    // Per-player death info, used for the elimination label ("n3" / "d2")
+    // and for filtering wolf-team attribution to nights the wolf was alive
+    // for.
+    type DeathInfo = {
+      nightNumber: number;
+      phase: 'day' | 'night';
+      dayNumber: number | null;
+    };
+    const deathByPlayer = new Map<Id<'players'>, DeathInfo>();
     for (const a of actions) {
       if (a.actionType === 'death' && a.targetPlayerId) {
         deaths.add(deathKey(a.nightNumber, a.targetPlayerId));
+        if (!deathByPlayer.has(a.targetPlayerId)) {
+          const r = (a.result ?? {}) as { phase?: string; dayNumber?: number };
+          const phase: 'day' | 'night' = r.phase === 'day' ? 'day' : 'night';
+          deathByPlayer.set(a.targetPlayerId, {
+            nightNumber: a.nightNumber,
+            phase,
+            dayNumber: typeof r.dayNumber === 'number' ? r.dayNumber : null,
+          });
+        }
       }
       if (a.actionType === 'tough_guy_wounded' && a.targetPlayerId) {
         delayedWounds.add(deathKey(a.nightNumber, a.targetPlayerId));
@@ -725,19 +743,28 @@ export const endGameView = query({
           a.targetPlayerId &&
           deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
         baseEntry.outcome = delayed ? 'delayed' : killed ? 'killed' : 'saved';
-        // Team decision — attribute to every wolf-team player so each wolf
-        // sees the kill in their own history.
+        // Team decision — attribute to every wolf-team player who was alive
+        // at the start of this night. Wolves act first in NIGHT_STEPS, so a
+        // wolf who died during night N still made (or witnessed) night N's
+        // pick. A wolf who died on day N has death.nightNumber = N-1, so
+        // night N+ is correctly excluded.
         for (const p of players) {
-          if (p.role && isWolfTeam(p.role)) pushEntry(p._id, baseEntry);
+          if (!p.role || !isWolfTeam(p.role)) continue;
+          const death = deathByPlayer.get(p._id);
+          if (death && a.nightNumber > death.nightNumber) continue;
+          pushEntry(p._id, baseEntry);
         }
         continue;
       }
 
       if (a.actionType === 'wolf_blocked') {
-        // Diseased carryover — wolves skipped their pick. Show in every
-        // wolf-team player's history so they see the lost night.
+        // Diseased carryover — wolves skipped their pick. Same alive-at-night
+        // filter as wolf_kill: only wolves who were around to lose the pick.
         for (const p of players) {
-          if (p.role && isWolfTeam(p.role)) pushEntry(p._id, baseEntry);
+          if (!p.role || !isWolfTeam(p.role)) continue;
+          const death = deathByPlayer.get(p._id);
+          if (death && a.nightNumber > death.nightNumber) continue;
+          pushEntry(p._id, baseEntry);
         }
         continue;
       }
@@ -818,6 +845,19 @@ export const endGameView = query({
       if (a.actorPlayerId) pushEntry(a.actorPlayerId, baseEntry);
     }
 
+    // Build the elimination label ("d2" / "n3") from each death record. We
+    // fall back to nightNumber+1 for the day number only if the legacy death
+    // row predates the phase tag (so older games still render something
+    // reasonable rather than swallowing the label).
+    const labelFor = (death: DeathInfo | undefined): string | null => {
+      if (!death) return null;
+      if (death.phase === 'day') {
+        const day = death.dayNumber ?? death.nightNumber + 1;
+        return `d${day}`;
+      }
+      return `n${death.nightNumber}`;
+    };
+
     return {
       game: {
         _id: game._id,
@@ -835,6 +875,7 @@ export const endGameView = query({
           seatPosition: p.seatPosition,
           isMe: p._id === me?._id,
           history: historyByPlayer.get(p._id) ?? [],
+          eliminationLabel: labelFor(deathByPlayer.get(p._id)),
         })),
     };
   },

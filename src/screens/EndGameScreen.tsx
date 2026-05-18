@@ -358,7 +358,9 @@ export default function EndGameScreen() {
                     </Text>
                     {!p.alive && (
                       <Text className="text-wolf-muted text-xs italic">
-                        eliminated
+                        {p.eliminationLabel
+                          ? `eliminated ${p.eliminationLabel}`
+                          : 'eliminated'}
                       </Text>
                     )}
                   </View>
