@@ -408,7 +408,14 @@ function DayClockBar({
             className="bg-wolf-surface rounded-full items-center justify-center"
             style={{ width: 40, height: 40, opacity: busy === 'toggle' ? 0.4 : 1 }}
           >
-            <Text className="text-wolf-text text-base">{paused ? '▶' : '⏸'}</Text>
+            {paused ? (
+              <Text className="text-wolf-text text-base">▶</Text>
+            ) : (
+              <View className="flex-row" style={{ gap: 3 }}>
+                <View style={{ width: 4, height: 14, backgroundColor: '#F0EDE8', borderRadius: 1 }} />
+                <View style={{ width: 4, height: 14, backgroundColor: '#F0EDE8', borderRadius: 1 }} />
+              </View>
+            )}
           </TouchableOpacity>
           <TouchableOpacity
             onPress={reset}
