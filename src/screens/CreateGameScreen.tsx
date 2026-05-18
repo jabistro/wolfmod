@@ -20,7 +20,7 @@ import { useDeviceId } from '../hooks/useDeviceId';
 type Nav = StackNavigationProp<RootStackParamList, 'CreateGame'>;
 
 const MIN = 3;
-const MAX = 30;
+const MAX = 40;
 
 export default function CreateGameScreen() {
   const navigation = useNavigation<Nav>();
@@ -28,7 +28,7 @@ export default function CreateGameScreen() {
   const createGame = useMutation(api.games.createGame);
 
   const [name, setName] = useState('');
-  const [playerCount, setPlayerCount] = useState(8);
+  const [playerCount, setPlayerCount] = useState(9);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleCreate() {

@@ -13,7 +13,7 @@ import {
 const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I, O
 const ROOM_CODE_LENGTH = 4;
 const MIN_PLAYERS = 3;
-const MAX_PLAYERS = 30;
+const MAX_PLAYERS = 40;
 
 function shuffle<T>(items: readonly T[]): T[] {
   const result = items.slice();

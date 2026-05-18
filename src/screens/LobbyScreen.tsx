@@ -43,7 +43,7 @@ const CIRCLE_SIZE = Math.min(360, SCREEN_WIDTH - 24);
 const MIN_SEAT = 30;
 const MAX_SEAT = 64;
 const MIN_PLAYER_COUNT = 3;
-const MAX_PLAYER_COUNT = 30;
+const MAX_PLAYER_COUNT = 40;
 
 /**
  * Largest seatSize that keeps adjacent seats from overlapping when N seats are
