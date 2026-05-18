@@ -7,10 +7,10 @@ import {
   FlatList,
   TouchableOpacity,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Dimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { ROLES, CATEGORIES, type Role, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
 
