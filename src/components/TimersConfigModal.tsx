@@ -5,12 +5,12 @@ import {
   Text,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
+import { showAlert } from './ThemedAlert';
 
 type Props = {
   visible: boolean;
@@ -84,7 +84,7 @@ export default function TimersConfigModal({
       });
       onClose();
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }

@@ -6,7 +6,6 @@ import {
   SafeAreaView,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -17,6 +16,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { SeatingCircle } from '../components/SeatingCircle';
+import { showAlert } from '../components/ThemedAlert';
 import { TRIGGER_DWELL_MS } from '../../convex/triggers';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Triggers'>;
@@ -229,7 +229,7 @@ function HunterPickerView({
         targetPlayerId: targetId,
       });
     } catch (e) {
-      Alert.alert('Could not shoot', e instanceof Error ? e.message : String(e));
+      showAlert('Could not shoot', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -239,7 +239,7 @@ function HunterPickerView({
     try {
       await submitSkip({ gameId, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Could not pass', e instanceof Error ? e.message : String(e));
+      showAlert('Could not pass', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -335,7 +335,7 @@ function MadDestroyerPickerView({
         direction,
       });
     } catch (e) {
-      Alert.alert('Could not destroy', e instanceof Error ? e.message : String(e));
+      showAlert('Could not destroy', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(null);
     }

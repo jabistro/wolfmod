@@ -8,7 +8,6 @@ import {
   Animated,
   Easing,
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   Image,
@@ -22,6 +21,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { SeatingCircle, type SeatingPlayer } from '../components/SeatingCircle';
+import { showAlert } from '../components/ThemedAlert';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Night'>;
 type Route = RouteProp<RootStackParamList, 'Night'>;
@@ -314,7 +314,7 @@ export default function NightScreen() {
                   expectedStep: game.nightStep!,
                 });
               } catch (e) {
-                Alert.alert(
+                showAlert(
                   'Could not refresh',
                   e instanceof Error ? e.message : String(e),
                 );
@@ -328,7 +328,7 @@ export default function NightScreen() {
                   expectedStep: game.nightStep!,
                 });
               } catch (e) {
-                Alert.alert(
+                showAlert(
                   'Could not skip',
                   e instanceof Error ? e.message : String(e),
                 );
@@ -581,7 +581,7 @@ function WolvesPicker({
         targetPlayerId: targetId,
       });
     } catch (e) {
-      Alert.alert('Could not vote', e instanceof Error ? e.message : String(e));
+      showAlert('Could not vote', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -716,7 +716,7 @@ function SeerPicker({
       setPendingResult({ name: pendingTarget.name, team: result.team });
       setPendingTarget(null);
     } catch (e) {
-      Alert.alert('Could not check', e instanceof Error ? e.message : String(e));
+      showAlert('Could not check', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -734,7 +734,7 @@ function SeerPicker({
       // which case this is a no-op and the scheduled tick will advance later.
       await tickNight({ gameId, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setPendingResult(null);
     }
@@ -1000,7 +1000,7 @@ function PIPicker({
       setPendingResult({ name: pendingTarget.name, team: result.team });
       setPendingTarget(null);
     } catch (e) {
-      Alert.alert('Could not investigate', e instanceof Error ? e.message : String(e));
+      showAlert('Could not investigate', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -1016,7 +1016,7 @@ function PIPicker({
     try {
       await tickNight({ gameId, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setPendingResult(null);
     }
@@ -1028,7 +1028,7 @@ function PIPicker({
     try {
       await submitSkip({ gameId, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -1312,7 +1312,7 @@ function MentalistPicker({
       setConfirmOpen(false);
       setPicks([]);
     } catch (e) {
-      Alert.alert('Could not compare', e instanceof Error ? e.message : String(e));
+      showAlert('Could not compare', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -1322,7 +1322,7 @@ function MentalistPicker({
     try {
       await tickNight({ gameId, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setPendingResult(null);
     }
@@ -1631,7 +1631,7 @@ function WitchPicker({
       await submitSave({ gameId, callerDeviceClientId: deviceClientId });
       setConfirmSave(false);
     } catch (e) {
-      Alert.alert('Could not save', e instanceof Error ? e.message : String(e));
+      showAlert('Could not save', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -1649,7 +1649,7 @@ function WitchPicker({
       setConfirmPoison(null);
       setPoisonPickerOpen(false);
     } catch (e) {
-      Alert.alert('Could not poison', e instanceof Error ? e.message : String(e));
+      showAlert('Could not poison', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -1660,7 +1660,7 @@ function WitchPicker({
     try {
       await submitDone({ gameId, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -1989,7 +1989,7 @@ function BodyguardPicker({
         targetPlayerId: targetId,
       });
     } catch (e) {
-      Alert.alert(
+      showAlert(
         'Could not protect',
         e instanceof Error ? e.message : String(e),
       );
@@ -2119,7 +2119,7 @@ function HuntressPicker({
       });
       setPendingTarget(null);
     } catch (e) {
-      Alert.alert('Could not shoot', e instanceof Error ? e.message : String(e));
+      showAlert('Could not shoot', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -2136,7 +2136,7 @@ function HuntressPicker({
     try {
       await submitSkip({ gameId, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -2319,7 +2319,7 @@ function RevealerPicker({
       });
       setPendingTarget(null);
     } catch (e) {
-      Alert.alert('Could not shoot', e instanceof Error ? e.message : String(e));
+      showAlert('Could not shoot', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -2336,7 +2336,7 @@ function RevealerPicker({
     try {
       await submitSkip({ gameId, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -2519,7 +2519,7 @@ function RevilerPicker({
       });
       setPendingTarget(null);
     } catch (e) {
-      Alert.alert('Could not shoot', e instanceof Error ? e.message : String(e));
+      showAlert('Could not shoot', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -2536,7 +2536,7 @@ function RevilerPicker({
     try {
       await submitSkip({ gameId, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }

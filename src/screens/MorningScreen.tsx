@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   SafeAreaView,
   ActivityIndicator,
-  Alert,
   Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +15,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
+import { showAlert } from '../components/ThemedAlert';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Morning'>;
 type Route = RouteProp<RootStackParamList, 'Morning'>;
@@ -89,7 +89,7 @@ export default function MorningScreen() {
     try {
       await beginDay({ gameId: game._id, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert(
+      showAlert(
         'Could not begin day',
         e instanceof Error ? e.message : String(e),
       );

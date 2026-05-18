@@ -26,6 +26,7 @@ import TriggersScreen from './src/screens/TriggersScreen';
 import MorningScreen from './src/screens/MorningScreen';
 import DayScreen from './src/screens/DayScreen';
 import EndGameScreen from './src/screens/EndGameScreen';
+import { AlertHost } from './src/components/ThemedAlert';
 import type { RootStackParamList } from './src/navigation/types';
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -78,6 +79,7 @@ export default function App() {
             <StatusBar style="light" />
           </NavigationContainer>
           {!splashDone && <SplashScreen onDone={() => setSplashDone(true)} />}
+          <AlertHost />
         </GestureHandlerRootView>
       </SafeAreaProvider>
     </ConvexProvider>

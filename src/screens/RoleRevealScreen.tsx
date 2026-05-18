@@ -6,7 +6,6 @@ import {
   SafeAreaView,
   Pressable,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   Animated,
 } from 'react-native';
@@ -20,6 +19,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { ROLES } from '../data/roles';
 import { teamForRole, type Team } from '../data/v1Roles';
+import { showAlert } from '../components/ThemedAlert';
 
 type Nav = StackNavigationProp<RootStackParamList, 'RoleReveal'>;
 type Route = RouteProp<RootStackParamList, 'RoleReveal'>;
@@ -165,7 +165,7 @@ export default function RoleRevealScreen() {
         callerDeviceClientId: deviceClientId,
       });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setConfirming(false);
     }
@@ -183,7 +183,7 @@ export default function RoleRevealScreen() {
         callerDeviceClientId: deviceClientId,
       });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setBeginningDay(false);
     }

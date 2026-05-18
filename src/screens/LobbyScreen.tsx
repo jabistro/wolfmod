@@ -7,7 +7,6 @@ import {
   Modal,
   ScrollView,
   Pressable,
-  Alert,
   Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,6 +22,7 @@ import { ROLES, CATEGORIES, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
 import TimersConfigModal from '../components/TimersConfigModal';
 import RolesBrowserModal from '../components/RolesBrowserModal';
+import { showAlert } from '../components/ThemedAlert';
 
 // Build the category map for v1 roles once. The role selection modal uses
 // this to power its team tabs (Villagers / Wolves / Team Wolf / Solo) so
@@ -214,7 +214,7 @@ export default function LobbyScreen() {
       });
       setSeatModalIndex(null);
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -228,13 +228,13 @@ export default function LobbyScreen() {
       });
       setSeatModalIndex(null);
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     }
   }
 
   function handleDeletePlayer(playerId: Id<'players'>, playerName: string) {
     if (!deviceClientId) return;
-    Alert.alert(
+    showAlert(
       `Remove ${playerName}?`,
       'They leave the lobby and the table shrinks by one seat. Remaining players shift to close the gap. Roles stay picked — adjust them if the count no longer matches.',
       [
@@ -251,7 +251,7 @@ export default function LobbyScreen() {
               });
               setSeatModalIndex(null);
             } catch (e) {
-              Alert.alert('Error', e instanceof Error ? e.message : String(e));
+              showAlert('Error', e instanceof Error ? e.message : String(e));
             }
           },
         },
@@ -261,7 +261,7 @@ export default function LobbyScreen() {
 
   function handleClearAllSeats() {
     if (!deviceClientId) return;
-    Alert.alert(
+    showAlert(
       'Clear all seats?',
       'Every player will be unseated. Roles stay picked.',
       [
@@ -276,7 +276,7 @@ export default function LobbyScreen() {
                 callerDeviceClientId: deviceClientId,
               });
             } catch (e) {
-              Alert.alert('Error', e instanceof Error ? e.message : String(e));
+              showAlert('Error', e instanceof Error ? e.message : String(e));
             }
           },
         },
@@ -295,7 +295,7 @@ export default function LobbyScreen() {
         callerDeviceClientId: deviceClientId,
       });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -346,7 +346,7 @@ export default function LobbyScreen() {
       });
       setRolesModalOpen(false);
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -358,7 +358,7 @@ export default function LobbyScreen() {
         callerDeviceClientId: deviceClientId,
       });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -371,12 +371,12 @@ export default function LobbyScreen() {
       });
       // Navigation happens via the phase-change effect above for everyone.
     } catch (e) {
-      Alert.alert('Cannot start game', e instanceof Error ? e.message : String(e));
+      showAlert('Cannot start game', e instanceof Error ? e.message : String(e));
     }
   }
 
   function handleLeave() {
-    Alert.alert(
+    showAlert(
       'Leave game?',
       isHost
         ? "You're the host — leaving ends the game for everyone."
@@ -395,7 +395,7 @@ export default function LobbyScreen() {
               });
               navigation.popToTop();
             } catch (e) {
-              Alert.alert('Error', e instanceof Error ? e.message : String(e));
+              showAlert('Error', e instanceof Error ? e.message : String(e));
             }
           },
         },

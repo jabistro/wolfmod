@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   TextInput,
   SafeAreaView,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -16,6 +15,7 @@ import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
+import { showAlert } from '../components/ThemedAlert';
 
 type Nav = StackNavigationProp<RootStackParamList, 'CreateGame'>;
 
@@ -34,7 +34,7 @@ export default function CreateGameScreen() {
   async function handleCreate() {
     if (!deviceClientId) return;
     if (!name.trim()) {
-      Alert.alert('Name required', 'Please enter your name.');
+      showAlert('Name required', 'Please enter your name.');
       return;
     }
     setSubmitting(true);
@@ -47,7 +47,7 @@ export default function CreateGameScreen() {
       navigation.replace('Lobby', { gameId: result.gameId });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('Could not create game', msg);
+      showAlert('Could not create game', msg);
     } finally {
       setSubmitting(false);
     }

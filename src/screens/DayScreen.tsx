@@ -8,7 +8,6 @@ import {
   Modal,
   Pressable,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -20,6 +19,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { SeatingCircle } from '../components/SeatingCircle';
 import TimersConfigModal from '../components/TimersConfigModal';
+import { showAlert } from '../components/ThemedAlert';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Day'>;
 type Route = RouteProp<RootStackParamList, 'Day'>;
@@ -211,7 +211,7 @@ export default function DayScreen() {
             callerDeviceClientId: deviceClientId,
           });
         } catch (e) {
-          Alert.alert(
+          showAlert(
             'Could not begin night',
             e instanceof Error ? e.message : String(e),
           );
@@ -343,7 +343,7 @@ function DayClockBar({
         await pauseDay({ gameId: game._id, callerDeviceClientId: deviceClientId });
       }
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -353,7 +353,7 @@ function DayClockBar({
     try {
       await resetDay({ gameId: game._id, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -449,7 +449,7 @@ function DiscussionView({
       });
       setConfirmTarget(null);
     } catch (e) {
-      Alert.alert('Could not put on trial', e instanceof Error ? e.message : String(e));
+      showAlert('Could not put on trial', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -659,7 +659,7 @@ function TrialView({
         await pauseClock({ gameId: game._id, callerDeviceClientId: deviceClientId });
       }
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -669,7 +669,7 @@ function TrialView({
     try {
       await resetClock({ gameId: game._id, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -689,7 +689,7 @@ function TrialView({
         });
       }
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -850,7 +850,7 @@ function VoteView({
         vote,
       });
     } catch (e) {
-      Alert.alert('Could not vote', e instanceof Error ? e.message : String(e));
+      showAlert('Could not vote', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(null);
     }
@@ -866,7 +866,7 @@ function VoteView({
         await pauseClock({ gameId: game._id, callerDeviceClientId: deviceClientId });
       }
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -876,7 +876,7 @@ function VoteView({
     try {
       await resetClock({ gameId: game._id, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -1111,7 +1111,7 @@ function ResultsView({
         callerDeviceClientId: deviceClientId,
       });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : String(e));
+      showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -1389,7 +1389,7 @@ function HunterModal({
         targetPlayerId: targetId,
       });
     } catch (e) {
-      Alert.alert('Could not shoot', e instanceof Error ? e.message : String(e));
+      showAlert('Could not shoot', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -1399,7 +1399,7 @@ function HunterModal({
     try {
       await submitSkip({ gameId, callerDeviceClientId: deviceClientId });
     } catch (e) {
-      Alert.alert('Could not pass', e instanceof Error ? e.message : String(e));
+      showAlert('Could not pass', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
@@ -1486,7 +1486,7 @@ function MadDestroyerModal({
         direction,
       });
     } catch (e) {
-      Alert.alert('Could not destroy', e instanceof Error ? e.message : String(e));
+      showAlert('Could not destroy', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(null);
     }
