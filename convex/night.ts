@@ -2681,6 +2681,60 @@ export const nightView = query({
         seatPosition: p.seatPosition,
       }));
 
+    // Ghost-only: describe the current step's actor so the spectator fallback
+    // can replace the generic "X is awake" spinner with the truth — actor
+    // eliminated, or alive but their one-time power is spent. Skipped for
+    // wolves (all-dead would already have ended the game) and for living
+    // viewers (they don't see the fallback).
+    let stepActorStatus:
+      | {
+          roleName: string;
+          status: 'present' | 'eliminated' | 'powerUsed';
+          actorName: string | null;
+        }
+      | null = null;
+    if (!me.alive && step && step !== 'wolves') {
+      const ROLE_BY_STEP: Record<Exclude<NightStep, 'wolves'>, string> = {
+        seer: 'Seer',
+        pi: 'Paranormal Investigator',
+        mentalist: 'Mentalist',
+        witch: 'Witch',
+        bodyguard: 'Bodyguard',
+        huntress: 'Huntress',
+        revealer: 'Revealer',
+        reviler: 'Reviler',
+      };
+      const roleName = ROLE_BY_STEP[step as Exclude<NightStep, 'wolves'>];
+      if (roleName) {
+        const active = stepActors.find(a => a.role === roleName);
+        if (active) {
+          stepActorStatus = {
+            roleName,
+            status: 'present',
+            actorName: active.name,
+          };
+        } else {
+          const aliveOfRole = alive.find(p => p.role === roleName);
+          if (aliveOfRole) {
+            stepActorStatus = {
+              roleName,
+              status: 'powerUsed',
+              actorName: aliveOfRole.name,
+            };
+          } else {
+            const anyOfRole = players.find(p => p.role === roleName);
+            if (anyOfRole) {
+              stepActorStatus = {
+                roleName,
+                status: 'eliminated',
+                actorName: anyOfRole.name,
+              };
+            }
+          }
+        }
+      }
+    }
+
     return {
       game: {
         _id: game._id,
@@ -2718,6 +2772,7 @@ export const nightView = query({
       revilerState,
       targetables,
       alivePlayers: aliveSummaries,
+      stepActorStatus,
     };
   },
 });

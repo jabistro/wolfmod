@@ -103,6 +103,7 @@ export default function NightScreen() {
     revealerState,
     revilerState,
     targetables,
+    stepActorStatus,
   } = view;
 
   // Defensive: if phase has already moved on, the effect above will navigate.
@@ -291,12 +292,10 @@ export default function NightScreen() {
           ) : hasPickerForGhost ? (
             pickerTree
           ) : (
-            <View className="flex-1 items-center justify-center px-8">
-              <ActivityIndicator color="#D4A017" />
-              <Text className="text-wolf-muted text-sm text-center mt-6">
-                {stepLabel ? `${stepLabel}…` : 'The night unfolds…'}
-              </Text>
-            </View>
+            <GhostStepFallback
+              stepActorStatus={stepActorStatus}
+              stepLabel={stepLabel}
+            />
           )}
         </View>
       )}
@@ -393,6 +392,66 @@ function HostStallOverride({
           </Text>
         </TouchableOpacity>
       </View>
+    </View>
+  );
+}
+
+// ───── Ghost fallback view ─────────────────────────────────────────────────
+//
+// Shown to a dead spectator when the current step has no picker to render for
+// them — either because the role's actor is dead (no XState populated for any
+// alive actor on this step) or because the actor is alive but used their
+// one-time power (PI / Huntress get filtered out of activePlayersForStep
+// once their used-flag flips). Replaces the misleading "X IS AWAKE" spinner
+// with the actual reason the step is quiet.
+
+function GhostStepFallback({
+  stepActorStatus,
+  stepLabel,
+}: {
+  stepActorStatus:
+    | {
+        roleName: string;
+        status: 'present' | 'eliminated' | 'powerUsed';
+        actorName: string | null;
+      }
+    | null;
+  stepLabel: string | null;
+}) {
+  if (stepActorStatus?.status === 'eliminated') {
+    return (
+      <View className="flex-1 items-center justify-center px-8">
+        {stepActorStatus.actorName ? (
+          <Text className="text-wolf-text text-xl font-extrabold tracking-wide text-center">
+            {stepActorStatus.actorName.toUpperCase()}
+          </Text>
+        ) : null}
+        <Text className="text-wolf-muted text-sm text-center mt-2">
+          The {stepActorStatus.roleName} has been eliminated.
+        </Text>
+      </View>
+    );
+  }
+  if (stepActorStatus?.status === 'powerUsed') {
+    return (
+      <View className="flex-1 items-center justify-center px-8">
+        {stepActorStatus.actorName ? (
+          <Text className="text-wolf-text text-xl font-extrabold tracking-wide text-center">
+            {stepActorStatus.actorName.toUpperCase()}
+          </Text>
+        ) : null}
+        <Text className="text-wolf-muted text-sm text-center mt-2">
+          The {stepActorStatus.roleName}'s power has already been used.
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <View className="flex-1 items-center justify-center px-8">
+      <ActivityIndicator color="#D4A017" />
+      <Text className="text-wolf-muted text-sm text-center mt-6">
+        {stepLabel ? `${stepLabel}…` : 'The night unfolds…'}
+      </Text>
     </View>
   );
 }
