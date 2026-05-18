@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -266,20 +267,14 @@ export default function NightScreen() {
     <SafeAreaView className="flex-1 bg-wolf-bg">
       <NightHeader
         nightNumber={game.nightNumber}
-        stepLabel={stepLabel}
+        stepLabel={me.alive ? null : stepLabel}
         dead={!me.alive}
       />
 
       {me.alive ? (
         <>
           {pickerTree}
-          {!isMyStep && (
-            <WaitingView
-              role={me.role}
-              stepLabel={stepLabel}
-              history={seerHistory}
-            />
-          )}
+          {!isMyStep && <WaitingView role={me.role} />}
         </>
       ) : (
         <View
@@ -415,7 +410,7 @@ function NightHeader({
 }) {
   return (
     <View className="px-4 pt-10 pb-3 items-center">
-      <Text className="text-wolf-muted text-xs tracking-widest">
+      <Text className="text-wolf-muted text-lg font-bold tracking-widest">
         NIGHT {nightNumber}
       </Text>
       {dead && (
@@ -2611,53 +2606,71 @@ function RevilerPicker({
   );
 }
 
-function WaitingView({
-  role,
-  stepLabel,
-  history,
-}: {
-  role?: string;
-  stepLabel: string | null;
-  history?: Array<{
-    nightNumber: number;
-    targetName: string;
-    team: 'wolf' | 'villager';
-  }> | null;
-}) {
+const NIGHT_WHISPERS = [
+  'WHO WILL COME FOR YOU IN THE NIGHT?',
+  'THE VILLAGE SLEEPS. SOMETHING DOES NOT.',
+  'TRUST NO ONE.',
+  'LISTEN… CAN YOU HEAR THE FOOTSTEPS?',
+  'BY MORNING, ONE LESS HEART WILL BEAT.',
+  'THE MOON KEEPS ITS SECRETS.',
+  'WHO WHISPERS YOUR NAME?',
+  'NOT EVERY FRIEND IS A FRIEND.',
+  'EYES CLOSED. EARS OPEN.',
+  'YOUR FATE IS DECIDED IN THE DARK.',
+  'SOMETHING HOWLS BEYOND THE TREELINE.',
+  'THE WOLVES ARE DREAMING OF YOU.',
+  "DON'T PEEK. IT WILL BE WORSE IF YOU DO.",
+  'EVERY SHADOW HIDES A SECRET.',
+];
+
+function WaitingView({ role }: { role?: string }) {
+  const [lineIndex, setLineIndex] = useState(() =>
+    Math.floor(Math.random() * NIGHT_WHISPERS.length),
+  );
+  const fade = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const tick = () => {
+      Animated.timing(fade, {
+        toValue: 0,
+        duration: 900,
+        useNativeDriver: true,
+      }).start(() => {
+        setLineIndex((i) => (i + 1) % NIGHT_WHISPERS.length);
+        Animated.timing(fade, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }).start();
+      });
+    };
+    const id = setInterval(tick, 6000);
+    return () => clearInterval(id);
+  }, [fade]);
+
   return (
-    <View className="flex-1 px-6 pt-2 pb-8">
+    <View className="flex-1 pb-8">
       <View className="flex-1 items-center justify-center">
-        <ActivityIndicator color="#D4A017" />
-        <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
-          {stepLabel ?? 'The night is settling…'}
-        </Text>
+        <Animated.Text
+          style={{ opacity: fade }}
+          className="text-wolf-muted text-sm tracking-widest text-center mb-6 px-6"
+        >
+          {NIGHT_WHISPERS[lineIndex]}
+        </Animated.Text>
+        <View style={{ width: '100%', height: 200 }}>
+          <Image
+            source={require('../../assets/images/allan-de-paepe-ezgif-com-gif-maker-2.gif')}
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="contain"
+          />
+        </View>
         {role && (
-          <Text className="text-wolf-muted text-xs tracking-widest mt-2">
+          <Text className="text-wolf-muted text-xs tracking-widest mt-6 px-6">
             YOU ARE THE {role.toUpperCase()}
           </Text>
         )}
       </View>
 
-      {history && history.length > 0 && (
-        <View className="bg-wolf-card rounded-xl px-4 py-3">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-            YOUR CHECKS
-          </Text>
-          {history.map((h, i) => (
-            <View key={i} className="flex-row justify-between py-1">
-              <Text className="text-wolf-text text-sm">
-                Night {h.nightNumber} — {h.targetName}
-              </Text>
-              <Text
-                className="text-sm font-bold"
-                style={{ color: h.team === 'wolf' ? '#B03A2E' : '#5BA0E5' }}
-              >
-                {h.team === 'wolf' ? 'WOLF' : 'VILLAGER'}
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
     </View>
   );
 }

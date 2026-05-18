@@ -287,7 +287,7 @@ function DayHeader({
   return (
     <View className="px-4 pt-10 pb-3" style={{ position: 'relative' }}>
       <View className="items-center">
-        <Text className="text-wolf-muted text-xs tracking-widest">
+        <Text className="text-wolf-muted text-lg font-bold tracking-widest">
           DAY {dayNumber}
         </Text>
         <Text className="text-wolf-accent text-3xl font-extrabold tracking-widest mt-1">
