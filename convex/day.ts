@@ -702,13 +702,16 @@ export const dayView = query({
       cfg.maxNominationsPerDay - nominationsUsed,
     );
 
-    // Cascade deaths from THIS lynch (Hunter/HW shot, MD blast). The lynch
-    // tally row uses cause='lynch' and is excluded — the lynchee is
-    // already shown in the result pill above the votes.
+    // Cascade deaths from THIS lynch (Hunter/HW shot, MD blast). For shot
+    // deaths we also resolve the shooter's name from the matching shot
+    // action — the shooter is public info (the announcement already says
+    // "X HAS SHOT Y"), and attribution lets the table see chained shots
+    // correctly (e.g. Hunter shoots HW, HW then shoots someone else).
     let cascadeDeaths: Array<{
       _id: Id<'players'>;
       name: string;
       cause: string;
+      shotByName: string | null;
     }> = [];
     if (
       game.currentNomination?.resultsRevealed &&
@@ -720,16 +723,28 @@ export const dayView = query({
         .withIndex('by_game_night', q =>
           q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
         )
-        .filter(q => q.eq(q.field('actionType'), 'death'))
         .collect();
+      const shotRows = rows.filter(
+        r =>
+          r.actionType === 'hunter_shot' || r.actionType === 'hunter_wolf_shot',
+      );
       for (const r of rows) {
+        if (r.actionType !== 'death') continue;
         if (r.resolvedAt < lynchStart) continue;
         const cause = (r.result?.cause as string | undefined) ?? '';
         if (cause === 'lynch' || cause === '') continue;
         if (!r.targetPlayerId) continue;
         const p = playerById.get(r.targetPlayerId);
         if (!p) continue;
-        cascadeDeaths.push({ _id: p._id, name: p.name, cause });
+        let shotByName: string | null = null;
+        if (cause === 'hunter' || cause === 'hunter-wolf') {
+          const shot = shotRows.find(s => s.targetPlayerId === r.targetPlayerId);
+          if (shot?.actorPlayerId) {
+            const shooter = playerById.get(shot.actorPlayerId);
+            if (shooter) shotByName = shooter.name;
+          }
+        }
+        cascadeDeaths.push({ _id: p._id, name: p.name, cause, shotByName });
       }
     }
 

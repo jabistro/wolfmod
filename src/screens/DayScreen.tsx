@@ -1061,6 +1061,7 @@ function ResultsView({
     _id: Id<'players'>;
     name: string;
     cause: string;
+    shotByName: string | null;
   }>;
 }) {
   const insets = useSafeAreaInsets();
@@ -1119,14 +1120,6 @@ function ResultsView({
           <Text className="text-wolf-text text-3xl font-extrabold tracking-widest text-center">
             {nomination.nominee?.name.toUpperCase() ?? '—'}
           </Text>
-          <View
-            className="mt-3 rounded-full px-5 py-1.5"
-            style={{ backgroundColor: lynch ? '#8B1818' : '#1F4E80' }}
-          >
-            <Text className="text-wolf-text text-sm font-extrabold tracking-widest">
-              {lynch ? 'ELIMINATED' : 'LIVES'}
-            </Text>
-          </View>
         </View>
 
         <View className="flex-row" style={{ gap: 12 }}>
@@ -1166,7 +1159,23 @@ function ResultsView({
           </View>
         </View>
 
-        {cascadeDeaths.length > 0 ? (
+        {!lynch ? (
+          <View
+            className="mt-6 rounded-2xl px-5 py-5"
+            style={{
+              backgroundColor: '#22222F',
+              borderWidth: 2,
+              borderColor: '#8A8590',
+              gap: 12,
+            }}
+          >
+            <Text className="text-wolf-text text-2xl font-extrabold tracking-widest text-center">
+              LIVES
+            </Text>
+          </View>
+        ) : null}
+
+        {lynch || cascadeDeaths.length > 0 ? (
           <View
             className="mt-6 rounded-2xl px-5 py-5"
             style={{
@@ -1176,20 +1185,54 @@ function ResultsView({
               gap: 12,
             }}
           >
-            <Text
-              className="text-wolf-accent text-xs font-extrabold tracking-widest text-center"
-              style={{ letterSpacing: 2 }}
-            >
-              ALSO ELIMINATED
-            </Text>
-            {cascadeDeaths.map(d => (
-              <Text
-                key={d._id}
-                className="text-wolf-text text-xl font-extrabold tracking-widest text-center"
-              >
-                {d.name.toUpperCase()}
-              </Text>
-            ))}
+            {lynch ? (
+              <>
+                <Text
+                  className="text-wolf-accent text-xs font-extrabold tracking-widest text-center"
+                  style={{ letterSpacing: 2 }}
+                >
+                  ELIMINATED
+                </Text>
+                <Text className="text-wolf-text text-2xl font-extrabold tracking-widest text-center">
+                  {nomination.nominee?.name.toUpperCase() ?? '—'}
+                </Text>
+              </>
+            ) : null}
+
+            {cascadeDeaths.length > 0 ? (
+              <>
+                {lynch ? (
+                  <View
+                    style={{
+                      height: 1,
+                      backgroundColor: '#D4A017',
+                      opacity: 0.3,
+                      marginTop: 4,
+                      marginBottom: 4,
+                    }}
+                  />
+                ) : null}
+                <Text
+                  className="text-wolf-accent text-xs font-extrabold tracking-widest text-center"
+                  style={{ letterSpacing: 2 }}
+                >
+                  {lynch ? 'ALSO ELIMINATED' : 'ELIMINATED'}
+                </Text>
+                {cascadeDeaths.map(d => (
+                  <View key={d._id} style={{ alignItems: 'center', gap: 2 }}>
+                    <Text className="text-wolf-text text-xl font-extrabold tracking-widest text-center">
+                      {d.name.toUpperCase()}
+                    </Text>
+                    {(d.cause === 'hunter' || d.cause === 'hunter-wolf') &&
+                    d.shotByName ? (
+                      <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center">
+                        SHOT BY {d.shotByName.toUpperCase()}
+                      </Text>
+                    ) : null}
+                  </View>
+                ))}
+              </>
+            ) : null}
           </View>
         ) : null}
       </ScrollView>
