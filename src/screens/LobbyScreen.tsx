@@ -119,6 +119,7 @@ export default function LobbyScreen() {
 
   const assignSeat = useMutation(api.games.assignPlayerToSeat);
   const removeFromSeat = useMutation(api.games.removePlayerFromSeat);
+  const removeFromGame = useMutation(api.games.removePlayerFromGame);
   const clearAllSeats = useMutation(api.games.clearAllSeats);
   const setPlayerCount = useMutation(api.games.setPlayerCount);
   const setRoles = useMutation(api.games.setRoles);
@@ -192,6 +193,9 @@ export default function LobbyScreen() {
     seatedByPosition.size === game.playerCount &&
     players.length === game.playerCount;
   const rolesValid = game.selectedRoles.length === game.playerCount;
+  const tooManyRoles = game.selectedRoles.length > game.playerCount;
+  const tooFewRoles =
+    game.selectedRoles.length > 0 && game.selectedRoles.length < game.playerCount;
   const canStart = isHost && allSeated && rolesValid;
 
   function handleSeatTap(seatIndex: number) {
@@ -226,6 +230,33 @@ export default function LobbyScreen() {
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : String(e));
     }
+  }
+
+  function handleDeletePlayer(playerId: Id<'players'>, playerName: string) {
+    if (!deviceClientId) return;
+    Alert.alert(
+      `Remove ${playerName}?`,
+      'They leave the lobby and the table shrinks by one seat. Remaining players shift to close the gap. Roles stay picked — adjust them if the count no longer matches.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await removeFromGame({
+                gameId: game._id,
+                playerId,
+                callerDeviceClientId: deviceClientId,
+              });
+              setSeatModalIndex(null);
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : String(e));
+            }
+          },
+        },
+      ],
+    );
   }
 
   function handleClearAllSeats() {
@@ -525,14 +556,28 @@ export default function LobbyScreen() {
               {isHost ? 'WAITING FOR SEAT' : 'JOINED'}
             </Text>
             <View className="flex-row flex-wrap" style={{ gap: 8 }}>
-              {unseatedPlayers.map(p => (
-                <View key={p._id} className="bg-wolf-card rounded-full px-3 py-1.5">
-                  <Text className="text-wolf-text text-sm">
-                    {p.name}
-                    {p.isHost ? ' (host)' : ''}
-                  </Text>
-                </View>
-              ))}
+              {unseatedPlayers.map(p => {
+                const canDelete = isHost && !p.isHost;
+                return (
+                  <TouchableOpacity
+                    key={p._id}
+                    disabled={!canDelete}
+                    activeOpacity={canDelete ? 0.6 : 1}
+                    onPress={
+                      canDelete
+                        ? () => handleDeletePlayer(p._id, p.name)
+                        : undefined
+                    }
+                    className="bg-wolf-card rounded-full px-3 py-1.5"
+                  >
+                    <Text className="text-wolf-text text-sm">
+                      {p.name}
+                      {p.isHost ? ' (host)' : ''}
+                      {canDelete ? '  ×' : ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
         )}
@@ -540,9 +585,21 @@ export default function LobbyScreen() {
         {/* Roles section */}
         <View className="px-6 mt-6">
           <View className="flex-row items-center justify-between mb-2">
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
-              ROLES ({game.selectedRoles.length} / {game.playerCount})
-            </Text>
+            <View className="flex-row items-center" style={{ gap: 8 }}>
+              <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+                ROLES ({game.selectedRoles.length} / {game.playerCount})
+              </Text>
+              {tooManyRoles && (
+                <Text className="text-wolf-red text-xs font-bold tracking-widest">
+                  TOO MANY
+                </Text>
+              )}
+              {tooFewRoles && (
+                <Text className="text-wolf-accent text-xs font-bold tracking-widest">
+                  NEED MORE
+                </Text>
+              )}
+            </View>
             <TouchableOpacity
               onPress={() => setBrowseRolesOpen(true)}
               hitSlop={8}
@@ -643,9 +700,13 @@ export default function LobbyScreen() {
               <Text className="text-wolf-muted text-xs text-center mt-2">
                 {!allSeated
                   ? 'All players must be seated.'
-                  : !rolesValid
-                    ? `Pick exactly ${game.playerCount} roles.`
-                    : ''}
+                  : tooManyRoles
+                    ? `Too many roles — remove ${game.selectedRoles.length - game.playerCount} or add seats.`
+                    : tooFewRoles
+                      ? `Need ${game.playerCount - game.selectedRoles.length} more role${game.playerCount - game.selectedRoles.length === 1 ? '' : 's'}.`
+                      : !rolesValid
+                        ? `Pick ${game.playerCount} roles.`
+                        : ''}
               </Text>
             )}
           </View>
@@ -693,12 +754,27 @@ export default function LobbyScreen() {
                 </Text>
                 <TouchableOpacity
                   onPress={() => handleRemoveFromSeat(seatModalOccupant._id)}
-                  className="bg-wolf-card rounded-xl py-3"
+                  className="bg-wolf-card rounded-xl py-3 mb-2"
                 >
-                  <Text className="text-wolf-red text-center font-bold">
+                  <Text className="text-wolf-text text-center font-bold">
                     Remove from seat
                   </Text>
                 </TouchableOpacity>
+                {!seatModalOccupant.isHost && (
+                  <TouchableOpacity
+                    onPress={() =>
+                      handleDeletePlayer(
+                        seatModalOccupant._id,
+                        seatModalOccupant.name,
+                      )
+                    }
+                    className="bg-wolf-card rounded-xl py-3"
+                  >
+                    <Text className="text-wolf-red text-center font-bold">
+                      Remove from game
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
 

@@ -187,6 +187,60 @@ export const removePlayerFromSeat = mutation({
   },
 });
 
+export const removePlayerFromGame = mutation({
+  args: {
+    gameId: v.id('games'),
+    playerId: v.id('players'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'lobby') {
+      throw new Error('Players can only be removed from the lobby.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    const target = await ctx.db.get(args.playerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new Error('Player not in this game.');
+    }
+    if (target.isHost) {
+      throw new Error("Host can't be removed — use Leave to end the game.");
+    }
+    if (game.playerCount <= MIN_PLAYERS) {
+      throw new Error(`Game needs at least ${MIN_PLAYERS} seats.`);
+    }
+
+    await ctx.db.delete(args.playerId);
+
+    // Compact remaining seats to 0..n-1, preserving relative order. Without
+    // this, a hole appears where the removed player sat AND any seated
+    // player whose position equals the old (now-invalid) top index falls
+    // off the ring — the lobby circle only renders `playerCount` seats but
+    // the player record still has the stale position, so they vanish from
+    // the UI while still counting as "joined" for the start check.
+    const remaining = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    const seated = remaining
+      .filter(p => typeof p.seatPosition === 'number')
+      .sort(
+        (a, b) => (a.seatPosition as number) - (b.seatPosition as number),
+      );
+    for (let i = 0; i < seated.length; i++) {
+      if (seated[i].seatPosition !== i) {
+        await ctx.db.patch(seated[i]._id, { seatPosition: i });
+      }
+    }
+
+    // selectedRoles intentionally left alone — surfacing the mismatch
+    // (TOO MANY ROLES / NEED MORE) is the design.
+    await ctx.db.patch(args.gameId, { playerCount: game.playerCount - 1 });
+  },
+});
+
 export const clearAllSeats = mutation({
   args: {
     gameId: v.id('games'),
@@ -250,15 +304,11 @@ export const setPlayerCount = mutation({
       }
     }
 
-    const patch: { playerCount: number; selectedRoles?: string[] } = {
-      playerCount: args.playerCount,
-    };
-    // Trim role selection if it now exceeds the new count. If it's short,
-    // leave it — the Start button already blocks until the host picks more.
-    if (game.selectedRoles.length > args.playerCount) {
-      patch.selectedRoles = game.selectedRoles.slice(0, args.playerCount);
-    }
-    await ctx.db.patch(args.gameId, patch);
+    // Don't touch selectedRoles either way — Start is gated on
+    // selectedRoles.length === playerCount, and the lobby UI shows
+    // "TOO MANY ROLES" / "MORE ROLES NEEDED" so the host can adjust
+    // whichever side reads more naturally.
+    await ctx.db.patch(args.gameId, { playerCount: args.playerCount });
   },
 });
 
