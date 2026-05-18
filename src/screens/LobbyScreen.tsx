@@ -22,6 +22,7 @@ import { V1_ROLES } from '../data/v1Roles';
 import { ROLES, CATEGORIES, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
 import TimersConfigModal from '../components/TimersConfigModal';
+import RolesBrowserModal from '../components/RolesBrowserModal';
 
 // Build the category map for v1 roles once. The role selection modal uses
 // this to power its team tabs (Villagers / Wolves / Team Wolf / Solo) so
@@ -85,6 +86,24 @@ function formatRoleSummary(roles: string[]): string {
     .join(', ');
 }
 
+function BalanceLine({ roles }: { roles: string[] }) {
+  let total = 0;
+  for (const r of roles) total += getRoleValue(r);
+  const color = total > 0 ? '#4caf50' : total < 0 ? '#ef5350' : '#8A8590';
+  return (
+    <Text
+      style={{
+        color,
+        fontSize: 12,
+        fontWeight: '600',
+        marginTop: 16,
+      }}
+    >
+      Balance: {total > 0 ? `+${total}` : total}
+    </Text>
+  );
+}
+
 export default function LobbyScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
@@ -110,6 +129,7 @@ export default function LobbyScreen() {
   const [seatModalIndex, setSeatModalIndex] = useState<number | null>(null);
   const [rolesModalOpen, setRolesModalOpen] = useState(false);
   const [timersModalOpen, setTimersModalOpen] = useState(false);
+  const [browseRolesOpen, setBrowseRolesOpen] = useState(false);
   const [draftCounts, setDraftCounts] = useState<Record<string, number>>({});
   const [roleFilter, setRoleFilter] = useState<RoleCategory>('villagers');
   const rolesPagerRef = useRef<ScrollView | null>(null);
@@ -519,9 +539,20 @@ export default function LobbyScreen() {
 
         {/* Roles section */}
         <View className="px-6 mt-6">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-            ROLES ({game.selectedRoles.length} / {game.playerCount})
-          </Text>
+          <View className="flex-row items-center justify-between mb-2">
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+              ROLES ({game.selectedRoles.length} / {game.playerCount})
+            </Text>
+            <TouchableOpacity
+              onPress={() => setBrowseRolesOpen(true)}
+              hitSlop={8}
+              activeOpacity={0.6}
+            >
+              <Text className="text-wolf-accent text-xs font-bold tracking-widest">
+                BROWSE ALL ›
+              </Text>
+            </TouchableOpacity>
+          </View>
           {isHost ? (
             <TouchableOpacity
               onPress={openRoleModal}
@@ -533,6 +564,7 @@ export default function LobbyScreen() {
                   ? 'Tap to pick roles'
                   : formatRoleSummary(game.selectedRoles)}
               </Text>
+              {game.selectedRoles.length > 0 && <BalanceLine roles={game.selectedRoles} />}
             </TouchableOpacity>
           ) : (
             <View className="bg-wolf-card rounded-xl px-4 py-4">
@@ -541,6 +573,7 @@ export default function LobbyScreen() {
                   ? 'Host is picking roles…'
                   : formatRoleSummary(game.selectedRoles)}
               </Text>
+              {game.selectedRoles.length > 0 && <BalanceLine roles={game.selectedRoles} />}
             </View>
           )}
         </View>
@@ -923,6 +956,14 @@ export default function LobbyScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Browse-all-roles modal. Available to host and players while waiting
+          in the lobby. When the host starts the game, LobbyScreen unmounts
+          via the phase-change effect above and this modal closes with it. */}
+      <RolesBrowserModal
+        visible={browseRolesOpen}
+        onClose={() => setBrowseRolesOpen(false)}
+      />
 
       {/* Timers config modal (host only). Sets day-phase clocks and the
           nomination budget. Mutation rejects non-host callers, so we still
