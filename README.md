@@ -6,6 +6,29 @@ Built with Expo / React Native and Convex.
 
 ---
 
+## Try the demo
+
+WolfMod is a mobile app, but you can try the public demo without an app store account. Best with a group of 5+ friends, but you can also play solo with the **Roles** browser or the single-device **ModClock** timer.
+
+### Android — install the APK
+
+[Download the APK](https://expo.dev/artifacts/eas/wVihfjXRnJevVnFJcQ7e72.apk) on your Android phone and open the file to install. You may need to allow installs from your browser the first time.
+
+<a href="https://expo.dev/artifacts/eas/wVihfjXRnJevVnFJcQ7e72.apk"><img src="assets/images/apk-download-qr.png" alt="APK download QR" width="180"></a>
+
+### iPhone or Android — run in Expo Go
+
+1. Install the free Expo Go app: [iOS App Store](https://apps.apple.com/app/expo-go/id982107779) · [Google Play](https://play.google.com/store/apps/details?id=host.exp.exponent)
+2. Open the camera or Expo Go's "Scan QR code" and scan:
+
+<a href="https://expo.dev/preview/update?message=Public+demo&updateRuntimeVersion=1.0.5&createdAt=2026-05-20T19%3A54%3A45.867Z&slug=wolfmod&projectId=cb9e5e86-7395-4618-b62a-a148b6bf3d83&group=68c3e735-2351-4d5f-ae9f-38a39e8e3e84"><img src="assets/images/expo-go-qr.png" alt="Expo Go preview QR" width="180"></a>
+
+Or open the [preview link](https://expo.dev/preview/update?message=Public+demo&updateRuntimeVersion=1.0.5&createdAt=2026-05-20T19%3A54%3A45.867Z&slug=wolfmod&projectId=cb9e5e86-7395-4618-b62a-a148b6bf3d83&group=68c3e735-2351-4d5f-ae9f-38a39e8e3e84) directly on your phone.
+
+The demo runs on a free-tier Convex backend, so it may be slow or rate-limited under load.
+
+---
+
 ## Why
 
 Most werewolf groups have just enough people for a good game. Dedicating one of them to moderate means dropping roles, missing the fun, or both. WolfMod replaces the human mod so every friend can play.
