@@ -386,28 +386,47 @@ export default function EndGameScreen() {
                     <View className="ml-2 w-4" />
                   )}
                 </TouchableOpacity>
-                {hasHistory && isExpanded && (
-                  <View
-                    className="px-4 py-3 gap-y-2"
-                    style={{
-                      borderTopWidth: 1,
-                      borderTopColor: '#2A2A38',
-                      backgroundColor: '#1A1A24',
-                    }}
-                  >
-                    {history.map((entry, i) => (
-                      <View
-                        key={`${entry.nightNumber}-${entry.kind}-${i}`}
-                        className="flex-row"
-                      >
-                        <Text className="text-wolf-muted text-xs font-bold tracking-widest w-16">
-                          N{entry.nightNumber}
-                        </Text>
-                        <View className="flex-1">{renderEntryBody(entry)}</View>
-                      </View>
-                    ))}
-                  </View>
-                )}
+                {hasHistory && isExpanded && (() => {
+                  const groups: HistoryEntry[][] = [];
+                  for (const entry of history) {
+                    const last = groups[groups.length - 1];
+                    if (last && last[0].nightNumber === entry.nightNumber) {
+                      last.push(entry);
+                    } else {
+                      groups.push([entry]);
+                    }
+                  }
+                  return (
+                    <View
+                      style={{
+                        borderTopWidth: 1,
+                        borderTopColor: '#2A2A38',
+                      }}
+                    >
+                      {groups.map((group, gi) => (
+                        <View
+                          key={`night-${group[0].nightNumber}-${gi}`}
+                          className="px-4 py-3 gap-y-2"
+                          style={{
+                            backgroundColor: gi % 2 === 0 ? '#1A1A24' : '#20202D',
+                          }}
+                        >
+                          {group.map((entry, i) => (
+                            <View
+                              key={`${entry.nightNumber}-${entry.kind}-${i}`}
+                              className="flex-row"
+                            >
+                              <Text className="text-wolf-muted text-xs font-bold tracking-widest w-16">
+                                N{entry.nightNumber}
+                              </Text>
+                              <View className="flex-1">{renderEntryBody(entry)}</View>
+                            </View>
+                          ))}
+                        </View>
+                      ))}
+                    </View>
+                  );
+                })()}
               </View>
             );
           })}
