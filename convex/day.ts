@@ -12,6 +12,8 @@ import {
   applyWinIfReached,
   isBotName,
   isTriggerRole,
+  TRIGGER_ROLES,
+  checkWinCondition,
   dayConfigOf,
   DAY_CONFIG_DEFAULTS,
   flagCubDeathIfApplicable,
@@ -552,24 +554,48 @@ export const tallyVote = internalMutation({
     const lives = eligibleCount - dies;
     const lynch = dies > lives;
 
+    // Cloak rule for the post-vote dwell:
+    //   - No lynch → no death → no cloak needed.
+    //   - Game has no trigger roles in the build → cascade is impossible →
+    //     no cloak needed (and crucially, never showing a dwell does NOT
+    //     leak info because everyone knows the build).
+    //   - Game has trigger roles AND someone is lynched → dwell, so the
+    //     presence/absence of WAIT doesn't reveal whether the lynched
+    //     player was Hunter / Hunter Wolf / Mad Destroyer.
+    //   - Exception: if the lynch already ends the game and no cascade is
+    //     pending (lynched player wasn't a trigger role), the dwell can be
+    //     skipped — end-game reveals all roles anyway.
+    const targetId = lynch ? nom.nominatedPlayerId : null;
+    const target = targetId ? await ctx.db.get(targetId) : null;
+    const cascadePossible = !!target && isTriggerRole(target.role);
+    const gameHasTriggerRoles = game.selectedRoles.some(r =>
+      TRIGGER_ROLES.has(r),
+    );
+    const playersAfterLynch =
+      lynch && targetId
+        ? players.map(p =>
+            p._id === targetId ? { ...p, alive: false } : p,
+          )
+        : players;
+    const winMet = checkWinCondition(playersAfterLynch) != null;
+    const dwellNeeded =
+      lynch && gameHasTriggerRoles && !(winMet && !cascadePossible);
+
     await ctx.db.patch(args.gameId, {
       currentNomination: {
         ...nom,
         subPhase: 'results' as const,
         resultsRevealed: true,
       },
-      voteDwellEndsAt: Date.now() + TRIGGER_DWELL_MS,
+      voteDwellEndsAt: dwellNeeded ? Date.now() + TRIGGER_DWELL_MS : undefined,
     });
 
-    if (!lynch) return;
+    if (!lynch || !target || !targetId) return;
 
     // Apply the lynch death immediately so the trigger actor (if any) can
     // act during the dwell. Their decision is private; host CONTINUE
     // remains locked until the dwell ends and any cascade triggers
     // resolve.
-    const targetId = nom.nominatedPlayerId;
-    const target = await ctx.db.get(targetId);
-    if (!target) return;
     await ctx.db.patch(targetId, { alive: false });
     await ctx.db.insert('nightActions', {
       gameId: args.gameId,
