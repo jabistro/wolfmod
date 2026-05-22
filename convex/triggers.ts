@@ -33,7 +33,7 @@ type TriggerEntry = {
 // vote dwell so all "is a trigger acting?" cloaks share one feel.
 export const TRIGGER_DWELL_MS = 10_000;
 
-// How long a public trigger result (Hunter shot / MD cascade) stays on
+// How long a public trigger result (Hunter shot / MB cascade) stays on
 // every phone before the queue advances. Long enough to read but short
 // enough that the table doesn't lose momentum.
 const ANNOUNCEMENT_MS = 4_000;
@@ -41,7 +41,7 @@ const ANNOUNCEMENT_MS = 4_000;
 /**
  * Whether trigger results should be announced to the table in the current
  * context. The Case A pre-morning silent flow (`followUp === 'morning'`)
- * suppresses announcements — MD cascade victims appear in the upcoming
+ * suppresses announcements — MB cascade victims appear in the upcoming
  * morning death list and the village figures it out from there. Every
  * other context (Case B post-morning, lynch dwell) does announce.
  */
@@ -68,15 +68,15 @@ async function setAnnouncementAndSchedule(
 // ───── Queue manipulation ───────────────────────────────────────────────────
 
 function tierIndex(role: TriggerRole): number {
-  // Hunter / Hunter Wolf act first (tier 0). Mad Destroyer acts last (tier 1).
-  return role === 'Mad Destroyer' ? 1 : 0;
+  // Hunter / Hunter Wolf act first (tier 0). Mad Bomber acts last (tier 1).
+  return role === 'Mad Bomber' ? 1 : 0;
 }
 
 /**
  * Insert a new trigger in tier order: a public entry slots before any silent
  * entries, in the order it arrived; a silent entry goes to the end. Cascade
  * triggers from a kill follow the same rule (a Hunter killed by another
- * Hunter joins the back of the public tier, ahead of any waiting MD).
+ * Hunter joins the back of the public tier, ahead of any waiting MB).
  */
 function insertInTierOrder(
   queue: TriggerEntry[],
@@ -93,7 +93,7 @@ function insertInTierOrder(
 
 /**
  * Append triggers for any of the given player IDs whose role is a trigger
- * role. Triggers go in tier order — Hunter/HW first, MD last. Does not
+ * role. Triggers go in tier order — Hunter/HW first, MB last. Does not
  * start processing; caller invokes `processTriggerQueue` after.
  */
 export async function enqueueTriggersForDeaths(
@@ -125,16 +125,16 @@ export async function enqueueTriggersForDeaths(
   }
 }
 
-// ───── Mad Destroyer geometry ───────────────────────────────────────────────
+// ───── Mad Bomber geometry ───────────────────────────────────────────────
 //
 // Seats are laid out clockwise on screen (seat 0 at top, indices increasing
 // clockwise). Players face the center, so player POV:
 //   right = seat (X-1+N) % N  → walking right = step -1
 //   left  = seat (X+1)   % N  → walking left  = step +1
-// MD walks in the chosen direction, skipping seats that are already empty
+// MB walks in the chosen direction, skipping seats that are already empty
 // (eliminated), taking the next `killCount` alive players.
 
-function madDestroyerVictims(
+function madBomberVictims(
   md: Player,
   allPlayers: Player[],
   totalSeats: number,
@@ -152,7 +152,7 @@ function madDestroyerVictims(
   let cursor = startSeat;
   // Cap iterations at totalSeats to guarantee termination even with sparse
   // seating; the loop exits early once we've collected enough victims or
-  // wrapped back to MD's own seat.
+  // wrapped back to MB's own seat.
   for (let i = 0; i < totalSeats; i++) {
     cursor = ((cursor + step) % totalSeats + totalSeats) % totalSeats;
     if (cursor === startSeat) break;
@@ -173,7 +173,7 @@ function aliveWolfCount(players: Player[]): number {
 /**
  * Mark a player dead from a trigger action, write a death row, and queue
  * their trigger if they're a trigger role themselves (cascade). Returns true
- * if the player was actually killed (i.e., they were alive). Hunter/MD kills
+ * if the player was actually killed (i.e., they were alive). Hunter/MB kills
  * bypass BG and witch saves — those only apply to night-source deaths.
  */
 async function applyTriggerDeath(
@@ -205,7 +205,7 @@ async function applyTriggerDeath(
     result,
     resolvedAt: Date.now(),
   });
-  // Wolf Cub vengeance: if the cub died from a Hunter/HW shot or an MD
+  // Wolf Cub vengeance: if the cub died from a Hunter/HW shot or an MB
   // cascade, remaining wolves get 2 kills on the next wolves step.
   await flagCubDeathIfApplicable(ctx, gameId, [targetId]);
   return true;
@@ -214,7 +214,7 @@ async function applyTriggerDeath(
 // ───── Queue processing ─────────────────────────────────────────────────────
 
 /**
- * Walk the trigger queue: auto-skip bot heads (and MD heads with no kills
+ * Walk the trigger queue: auto-skip bot heads (and MB heads with no kills
  * to make), then either (a) stop on the first real-player head, setting a
  * fresh 10 s dwell and scheduling the auto-tick, or (b) call
  * `finalizeTriggerPhase` if the queue empties.
@@ -239,7 +239,7 @@ export async function processTriggerQueue(
     }
     const head = queue[0];
 
-    // Case A (pre-morning silent context) escape hatch. If an MD cascade
+    // Case A (pre-morning silent context) escape hatch. If an MB cascade
     // kicks a public-visibility head onto the queue, those Hunter/HW
     // triggers must wait until *after* the morning announcement — they
     // learn of their death at the same time as the village. Transition
@@ -283,7 +283,7 @@ export async function processTriggerQueue(
       continue;
     }
 
-    // Real player at head — open the decision window. We prompt the MD
+    // Real player at head — open the decision window. We prompt the MB
     // even when wolves_remaining <= 1 (killCount = 0) so they know they
     // died; the picker shows "0 victims" and a single acknowledge button.
     const deadline = Date.now() + TRIGGER_DWELL_MS;
@@ -302,8 +302,8 @@ function skipActionType(role: TriggerRole): string {
       return 'hunter_skip';
     case 'Hunter Wolf':
       return 'hunter_wolf_skip';
-    case 'Mad Destroyer':
-      return 'mad_destroyer_skip';
+    case 'Mad Bomber':
+      return 'mad_bomber_skip';
   }
 }
 
@@ -334,7 +334,7 @@ async function finalizeTriggerPhase(
   });
 
   if (followUp === 'morning') {
-    // Case A path: silent MD ran pre-morning. Now reveal the morning.
+    // Case A path: silent MB ran pre-morning. Now reveal the morning.
     await ctx.db.patch(gameId, { phase: 'morning', nightStep: undefined });
     await recordWinIfReached(ctx, gameId);
     return;
@@ -469,7 +469,7 @@ export const submitHunterSkip = mutation({
   },
 });
 
-export const submitMadDestroyerKill = mutation({
+export const submitMadBomberKill = mutation({
   args: {
     gameId: v.id('games'),
     callerDeviceClientId: v.string(),
@@ -480,20 +480,20 @@ export const submitMadDestroyerKill = mutation({
       ctx,
       args.gameId,
       args.callerDeviceClientId,
-      ['Mad Destroyer'],
+      ['Mad Bomber'],
     );
-    await applyMadDestroyerDirection(ctx, args.gameId, game, me, args.direction);
+    await applyMadBomberDirection(ctx, args.gameId, game, me, args.direction);
   },
 });
 
 /**
- * Shared MD resolution path — used by the player-facing mutation and the
+ * Shared MB resolution path — used by the player-facing mutation and the
  * 10 s auto-default fallback. Computes victims from the current alive
  * state (so a Hunter shot that landed earlier this same trigger window
- * has already shifted MD's neighbors), kills them, cascades any trigger
+ * has already shifted MB's neighbors), kills them, cascades any trigger
  * roles, and advances the queue.
  */
-async function applyMadDestroyerDirection(
+async function applyMadBomberDirection(
   ctx: MutationCtx,
   gameId: Id<'games'>,
   game: Doc<'games'>,
@@ -506,7 +506,7 @@ async function applyMadDestroyerDirection(
     .collect();
   const wolves = aliveWolfCount(all);
   const killCount = Math.max(0, wolves - 1);
-  const victimIds = madDestroyerVictims(
+  const victimIds = madBomberVictims(
     md,
     all,
     game.playerCount,
@@ -517,7 +517,7 @@ async function applyMadDestroyerDirection(
     gameId,
     nightNumber: game.nightNumber,
     actorPlayerId: md._id,
-    actionType: 'mad_destroyer_kill',
+    actionType: 'mad_bomber_kill',
     result: { direction, victimIds, killCount },
     resolvedAt: Date.now(),
   });
@@ -530,7 +530,7 @@ async function applyMadDestroyerDirection(
       gameId,
       game.nightNumber,
       vid,
-      'mad-destroyer',
+      'mad-bomber',
     );
     if (killed) {
       newlyDead.push(vid);
@@ -540,8 +540,8 @@ async function applyMadDestroyerDirection(
   await popHead(ctx, gameId);
   await enqueueTriggersForDeaths(ctx, gameId, newlyDead);
 
-  // MD's cascade is announced WITHOUT attributing the killer — per
-  // house rule, MD's role stays hidden. Just stack the eliminations.
+  // MB's cascade is announced WITHOUT attributing the killer — per
+  // house rule, MB's role stays hidden. Just stack the eliminations.
   if (victimNames.length > 0 && shouldAnnounce(game.triggersFollowUp)) {
     await setAnnouncementAndSchedule(
       ctx,
@@ -588,7 +588,7 @@ export const announcementTick = internalMutation({
  * within that head (with picker data when I'm the head), plus deadlines so
  * the UI can render countdowns. Silent-trigger heads are exposed by name
  * ONLY when the caller is the head themselves — non-actors get a generic
- * "resolving" view without a name so MD's death isn't telegraphed.
+ * "resolving" view without a name so MB's death isn't telegraphed.
  */
 export const triggerView = query({
   args: {
@@ -641,7 +641,7 @@ export const triggerView = query({
       name: string;
       seatPosition?: number;
     }> = [];
-    let mdState:
+    let mbState:
       | {
           mySeat: number | null;
           totalSeats: number;
@@ -668,7 +668,7 @@ export const triggerView = query({
             seatPosition: p.seatPosition,
           }));
       }
-      if (head.role === 'Mad Destroyer') {
+      if (head.role === 'Mad Bomber') {
         const wolvesRemaining = players.filter(
           p => p.alive && p.role && isWolfTeam(p.role),
         ).length;
@@ -681,7 +681,7 @@ export const triggerView = query({
             name: p.name,
             seatPosition: p.seatPosition as number,
           }));
-        mdState = {
+        mbState = {
           mySeat:
             typeof me.seatPosition === 'number' ? me.seatPosition : null,
           totalSeats: game.playerCount,
@@ -714,15 +714,15 @@ export const triggerView = query({
       head,
       queueLength: queue.length,
       targetables,
-      mdState,
+      mbState,
     };
   },
 });
 
 /**
  * Fires at the trigger dwell deadline. If the head hasn't changed since the
- * tick was scheduled, auto-default: Hunter/HW → skip, MD → LEFT (per house
- * choice; MD has no canonical skip option).
+ * tick was scheduled, auto-default: Hunter/HW → skip, MB → LEFT (per house
+ * choice; MB has no canonical skip option).
  */
 export const triggerAutoTick = internalMutation({
   args: {
@@ -748,10 +748,10 @@ export const triggerAutoTick = internalMutation({
       return;
     }
 
-    if (head.role === 'Mad Destroyer') {
+    if (head.role === 'Mad Bomber') {
       // Default LEFT on timeout. The user can revisit if a different default
       // (random, or per-game pref) becomes preferable.
-      await applyMadDestroyerDirection(ctx, args.gameId, game, me, 'L');
+      await applyMadBomberDirection(ctx, args.gameId, game, me, 'L');
       return;
     }
     // Hunter/HW timeout → skip.

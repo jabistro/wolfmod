@@ -62,7 +62,7 @@ const ROLE_VALUES: Record<string, number> = {
   leprechaun: 5,
   lone_wolf: -5,
   lycan: -1,
-  mad_destroyer: 2,
+  mad_bomber: 2,
   magician: 5,
   magistrate: 3,
   mama_wolf: -9,

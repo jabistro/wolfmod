@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ROLES, CATEGORIES, type Role, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
+import RoleCard from './RoleCard';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COLUMNS = 3;
@@ -167,45 +168,16 @@ export default function BuildModal({ visible, onClose, selectedRoles }: Props) {
           animationType="fade"
           onRequestClose={() => setEnlarged(null)}
         >
-          {enlarged &&
-            (() => {
-              const val = getRoleValue(enlarged.name);
-              const bg =
-                val > 0 ? '#1a4a1a' : val < 0 ? '#4a1a1a' : '#2a2a2a';
-              const color =
-                val > 0 ? '#4caf50' : val < 0 ? '#ef5350' : '#8A8590';
-              return (
-                <Pressable
-                  style={styles.enlargeOverlay}
-                  onPress={() => setEnlarged(null)}
-                >
-                  <Pressable
-                    style={styles.enlargeCard}
-                    onPress={e => e.stopPropagation()}
-                  >
-                    <View style={styles.enlargeImageWrapper}>
-                      <Image
-                        source={enlarged.image}
-                        style={styles.enlargeImage}
-                        resizeMode="cover"
-                      />
-                    </View>
-                    <View style={styles.enlargeNameRow}>
-                      <Text style={styles.enlargeName}>{enlarged.name}</Text>
-                      <View
-                        style={[styles.valueBadge, { backgroundColor: bg }]}
-                      >
-                        <Text
-                          style={[styles.enlargeValueText, { color }]}
-                        >
-                          {val > 0 ? `+${val}` : `${val}`}
-                        </Text>
-                      </View>
-                    </View>
-                  </Pressable>
-                </Pressable>
-              );
-            })()}
+          {enlarged && (
+            <Pressable
+              style={styles.enlargeOverlay}
+              onPress={() => setEnlarged(null)}
+            >
+              <Pressable onPress={e => e.stopPropagation()}>
+                <RoleCard role={enlarged.name} width={SCREEN_WIDTH * 0.82} />
+              </Pressable>
+            </Pressable>
+          )}
         </Modal>
       </SafeAreaView>
     </Modal>
@@ -297,26 +269,4 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  enlargeCard: { alignItems: 'center' },
-  enlargeImageWrapper: {
-    width: SCREEN_WIDTH * 0.82,
-    height: SCREEN_WIDTH * 0.82 * 1.4,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  enlargeImage: { width: '100%', height: '100%' },
-  enlargeNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 18,
-    gap: 8,
-  },
-  enlargeName: {
-    color: '#F0EDE8',
-    fontSize: 22,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  enlargeValueText: { fontSize: 14, fontWeight: '700' },
 });

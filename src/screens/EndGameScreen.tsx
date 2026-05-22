@@ -222,13 +222,13 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
     case 'hunter_skip':
     case 'hunter_wolf_skip':
       return <Text className="text-wolf-muted text-sm italic">Held fire</Text>;
-    case 'mad_destroyer_kill': {
+    case 'mad_bomber_kill': {
       const dir = entry.direction === 'L' ? 'LEFT' : entry.direction === 'R' ? 'RIGHT' : '?';
       const victims = entry.victimNames ?? [];
       if (victims.length === 0) {
         return (
           <Text className="text-wolf-text text-sm">
-            Destruction —{' '}
+            Detonation —{' '}
             <Text className="font-bold" style={{ color: '#E0A030' }}>
               NO VICTIMS
             </Text>
@@ -237,7 +237,7 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
       }
       return (
         <Text className="text-wolf-text text-sm">
-          Destroyed{' '}
+          Detonated{' '}
           <Text className="font-bold" style={{ color: '#B03A2E' }}>
             {dir}
           </Text>
@@ -246,10 +246,10 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
         </Text>
       );
     }
-    case 'mad_destroyer_skip':
+    case 'mad_bomber_skip':
       return (
         <Text className="text-wolf-muted text-sm italic">
-          No victims to destroy
+          No one in blast radius
         </Text>
       );
     default:

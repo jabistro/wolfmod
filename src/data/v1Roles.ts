@@ -18,7 +18,7 @@ export const V1_ROLES = [
   'Tough Guy',
   'Diseased',
   'Revealer',
-  'Mad Destroyer',
+  'Mad Bomber',
   // Wolf
   'Werewolf',
   'Wolf Man',
@@ -68,7 +68,7 @@ const VILLAGE_ROLES = new Set<string>([
   'Tough Guy',
   'Diseased',
   'Revealer',
-  'Mad Destroyer',
+  'Mad Bomber',
 ]);
 // No v1 roles are currently TEAM_SOLO. Reviler and Minion both win with the
 // wolves and are wolf-team for grouping (Mentalist reads them as same-team

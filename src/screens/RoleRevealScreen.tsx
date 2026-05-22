@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
-  Image,
   SafeAreaView,
   Pressable,
   TouchableOpacity,
@@ -17,9 +16,9 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
-import { ROLES } from '../data/roles';
 import { teamForRole, type Team } from '../data/v1Roles';
 import { showAlert } from '../components/ThemedAlert';
+import RoleCard from '../components/RoleCard';
 
 type Nav = StackNavigationProp<RootStackParamList, 'RoleReveal'>;
 type Route = RouteProp<RootStackParamList, 'RoleReveal'>;
@@ -134,7 +133,6 @@ export default function RoleRevealScreen() {
     );
   }
 
-  const roleData = ROLES.find(r => r.name === me.role);
   const team = teamForRole(me.role);
   const teamColor = TEAM_COLORS[team];
   const isConfirmed = me.revealedAt !== undefined;
@@ -265,16 +263,7 @@ export default function RoleRevealScreen() {
       <View className="flex-1 items-center justify-center px-6">
         {revealed ? (
           <Animated.View style={{ alignItems: 'center', opacity: fadeAnim }}>
-            {roleData?.image && (
-              <Image
-                source={roleData.image}
-                style={{ width: 200, height: 280, borderRadius: 12 }}
-                resizeMode="cover"
-              />
-            )}
-            <Text className="text-wolf-text text-3xl font-bold mt-4 text-center">
-              {me.role}
-            </Text>
+            <RoleCard role={me.role} width={240} />
             <View
               className="mt-3 rounded-full px-4 py-1"
               style={{ backgroundColor: teamColor.bg }}

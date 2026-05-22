@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { ROLES, CATEGORIES, type Role } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
+import RoleCard from './RoleCard';
 
 function getBarColors(role: Role): string[] {
   if (role.barColors) return role.barColors;
@@ -215,31 +216,16 @@ export default function RolesBrowser({ sortMode }: Props) {
               const i = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
               setModalIndex(i);
             }}
-            renderItem={({ item }) => {
-              const val = getRoleValue(item.name);
-              const bg = val > 0 ? '#1a4a1a' : val < 0 ? '#4a1a1a' : '#2a2a2a';
-              const color = val > 0 ? '#4caf50' : val < 0 ? '#ef5350' : '#8A8590';
-              return (
-                <Pressable
-                  style={styles.modalPage}
-                  onPress={() => setModalRoleList(null)}
-                >
-                  <Pressable style={styles.modalCard} onPress={e => e.stopPropagation()}>
-                    <View style={styles.modalImageWrapper}>
-                      <Image source={item.image} style={styles.modalImage} resizeMode="cover" />
-                    </View>
-                    <View style={styles.modalNameRow}>
-                      <Text style={styles.modalName}>{item.name}</Text>
-                      <View style={[styles.valueBadge, { backgroundColor: bg }]}>
-                        <Text style={[styles.modalValueText, { color }]}>
-                          {val > 0 ? `+${val}` : `${val}`}
-                        </Text>
-                      </View>
-                    </View>
-                  </Pressable>
+            renderItem={({ item }) => (
+              <Pressable
+                style={styles.modalPage}
+                onPress={() => setModalRoleList(null)}
+              >
+                <Pressable onPress={e => e.stopPropagation()}>
+                  <RoleCard role={item.name} width={SCREEN_WIDTH * 0.82} />
                 </Pressable>
-              );
-            }}
+              </Pressable>
+            )}
           />
         </View>
       </Modal>
@@ -333,35 +319,5 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  modalCard: {
-    alignItems: 'center',
-  },
-  modalImageWrapper: {
-    width: SCREEN_WIDTH * 0.82,
-    height: SCREEN_WIDTH * 0.82 * 1.4,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  modalImage: {
-    width: '100%',
-    height: '100%',
-  },
-  modalNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 18,
-    gap: 8,
-  },
-  modalName: {
-    color: '#F0EDE8',
-    fontSize: 22,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  modalValueText: {
-    fontSize: 14,
-    fontWeight: '700',
   },
 });

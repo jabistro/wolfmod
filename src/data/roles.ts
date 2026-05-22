@@ -52,7 +52,7 @@ export const ROLES: Role[] = [
   { name: 'Tough Girl',              category: 'villagers', image: require('../../roles_medium/tough_girl.jpg'),              thumb: require('../../roles_thumbs/tough_girl.jpg') },
   { name: 'Leprechaun',              category: 'villagers', image: require('../../roles_medium/leprechaun.jpg'),              thumb: require('../../roles_thumbs/leprechaun.jpg') },
   { name: 'Revealer',                category: 'villagers', image: require('../../roles_medium/revealer.jpg'),                thumb: require('../../roles_thumbs/revealer.jpg') },
-  { name: 'Mad Destroyer',           category: 'villagers', image: require('../../roles_medium/mad_destroyer.jpg'),           thumb: require('../../roles_thumbs/mad_destroyer.jpg') },
+  { name: 'Mad Bomber',           category: 'villagers', image: require('../../roles_medium/mad_bomber.jpg'),           thumb: require('../../roles_thumbs/mad_bomber.jpg') },
   { name: 'Huntress',                category: 'villagers', image: require('../../roles_medium/huntress.jpg'),                thumb: require('../../roles_thumbs/huntress.jpg') },
   { name: 'Paranormal Investigator', category: 'villagers', image: require('../../roles_medium/paranormal_investigator.jpg'), thumb: require('../../roles_thumbs/paranormal_investigator.jpg') },
   { name: 'Village Idiot',           category: 'villagers', image: require('../../roles_medium/village_idiot.jpg'),           thumb: require('../../roles_thumbs/village_idiot.jpg') },

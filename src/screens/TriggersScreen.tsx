@@ -103,13 +103,13 @@ export default function TriggersScreen() {
         />
       );
     }
-    if (head.role === 'Mad Destroyer' && view.mdState) {
+    if (head.role === 'Mad Bomber' && view.mbState) {
       return (
-        <MadDestroyerPickerView
+        <MadBomberPickerView
           gameId={view.game._id}
           deviceClientId={deviceClientId}
           deadline={view.game.triggerEndsAt}
-          mdState={view.mdState}
+          mbState={view.mbState}
           myId={me._id}
           insetBottom={insets.bottom}
         />
@@ -299,18 +299,18 @@ function HunterPickerView({
   );
 }
 
-function MadDestroyerPickerView({
+function MadBomberPickerView({
   gameId,
   deviceClientId,
   deadline,
-  mdState,
+  mbState,
   myId,
   insetBottom,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
   deadline: number | null;
-  mdState: {
+  mbState: {
     mySeat: number | null;
     totalSeats: number;
     killCount: number;
@@ -323,36 +323,36 @@ function MadDestroyerPickerView({
   myId: Id<'players'>;
   insetBottom: number;
 }) {
-  const submitMD = useMutation(api.triggers.submitMadDestroyerKill);
+  const submitMB = useMutation(api.triggers.submitMadBomberKill);
   const [submitting, setSubmitting] = useState<'L' | 'R' | null>(null);
 
   async function pick(direction: 'L' | 'R') {
     setSubmitting(direction);
     try {
-      await submitMD({
+      await submitMB({
         gameId,
         callerDeviceClientId: deviceClientId,
         direction,
       });
     } catch (e) {
-      showAlert('Could not destroy', e instanceof Error ? e.message : String(e));
+      showAlert('Could not detonate', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(null);
     }
   }
 
   // Mark myself as a "seated" placeholder so the SeatingCircle shows my
-  // position (in gold). I'm dead so I'm not in mdState.aliveSeats.
+  // position (in gold). I'm dead so I'm not in mbState.aliveSeats.
   const seating: Array<{
     _id: Id<'players'>;
     name: string;
     seatPosition?: number;
-  }> = mdState.aliveSeats.slice();
-  if (mdState.mySeat !== null) {
+  }> = mbState.aliveSeats.slice();
+  if (mbState.mySeat !== null) {
     seating.push({
       _id: myId,
       name: 'YOU',
-      seatPosition: mdState.mySeat,
+      seatPosition: mbState.mySeat,
     });
   }
 
@@ -363,7 +363,7 @@ function MadDestroyerPickerView({
           YOU HAVE BEEN ELIMINATED
         </Text>
         <Text className="text-wolf-accent text-2xl font-extrabold tracking-widest mt-1">
-          {mdState.killCount === 0 ? 'NO ONE LEFT TO TAKE' : 'DESTROY'}
+          {mbState.killCount === 0 ? 'NO ONE LEFT TO TAKE' : 'DETONATE'}
         </Text>
       </View>
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, alignItems: 'center' }}>
@@ -374,7 +374,7 @@ function MadDestroyerPickerView({
           SECONDS
         </Text>
         <SeatingCircle
-          totalSeats={mdState.totalSeats}
+          totalSeats={mbState.totalSeats}
           players={seating}
           meId={myId}
         />
@@ -385,11 +385,11 @@ function MadDestroyerPickerView({
           <Text className="text-wolf-text text-sm text-center">
             You will take{' '}
             <Text className="text-wolf-accent font-extrabold">
-              {mdState.killCount}
+              {mbState.killCount}
             </Text>{' '}
-            {mdState.killCount === 1 ? 'player' : 'players'} with you.
+            {mbState.killCount === 1 ? 'player' : 'players'} with you.
           </Text>
-          {mdState.killCount > 0 ? (
+          {mbState.killCount > 0 ? (
             <Text className="text-wolf-muted text-xs text-center mt-1">
               Facing the center — LEFT and RIGHT are from your seat.
             </Text>
@@ -406,7 +406,7 @@ function MadDestroyerPickerView({
           paddingBottom: Math.max(insetBottom, 16) + 16,
         }}
       >
-        {mdState.killCount === 0 ? (
+        {mbState.killCount === 0 ? (
           <TouchableOpacity
             onPress={() => pick('L')}
             disabled={!!submitting}

@@ -95,7 +95,7 @@ export default defineSchema({
     /**
      * Carryover from a Wolf Cub death. Flipped on whenever a Wolf Cub
      * player dies (any cause — wolf can't kill teammate, but lynch, witch
-     * poison, hunter shot, MD cascade, etc. all qualify). Read at the
+     * poison, hunter shot, MB cascade, etc. all qualify). Read at the
      * following night's wolves step: while set, `requiredKills` is 2
      * instead of 1. Diseased block takes priority — if both flags are
      * set, the night is blocked and the vengeance is wasted. Cleared at
@@ -105,8 +105,8 @@ export default defineSchema({
 
     /**
      * Death-trigger queue. Populated when Hunter / Hunter Wolf / Mad
-     * Destroyer dies (overnight or via lynch). Ordered Hunter/HW first
-     * (public — their death is announced), MD last (silent — MD's role
+     * Bomber dies (overnight or via lynch). Ordered Hunter/HW first
+     * (public — their death is announced), MB last (silent — MB's role
      * is never spoken aloud). Each trigger gets a 10 s dwell so the host
      * can't infer from timing whether a special role died.
      */
@@ -117,7 +117,7 @@ export default defineSchema({
           role: v.union(
             v.literal('Hunter'),
             v.literal('Hunter Wolf'),
-            v.literal('Mad Destroyer'),
+            v.literal('Mad Bomber'),
           ),
           visibility: v.union(v.literal('public'), v.literal('silent')),
         }),
@@ -136,7 +136,7 @@ export default defineSchema({
     ),
     /**
      * Wall-clock deadline (ms) for the current trigger head's decision. On
-     * timeout, an internal mutation auto-defaults (Hunter/HW → skip, MD →
+     * timeout, an internal mutation auto-defaults (Hunter/HW → skip, MB →
      * LEFT). The dwell is also enforced as a minimum so quick decisions
      * don't leak "actor decided fast".
      */
@@ -151,14 +151,14 @@ export default defineSchema({
 
     /**
      * Public message shown to ALL phones for ~4 s after a Hunter/HW shot
-     * or an MD cascade with victims. Cloaks the role (Hunter shots are
-     * phrased "X HAS SHOT Y" for both Hunter and Hunter Wolf; MD
+     * or an MB cascade with victims. Cloaks the role (Hunter shots are
+     * phrased "X HAS SHOT Y" for both Hunter and Hunter Wolf; MB
      * cascades list eliminations with no attribution). Queue processing
      * pauses for this window so the village can read the result before
      * the next trigger fires. Cleared by `announcementTick`.
      *
      * Suppressed in Case A pre-morning context (`triggersFollowUp ===
-     * 'morning'`) — MD cascade victims fold silently into the morning
+     * 'morning'`) — MB cascade victims fold silently into the morning
      * announcement instead.
      */
     triggerAnnouncement: v.optional(

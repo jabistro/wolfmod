@@ -1349,7 +1349,7 @@ function ResultsView({
         )}
       </View>
 
-      {/* Lynch trigger overlay — unchanged (Hunter / Hunter Wolf / MD picker
+      {/* Lynch trigger overlay — unchanged (Hunter / Hunter Wolf / MB picker
           for the just-lynched player). */}
       <LynchTriggerOverlay
         gameId={game._id}
@@ -1396,13 +1396,13 @@ function LynchTriggerOverlay({
       />
     );
   }
-  if (view.head.role === 'Mad Destroyer' && view.mdState) {
+  if (view.head.role === 'Mad Bomber' && view.mbState) {
     return (
-      <MadDestroyerModal
+      <MadBomberModal
         gameId={gameId}
         deviceClientId={deviceClientId}
         deadline={view.game.triggerEndsAt}
-        mdState={view.mdState}
+        mbState={view.mbState}
         myId={view.me._id}
       />
     );
@@ -1519,17 +1519,17 @@ function HunterModal({
   );
 }
 
-function MadDestroyerModal({
+function MadBomberModal({
   gameId,
   deviceClientId,
   deadline,
-  mdState,
+  mbState,
   myId,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
   deadline: number | null;
-  mdState: {
+  mbState: {
     mySeat: number | null;
     totalSeats: number;
     killCount: number;
@@ -1541,19 +1541,19 @@ function MadDestroyerModal({
   };
   myId: Id<'players'>;
 }) {
-  const submitMD = useMutation(api.triggers.submitMadDestroyerKill);
+  const submitMB = useMutation(api.triggers.submitMadBomberKill);
   const [submitting, setSubmitting] = useState<'L' | 'R' | null>(null);
 
   async function pick(direction: 'L' | 'R') {
     setSubmitting(direction);
     try {
-      await submitMD({
+      await submitMB({
         gameId,
         callerDeviceClientId: deviceClientId,
         direction,
       });
     } catch (e) {
-      showAlert('Could not destroy', e instanceof Error ? e.message : String(e));
+      showAlert('Could not detonate', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(null);
     }
@@ -1563,9 +1563,9 @@ function MadDestroyerModal({
     _id: Id<'players'>;
     name: string;
     seatPosition?: number;
-  }> = mdState.aliveSeats.slice();
-  if (mdState.mySeat !== null) {
-    seating.push({ _id: myId, name: 'YOU', seatPosition: mdState.mySeat });
+  }> = mbState.aliveSeats.slice();
+  if (mbState.mySeat !== null) {
+    seating.push({ _id: myId, name: 'YOU', seatPosition: mbState.mySeat });
   }
 
   return (
@@ -1583,14 +1583,14 @@ function MadDestroyerModal({
           YOU HAVE BEEN ELIMINATED
         </Text>
         <Text className="text-wolf-accent text-2xl font-extrabold tracking-widest mt-1 mb-3">
-          {mdState.killCount === 0 ? 'NO ONE LEFT TO TAKE' : 'DESTROY'}
+          {mbState.killCount === 0 ? 'NO ONE LEFT TO TAKE' : 'DETONATE'}
         </Text>
         <CountdownText deadline={deadline} />
         <Text className="text-wolf-muted text-xs tracking-widest mt-1 mb-3">
           SECONDS
         </Text>
         <SeatingCircle
-          totalSeats={mdState.totalSeats}
+          totalSeats={mbState.totalSeats}
           players={seating}
           meId={myId}
         />
@@ -1601,11 +1601,11 @@ function MadDestroyerModal({
           <Text className="text-wolf-text text-sm text-center">
             You will take{' '}
             <Text className="text-wolf-accent font-extrabold">
-              {mdState.killCount}
+              {mbState.killCount}
             </Text>{' '}
-            {mdState.killCount === 1 ? 'player' : 'players'} with you.
+            {mbState.killCount === 1 ? 'player' : 'players'} with you.
           </Text>
-          {mdState.killCount > 0 ? (
+          {mbState.killCount > 0 ? (
             <Text className="text-wolf-muted text-xs text-center mt-1">
               Facing the center — LEFT and RIGHT are from your seat.
             </Text>
@@ -1615,7 +1615,7 @@ function MadDestroyerModal({
             </Text>
           )}
         </View>
-        {mdState.killCount === 0 ? (
+        {mbState.killCount === 0 ? (
           <View style={{ marginTop: 24, width: '100%' }}>
             <TouchableOpacity
               onPress={() => pick('L')}

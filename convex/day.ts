@@ -561,7 +561,7 @@ export const tallyVote = internalMutation({
     //     leak info because everyone knows the build).
     //   - Game has trigger roles AND someone is lynched → dwell, so the
     //     presence/absence of WAIT doesn't reveal whether the lynched
-    //     player was Hunter / Hunter Wolf / Mad Destroyer.
+    //     player was Hunter / Hunter Wolf / Mad Bomber.
     //   - Exception: if the lynch already ends the game and no cascade is
     //     pending (lynched player wasn't a trigger role), the dwell can be
     //     skipped — end-game reveals all roles anyway.
@@ -731,7 +731,7 @@ export const dayView = query({
       cfg.maxNominationsPerDay - nominationsUsed,
     );
 
-    // Cascade deaths from THIS lynch (Hunter/HW shot, MD blast). For shot
+    // Cascade deaths from THIS lynch (Hunter/HW shot, MB blast). For shot
     // deaths we also resolve the shooter's name from the matching shot
     // action — the shooter is public info (the announcement already says
     // "X HAS SHOT Y"), and attribution lets the table see chained shots

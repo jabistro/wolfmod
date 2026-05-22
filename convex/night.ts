@@ -624,7 +624,7 @@ async function resolveMorning(
   }
 
   // Tracks every player who actually dies this morning resolution. Used at
-  // the end to build the death-trigger queue from any Hunter/HW/MD among
+  // the end to build the death-trigger queue from any Hunter/HW/MB among
   // them.
   const newDeadIds: Id<'players'>[] = [];
 
@@ -813,19 +813,19 @@ async function resolveMorning(
     }
   }
 
-  // Death-trigger routing. Hunter / Hunter Wolf / Mad Destroyer among the
+  // Death-trigger routing. Hunter / Hunter Wolf / Mad Bomber among the
   // newly-dead each generate a queued trigger. Two cases:
   //
-  // Case A — only MD died (no Hunter/HW): MD acts SILENTLY before the
+  // Case A — only MB died (no Hunter/HW): MB acts SILENTLY before the
   //   morning is announced. The 'triggers' phase runs first; its cascade
   //   victims fold silently into the death list. Morning is shown when
   //   the queue empties.
   //
-  // Case B — any Hunter/HW died (with or without MD): the morning is
+  // Case B — any Hunter/HW died (with or without MB): the morning is
   //   shown first, INCLUDING the Hunter/HW death (so they learn at the
   //   same time as everyone else). Hunter cascade victims are NOT yet
   //   processed. Host taps BEGIN DAY → engine routes through the
-  //   'triggers' phase (public Hunter prompts first, silent MD last)
+  //   'triggers' phase (public Hunter prompts first, silent MB last)
   //   before reaching the day.
   //
   // No triggers — straight to morning, record winner if applicable.
@@ -835,7 +835,7 @@ async function resolveMorning(
     await recordWinIfReached(ctx, gameId);
     return;
   }
-  const hasPublic = triggerDeaths.some(t => t.role !== 'Mad Destroyer');
+  const hasPublic = triggerDeaths.some(t => t.role !== 'Mad Bomber');
   if (hasPublic) {
     // Case B: morning first, triggers after BEGIN DAY.
     await ctx.db.patch(gameId, {
@@ -852,7 +852,7 @@ async function resolveMorning(
     // (Hunter cascade) before the game is officially over.
     return;
   }
-  // Case A: silent MD pre-morning.
+  // Case A: silent MB pre-morning.
   await ctx.db.patch(gameId, {
     phase: 'triggers',
     nightStep: undefined,
@@ -868,7 +868,7 @@ async function resolveMorning(
 
 /**
  * Filters a set of just-died player IDs to those whose role is a trigger
- * role (Hunter / Hunter Wolf / Mad Destroyer), returning them with their
+ * role (Hunter / Hunter Wolf / Mad Bomber), returning them with their
  * role attached. Death order is preserved.
  */
 async function collectTriggerDeaths(
@@ -2952,10 +2952,10 @@ export const morningView = query({
 
     const playerById = new Map(players.map(p => [p._id, p]));
     // Morning announces every overnight death. Role identities aren't
-    // surfaced — only names — so MD's mechanic stays hidden even though
+    // surfaced — only names — so MB's mechanic stays hidden even though
     // their death is reported. (Hiding the death entirely was a worse
     // cloak: their seat empties in the day phase anyway, and in 1-wolf
-    // games with no MD cascade victims it created a "no one died but a
+    // games with no MB cascade victims it created a "no one died but a
     // seat is gone" contradiction.)
     const deaths = deathActions
       .map(a => (a.targetPlayerId ? playerById.get(a.targetPlayerId) : null))

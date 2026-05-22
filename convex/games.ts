@@ -829,9 +829,9 @@ export const endGameView = query({
         baseEntry.outcome = killed ? 'killed' : 'missed';
       }
 
-      // Mad Destroyer's blast — populate direction + victim names from
+      // Mad Bomber's blast — populate direction + victim names from
       // the result blob so the end-game row can render the full cascade.
-      if (a.actionType === 'mad_destroyer_kill') {
+      if (a.actionType === 'mad_bomber_kill') {
         const direction = (a.result?.direction as string | undefined) ?? null;
         const victimIds = (a.result?.victimIds as
           | Id<'players'>[]
