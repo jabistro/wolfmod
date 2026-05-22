@@ -161,7 +161,7 @@ export default function DayScreen() {
     );
   }
 
-  const { game, me, alive, currentNomination } = view;
+  const { game, me, alive, players, currentNomination } = view;
   const isHost = me.isHost;
 
   if (currentNomination) {
@@ -174,7 +174,7 @@ export default function DayScreen() {
           isHost={isHost}
           nomination={currentNomination}
           cascadeDeaths={view.cascadeDeaths}
-          alive={alive}
+          players={players}
         />
       );
     }
@@ -207,6 +207,7 @@ export default function DayScreen() {
       meAlive={me.alive}
       meId={me._id}
       alive={alive}
+      players={players}
       onBeginNight={async () => {
         try {
           await beginNight({
@@ -446,6 +447,7 @@ function DiscussionView({
   meAlive,
   meId,
   alive,
+  players,
   onBeginNight,
 }: {
   game: DayGame;
@@ -454,6 +456,12 @@ function DiscussionView({
   meAlive: boolean;
   meId: Id<'players'>;
   alive: Array<{ _id: Id<'players'>; name: string; seatPosition?: number }>;
+  players: Array<{
+    _id: Id<'players'>;
+    name: string;
+    seatPosition?: number;
+    alive: boolean;
+  }>;
   onBeginNight: () => Promise<void>;
 }) {
   const insets = useSafeAreaInsets();
@@ -518,7 +526,7 @@ function DiscussionView({
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24, alignItems: 'center' }}>
         <SeatingCircle
           totalSeats={game.playerCount}
-          players={alive}
+          players={players}
           meId={meId}
           onPress={
             isHost && !dayOver
@@ -1124,7 +1132,7 @@ function ResultsView({
   isHost,
   nomination,
   cascadeDeaths,
-  alive,
+  players,
 }: {
   game: DayGame;
   deviceClientId: string;
@@ -1136,7 +1144,12 @@ function ResultsView({
     cause: string;
     shotByName: string | null;
   }>;
-  alive: Array<{ _id: Id<'players'>; name: string; seatPosition?: number }>;
+  players: Array<{
+    _id: Id<'players'>;
+    name: string;
+    seatPosition?: number;
+    alive: boolean;
+  }>;
 }) {
   const insets = useSafeAreaInsets();
   const continueGame = useMutation(api.day.continueGameAfterVote);
@@ -1201,7 +1214,7 @@ function ResultsView({
         <View className="mt-2 mb-6">
           <SeatingCircle
             totalSeats={game.playerCount}
-            players={alive}
+            players={players}
             centerOverlay={
               <View style={{ alignItems: 'center', paddingHorizontal: 8 }}>
                 <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1">

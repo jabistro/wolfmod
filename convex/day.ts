@@ -934,6 +934,15 @@ export const dayView = query({
           name: p.name,
           seatPosition: p.seatPosition,
         })),
+      players: players
+        .slice()
+        .sort((a, b) => (a.seatPosition ?? 0) - (b.seatPosition ?? 0))
+        .map(p => ({
+          _id: p._id,
+          name: p.name,
+          seatPosition: p.seatPosition,
+          alive: p.alive,
+        })),
       currentNomination: nomination,
       cascadeDeaths,
     };
