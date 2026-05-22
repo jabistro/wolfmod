@@ -16,6 +16,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { teamForRole, type Team } from '../data/v1Roles';
+import { SeatingCircle } from '../components/SeatingCircle';
 
 type Nav = StackNavigationProp<RootStackParamList, 'EndGame'>;
 type Route = RouteProp<RootStackParamList, 'EndGame'>;
@@ -299,19 +300,28 @@ export default function EndGameScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
-      <View className="px-4 pt-10 pb-4 items-center">
+      <View className="px-4 pt-10 pb-2 items-center">
         <Text className="text-wolf-muted text-xs tracking-widest">GAME OVER</Text>
-        <View
-          className="mt-3 rounded-2xl px-8 py-4"
-          style={{ backgroundColor: winnerBg }}
-        >
-          <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
-            {winnerLabel}
-          </Text>
-        </View>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
+        <View className="items-center mt-2 mb-4">
+          <SeatingCircle
+            totalSeats={game.playerCount}
+            players={players}
+            centerOverlay={
+              <View
+                className="rounded-2xl px-5 py-2"
+                style={{ backgroundColor: winnerBg }}
+              >
+                <Text className="text-wolf-text text-lg font-extrabold tracking-widest text-center">
+                  {winnerLabel}
+                </Text>
+              </View>
+            }
+          />
+        </View>
+
         <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2 mt-2">
           ROLES REVEALED
         </Text>

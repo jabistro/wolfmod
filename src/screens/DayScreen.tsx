@@ -174,6 +174,7 @@ export default function DayScreen() {
           isHost={isHost}
           nomination={currentNomination}
           cascadeDeaths={view.cascadeDeaths}
+          alive={alive}
         />
       );
     }
@@ -1123,6 +1124,7 @@ function ResultsView({
   isHost,
   nomination,
   cascadeDeaths,
+  alive,
 }: {
   game: DayGame;
   deviceClientId: string;
@@ -1134,6 +1136,7 @@ function ResultsView({
     cause: string;
     shotByName: string | null;
   }>;
+  alive: Array<{ _id: Id<'players'>; name: string; seatPosition?: number }>;
 }) {
   const insets = useSafeAreaInsets();
   const continueGame = useMutation(api.day.continueGameAfterVote);
@@ -1188,17 +1191,34 @@ function ResultsView({
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
-        <View className="items-center mt-2 mb-6">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1">
-            VOTED ON
-          </Text>
-          <Text className="text-wolf-text text-3xl font-extrabold tracking-widest text-center">
-            {nomination.nominee?.name.toUpperCase() ?? '—'}
-          </Text>
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: 24,
+          paddingBottom: 24,
+          alignItems: 'center',
+        }}
+      >
+        <View className="mt-2 mb-6">
+          <SeatingCircle
+            totalSeats={game.playerCount}
+            players={alive}
+            centerOverlay={
+              <View style={{ alignItems: 'center', paddingHorizontal: 8 }}>
+                <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1">
+                  VOTED ON
+                </Text>
+                <Text
+                  className="text-wolf-text text-xl font-extrabold tracking-widest text-center"
+                  numberOfLines={2}
+                >
+                  {nomination.nominee?.name.toUpperCase() ?? '—'}
+                </Text>
+              </View>
+            }
+          />
         </View>
 
-        <View className="flex-row" style={{ gap: 12 }}>
+        <View className="flex-row self-stretch" style={{ gap: 12 }}>
           <View
             className="flex-1 bg-wolf-card rounded-xl px-4 py-3"
             style={{ borderWidth: 1, borderColor: '#1F4E80' }}
@@ -1237,7 +1257,7 @@ function ResultsView({
 
         {!lynch ? (
           <View
-            className="mt-6 rounded-2xl px-5 py-5"
+            className="mt-6 rounded-2xl px-5 py-5 self-stretch"
             style={{
               backgroundColor: '#22222F',
               borderWidth: 2,
@@ -1253,7 +1273,7 @@ function ResultsView({
 
         {lynch || cascadeDeaths.length > 0 ? (
           <View
-            className="mt-6 rounded-2xl px-5 py-5"
+            className="mt-6 rounded-2xl px-5 py-5 self-stretch"
             style={{
               backgroundColor: '#22222F',
               borderWidth: 2,

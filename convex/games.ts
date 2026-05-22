@@ -860,6 +860,7 @@ export const endGameView = query({
         _id: game._id,
         phase: game.phase,
         winner: game.winner ?? null,
+        playerCount: game.playerCount,
       },
       players: players
         .slice()

@@ -6,6 +6,13 @@ export type SeatingPlayer = {
   _id: Id<'players'>;
   name: string;
   seatPosition?: number;
+  /**
+   * Optional. When set to `false`, the seat still renders (faded) so the
+   * viewer can see the original roster. Omit or pass `true` and the seat
+   * renders normally. Callers that want eliminated players to appear as
+   * pure gaps should simply drop them from the `players` array.
+   */
+  alive?: boolean;
 };
 
 interface SeatingCircleProps {
@@ -36,6 +43,11 @@ interface SeatingCircleProps {
   onPress?: (player: SeatingPlayer) => void;
   /** Override the default circle size; defaults to ~min(320, screen-32). */
   size?: number;
+  /**
+   * Optional content rendered centered inside the ring (e.g., "VOTED ON
+   * NAME" on the vote-result screen, "VILLAGE WINS" on end-game).
+   */
+  centerOverlay?: React.ReactNode;
 }
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -79,6 +91,7 @@ export function SeatingCircle({
   selectableIds,
   onPress,
   size = DEFAULT_CIRCLE_SIZE,
+  centerOverlay,
 }: SeatingCircleProps) {
   const playerBySeat = new Map<number, SeatingPlayer>();
   for (const p of players) {
@@ -92,37 +105,50 @@ export function SeatingCircle({
     <View style={{ width: size, height: size, position: 'relative' }}>
       {Array.from({ length: totalSeats }).map((_, i) => {
         const occupant = playerBySeat.get(i);
-        // Empty seat (eliminated or unfilled): leave as a visual gap so the
-        // remaining alive players keep their original positions.
+        // Empty seat (eliminated mid-game with no faded-roster mode, or
+        // simply unfilled): leave as a visual gap so remaining alive players
+        // keep their original positions.
         if (!occupant) return null;
 
         const pos = seatPos(i, totalSeats, size, seatSize);
+        const isDead = occupant.alive === false;
         const isMe = occupant._id === meId;
         const isSelected =
-          occupant._id === selectedId ||
-          (selectedIds?.has(occupant._id as unknown as string) ?? false);
+          !isDead &&
+          (occupant._id === selectedId ||
+            (selectedIds?.has(occupant._id as unknown as string) ?? false));
         const isSelectable =
-          selectableIds === undefined ||
-          selectableIds.has(occupant._id as unknown as string);
+          !isDead &&
+          (selectableIds === undefined ||
+            selectableIds.has(occupant._id as unknown as string));
         const tappable = !!onPress && isSelectable;
         const fontSize = seatFontSize(seatSize, occupant.name.length > 6);
 
-        const borderColor = isSelected
-          ? '#D4A017'
-          : isMe
+        const borderColor = isDead
+          ? '#2A2A38'
+          : isSelected
             ? '#D4A017'
-            : isSelectable
-              ? '#3A3A48'
-              : '#2A2A38';
+            : isMe
+              ? '#D4A017'
+              : isSelectable
+                ? '#3A3A48'
+                : '#2A2A38';
         const backgroundColor = isSelected ? '#3A2A14' : '#22222F';
+        const textColor = isDead
+          ? '#5A5560'
+          : isSelectable
+            ? '#F0EDE8'
+            : '#5A5560';
+        const seatOpacity = isDead ? 0.35 : isSelectable ? 1 : 0.5;
 
         const content = (
           <Text
             style={{
-              color: isSelectable ? '#F0EDE8' : '#5A5560',
+              color: textColor,
               fontSize,
               fontWeight: isSelected || isMe ? '700' : '600',
               textAlign: 'center',
+              textDecorationLine: isDead ? 'line-through' : 'none',
             }}
             numberOfLines={2}
           >
@@ -138,12 +164,12 @@ export function SeatingCircle({
           height: seatSize,
           borderRadius: seatSize / 2,
           backgroundColor,
-          borderWidth: isSelected || isMe ? 2 : 1,
+          borderWidth: isSelected || (isMe && !isDead) ? 2 : 1,
           borderColor,
           alignItems: 'center' as const,
           justifyContent: 'center' as const,
           paddingHorizontal: 2,
-          opacity: isSelectable ? 1 : 0.5,
+          opacity: seatOpacity,
         };
 
         if (tappable) {
@@ -164,6 +190,22 @@ export function SeatingCircle({
           </View>
         );
       })}
+      {centerOverlay ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: seatSize,
+            left: seatSize,
+            right: seatSize,
+            bottom: seatSize,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {centerOverlay}
+        </View>
+      ) : null}
     </View>
   );
 }
