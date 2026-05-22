@@ -104,11 +104,12 @@ export default defineSchema({
     wolfCubVengeance: v.optional(v.boolean()),
 
     /**
-     * Death-trigger queue. Populated when Hunter / Hunter Wolf / Mad
-     * Bomber dies (overnight or via lynch). Ordered Hunter/HW first
-     * (public — their death is announced), MB last (silent — MB's role
-     * is never spoken aloud). Each trigger gets a 10 s dwell so the host
-     * can't infer from timing whether a special role died.
+     * Death-trigger queue. Populated when Hunter / Hunter Wolf dies
+     * (overnight or via lynch); each entry gets a 10 s dwell so the
+     * actor can decide whom to shoot. Mad Bomber is NOT queued — its
+     * detonation is automatic at the moment of death and writes its
+     * own `mad_bomber_kill` action row inline. `visibility` is retained
+     * as optional for legacy records (older runs may still have it set).
      */
     pendingDeathTriggers: v.optional(
       v.array(
@@ -117,9 +118,10 @@ export default defineSchema({
           role: v.union(
             v.literal('Hunter'),
             v.literal('Hunter Wolf'),
-            v.literal('Mad Bomber'),
           ),
-          visibility: v.union(v.literal('public'), v.literal('silent')),
+          visibility: v.optional(
+            v.union(v.literal('public'), v.literal('silent')),
+          ),
         }),
       ),
     ),
@@ -136,9 +138,9 @@ export default defineSchema({
     ),
     /**
      * Wall-clock deadline (ms) for the current trigger head's decision. On
-     * timeout, an internal mutation auto-defaults (Hunter/HW → skip, MB →
-     * LEFT). The dwell is also enforced as a minimum so quick decisions
-     * don't leak "actor decided fast".
+     * timeout, an internal mutation auto-defaults Hunter/HW → skip. The
+     * dwell is also enforced as a minimum so quick decisions don't leak
+     * "actor decided fast".
      */
     triggerEndsAt: v.optional(v.number()),
     /**
@@ -150,16 +152,13 @@ export default defineSchema({
     voteDwellEndsAt: v.optional(v.number()),
 
     /**
-     * Public message shown to ALL phones for ~4 s after a Hunter/HW shot
-     * or an MB cascade with victims. Cloaks the role (Hunter shots are
-     * phrased "X HAS SHOT Y" for both Hunter and Hunter Wolf; MB
-     * cascades list eliminations with no attribution). Queue processing
-     * pauses for this window so the village can read the result before
-     * the next trigger fires. Cleared by `announcementTick`.
-     *
-     * Suppressed in Case A pre-morning context (`triggersFollowUp ===
-     * 'morning'`) — MB cascade victims fold silently into the morning
-     * announcement instead.
+     * Public message shown to ALL phones for ~4 s after a Hunter/HW shot.
+     * Cloaks the role — Hunter shots are phrased "X HAS SHOT Y" for both
+     * Hunter and Hunter Wolf. Queue processing pauses for this window so
+     * the village can read the result before the next trigger fires.
+     * Cleared by `announcementTick`. Mad Bomber detonations are NOT
+     * announced through this field — they fold silently into the morning
+     * death list or the lynch result panel, since MB's role stays hidden.
      */
     triggerAnnouncement: v.optional(
       v.object({

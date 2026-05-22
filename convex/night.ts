@@ -12,7 +12,6 @@ import {
   findCaller,
   requireHost,
   isBotName,
-  isTriggerRole,
   recordWinIfReached,
   initializeDayClock,
   flagCubDeathIfApplicable,
@@ -20,6 +19,7 @@ import {
 import {
   enqueueTriggersForDeaths,
   processTriggerQueue,
+  applyMadBomberBlast,
 } from './triggers';
 import {
   isWolfTeam,
@@ -813,73 +813,81 @@ async function resolveMorning(
     }
   }
 
-  // Death-trigger routing. Hunter / Hunter Wolf / Mad Bomber among the
-  // newly-dead each generate a queued trigger. Two cases:
+  // Mad Bomber detonations resolve INLINE — every bomber in the morning
+  // death list immediately takes their alive neighbors with them. Night
+  // protections (BG / witch) don't apply: those only block the bomber's
+  // own night-source death; once the bomber is confirmed dead in morning
+  // resolution, the explosion is unstoppable. Cascade victims who are
+  // themselves bombers chain inside `applyMadBomberBlast`. Hunter/HW
+  // among the cascade are picked up by the trigger walker below.
+  const bomberIds = await filterRole(ctx, newDeadIds, 'Mad Bomber');
+  for (const bomberId of bomberIds) {
+    const blastDead = await applyMadBomberBlast(
+      ctx,
+      gameId,
+      nightNumber,
+      bomberId,
+    );
+    for (const id of blastDead) newDeadIds.push(id);
+  }
+
+  // Hunter / Hunter Wolf among the newly-dead each generate a queued
+  // trigger. Two paths now:
   //
-  // Case A — only MB died (no Hunter/HW): MB acts SILENTLY before the
-  //   morning is announced. The 'triggers' phase runs first; its cascade
-  //   victims fold silently into the death list. Morning is shown when
-  //   the queue empties.
-  //
-  // Case B — any Hunter/HW died (with or without MB): the morning is
-  //   shown first, INCLUDING the Hunter/HW death (so they learn at the
-  //   same time as everyone else). Hunter cascade victims are NOT yet
-  //   processed. Host taps BEGIN DAY → engine routes through the
-  //   'triggers' phase (public Hunter prompts first, silent MB last)
-  //   before reaching the day.
-  //
-  // No triggers — straight to morning, record winner if applicable.
-  const triggerDeaths = await collectTriggerDeaths(ctx, newDeadIds);
-  if (triggerDeaths.length === 0) {
+  //   * Any Hunter/HW died → morning is shown first (with the death),
+  //     then host taps BEGIN DAY → engine enters 'triggers' phase and
+  //     the actor decides.
+  //   * No Hunter/HW died → straight to morning. The bomber's cascade
+  //     (already applied above) folds into the morning death list.
+  const hunterDeaths = await filterRoles(
+    ctx,
+    newDeadIds,
+    ['Hunter', 'Hunter Wolf'],
+  );
+  if (hunterDeaths.length === 0) {
     await ctx.db.patch(gameId, { phase: 'morning', nightStep: undefined });
     await recordWinIfReached(ctx, gameId);
     return;
   }
-  const hasPublic = triggerDeaths.some(t => t.role !== 'Mad Bomber');
-  if (hasPublic) {
-    // Case B: morning first, triggers after BEGIN DAY.
-    await ctx.db.patch(gameId, {
-      phase: 'morning',
-      nightStep: undefined,
-      triggersFollowUp: 'day',
-    });
-    await enqueueTriggersForDeaths(
-      ctx,
-      gameId,
-      triggerDeaths.map(t => t.id),
-    );
-    // Don't recordWinIfReached yet — the triggers may shift the count
-    // (Hunter cascade) before the game is officially over.
-    return;
-  }
-  // Case A: silent MB pre-morning.
   await ctx.db.patch(gameId, {
-    phase: 'triggers',
+    phase: 'morning',
     nightStep: undefined,
-    triggersFollowUp: 'morning',
+    triggersFollowUp: 'day',
   });
-  await enqueueTriggersForDeaths(
-    ctx,
-    gameId,
-    triggerDeaths.map(t => t.id),
-  );
-  await processTriggerQueue(ctx, gameId);
+  await enqueueTriggersForDeaths(ctx, gameId, hunterDeaths);
+  // Don't recordWinIfReached yet — the triggers may shift the count
+  // (Hunter cascade) before the game is officially over.
 }
 
 /**
- * Filters a set of just-died player IDs to those whose role is a trigger
- * role (Hunter / Hunter Wolf / Mad Bomber), returning them with their
- * role attached. Death order is preserved.
+ * Subset of `ids` whose player role exactly matches `role`. Death order
+ * is preserved.
  */
-async function collectTriggerDeaths(
+async function filterRole(
   ctx: MutationCtx,
-  deadIds: readonly Id<'players'>[],
-): Promise<Array<{ id: Id<'players'>; role: string }>> {
-  const out: Array<{ id: Id<'players'>; role: string }> = [];
-  for (const id of deadIds) {
+  ids: readonly Id<'players'>[],
+  role: string,
+): Promise<Id<'players'>[]> {
+  const out: Id<'players'>[] = [];
+  for (const id of ids) {
     const p = await ctx.db.get(id);
-    if (!p || !isTriggerRole(p.role)) continue;
-    out.push({ id, role: p.role });
+    if (p?.role === role) out.push(id);
+  }
+  return out;
+}
+
+/**
+ * Subset of `ids` whose player role is in `roles`. Death order preserved.
+ */
+async function filterRoles(
+  ctx: MutationCtx,
+  ids: readonly Id<'players'>[],
+  roles: readonly string[],
+): Promise<Id<'players'>[]> {
+  const out: Id<'players'>[] = [];
+  for (const id of ids) {
+    const p = await ctx.db.get(id);
+    if (p?.role && roles.includes(p.role)) out.push(id);
   }
   return out;
 }

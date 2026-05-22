@@ -668,7 +668,6 @@ export const endGameView = query({
       team: string | null;
       sameTeam: string | null;
       outcome: string | null;
-      direction: string | null;
       victimNames: string[] | null;
     };
 
@@ -731,7 +730,6 @@ export const endGameView = query({
         team: result.team ?? null,
         sameTeam: result.sameTeam ?? null,
         outcome: null,
-        direction: null,
         victimNames: null,
       };
 
@@ -829,14 +827,13 @@ export const endGameView = query({
         baseEntry.outcome = killed ? 'killed' : 'missed';
       }
 
-      // Mad Bomber's blast — populate direction + victim names from
-      // the result blob so the end-game row can render the full cascade.
+      // Mad Bomber's blast — populate victim names from the result blob
+      // so the end-game row can render the full cascade. No direction
+      // anymore; the bomb takes both neighbors automatically.
       if (a.actionType === 'mad_bomber_kill') {
-        const direction = (a.result?.direction as string | undefined) ?? null;
         const victimIds = (a.result?.victimIds as
           | Id<'players'>[]
           | undefined) ?? [];
-        baseEntry.direction = direction;
         baseEntry.victimNames = victimIds
           .map(id => nameFor(id))
           .filter((n): n is string => !!n);

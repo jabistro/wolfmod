@@ -2,22 +2,17 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { isWolfTeam } from '../src/data/v1Roles';
 
-export type TriggerRole = 'Hunter' | 'Hunter Wolf' | 'Mad Bomber';
+// Trigger roles are those whose death prompts an actor decision (shoot or
+// hold fire) before the engine advances. Mad Bomber is NOT a trigger role
+// — its detonation is automatic and applied at the moment of death by
+// `applyMadBomberBlast`.
+export type TriggerRole = 'Hunter' | 'Hunter Wolf';
 export const TRIGGER_ROLES: ReadonlySet<string> = new Set<string>([
   'Hunter',
   'Hunter Wolf',
-  'Mad Bomber',
 ]);
 export function isTriggerRole(role: string | undefined | null): role is TriggerRole {
   return !!role && TRIGGER_ROLES.has(role);
-}
-/**
- * Hunter / Hunter Wolf are "public" — their death is announced. Mad
- * Bomber is "silent" — their death is never mentioned. The trigger
- * queue interleaves both kinds.
- */
-export function triggerVisibility(role: TriggerRole): 'public' | 'silent' {
-  return role === 'Mad Bomber' ? 'silent' : 'public';
 }
 
 export async function findCaller(

@@ -22,6 +22,7 @@ import { enterStep } from './night';
 import {
   enqueueTriggersForDeaths,
   processTriggerQueue,
+  applyMadBomberBlast,
   TRIGGER_DWELL_MS,
 } from './triggers';
 import { NIGHT_STEPS } from '../src/data/nightOrder';
@@ -556,18 +557,33 @@ export const tallyVote = internalMutation({
 
     // Cloak rule for the post-vote dwell:
     //   - No lynch → no death → no cloak needed.
-    //   - Game has no trigger roles in the build → cascade is impossible →
-    //     no cloak needed (and crucially, never showing a dwell does NOT
-    //     leak info because everyone knows the build).
-    //   - Game has trigger roles AND someone is lynched → dwell, so the
+    //   - Game has no Hunter / Hunter Wolf in the build → no actor will
+    //     ever need a private decision window → no cloak needed. (Mad
+    //     Bomber doesn't need a dwell — its blast is instant and folds
+    //     into the result panel.)
+    //   - Game has Hunter/HW AND someone is lynched → dwell, so the
     //     presence/absence of WAIT doesn't reveal whether the lynched
-    //     player was Hunter / Hunter Wolf / Mad Bomber.
-    //   - Exception: if the lynch already ends the game and no cascade is
-    //     pending (lynched player wasn't a trigger role), the dwell can be
-    //     skipped — end-game reveals all roles anyway.
+    //     player was a Hunter waiting to shoot.
+    //   - Exception: if the lynch already ends the game and no cascade
+    //     is pending (no Hunter/HW in this lynch chain), skip the dwell —
+    //     end-game reveals all roles anyway.
     const targetId = lynch ? nom.nominatedPlayerId : null;
     const target = targetId ? await ctx.db.get(targetId) : null;
-    const cascadePossible = !!target && isTriggerRole(target.role);
+    const targetIsHunter = !!target && isTriggerRole(target.role);
+    const targetIsBomber = !!target && target.role === 'Mad Bomber';
+    // If the target is a bomber and any Hunter/HW is alive (besides the
+    // target), the blast may catch them and create a cascade. We can't
+    // know exact seat geometry here without doing the blast, so treat
+    // this conservatively as "cascade possible".
+    const aliveHunterExists = players.some(
+      p =>
+        p.alive &&
+        p._id !== targetId &&
+        p.role !== undefined &&
+        isTriggerRole(p.role),
+    );
+    const cascadePossible =
+      targetIsHunter || (targetIsBomber && aliveHunterExists);
     const gameHasTriggerRoles = game.selectedRoles.some(r =>
       TRIGGER_ROLES.has(r),
     );
@@ -609,9 +625,31 @@ export const tallyVote = internalMutation({
     // Wolf Cub vengeance: lynching the cub triggers 2 wolf kills next night.
     await flagCubDeathIfApplicable(ctx, args.gameId, [targetId]);
 
-    if (target.role && isTriggerRole(target.role)) {
+    // Mad Bomber detonations resolve INLINE — both alive neighbors die
+    // at the moment of the bomber's lynch. Their deaths appear in the
+    // same result panel as the lynch itself. Set the trigger context
+    // BEFORE the blast so any Hunter caught in the cascade gets their
+    // death row tagged phase:'day'.
+    let blastDead: Id<'players'>[] = [];
+    if (targetIsBomber) {
       await ctx.db.patch(args.gameId, { triggersFollowUp: 'night' });
-      await enqueueTriggersForDeaths(ctx, args.gameId, [targetId]);
+      blastDead = await applyMadBomberBlast(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        targetId,
+      );
+    }
+
+    // Enqueue Hunter/HW triggers from the lynch target AND any blast
+    // victim. `enqueueTriggersForDeaths` filters non-Hunter IDs out, so
+    // passing the bomber's own ID through is safe.
+    const cascadeIds: Id<'players'>[] = [targetId, ...blastDead];
+    if (targetIsHunter && !targetIsBomber) {
+      await ctx.db.patch(args.gameId, { triggersFollowUp: 'night' });
+    }
+    if (targetIsHunter || targetIsBomber) {
+      await enqueueTriggersForDeaths(ctx, args.gameId, cascadeIds);
       await processTriggerQueue(ctx, args.gameId);
     }
   },
@@ -736,28 +774,38 @@ export const dayView = query({
     // action — the shooter is public info (the announcement already says
     // "X HAS SHOT Y"), and attribution lets the table see chained shots
     // correctly (e.g. Hunter shoots HW, HW then shoots someone else).
+    //
+    // Anchor the time window on the LYNCH ROW itself rather than the
+    // vote-dwell deadline: MB blasts in a no-Hunter game skip the dwell,
+    // so `voteDwellEndsAt` is undefined, but cascade rows still exist
+    // and should appear in the result panel.
     let cascadeDeaths: Array<{
       _id: Id<'players'>;
       name: string;
       cause: string;
       shotByName: string | null;
     }> = [];
-    if (
-      game.currentNomination?.resultsRevealed &&
-      game.voteDwellEndsAt != null
-    ) {
-      const lynchStart = game.voteDwellEndsAt - TRIGGER_DWELL_MS;
+    if (game.currentNomination?.resultsRevealed) {
+      const nom = game.currentNomination;
       const rows = await ctx.db
         .query('nightActions')
         .withIndex('by_game_night', q =>
           q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
         )
         .collect();
+      const lynchRow = rows.find(
+        r =>
+          r.actionType === 'death' &&
+          r.targetPlayerId === nom.nominatedPlayerId &&
+          (r.result as { cause?: string } | undefined)?.cause === 'lynch',
+      );
+      const lynchStart = lynchRow?.resolvedAt;
       const shotRows = rows.filter(
         r =>
           r.actionType === 'hunter_shot' || r.actionType === 'hunter_wolf_shot',
       );
       for (const r of rows) {
+        if (lynchStart === undefined) break;
         if (r.actionType !== 'death') continue;
         if (r.resolvedAt < lynchStart) continue;
         const cause = (r.result?.cause as string | undefined) ?? '';

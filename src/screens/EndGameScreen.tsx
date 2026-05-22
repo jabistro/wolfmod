@@ -45,7 +45,6 @@ type HistoryEntry = {
   team: string | null;
   sameTeam: string | null;
   outcome: string | null;
-  direction: string | null;
   victimNames: string[] | null;
 };
 
@@ -223,7 +222,6 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
     case 'hunter_wolf_skip':
       return <Text className="text-wolf-muted text-sm italic">Held fire</Text>;
     case 'mad_bomber_kill': {
-      const dir = entry.direction === 'L' ? 'LEFT' : entry.direction === 'R' ? 'RIGHT' : '?';
       const victims = entry.victimNames ?? [];
       if (victims.length === 0) {
         return (
@@ -237,21 +235,13 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
       }
       return (
         <Text className="text-wolf-text text-sm">
-          Detonated{' '}
+          Detonated —{' '}
           <Text className="font-bold" style={{ color: '#B03A2E' }}>
-            {dir}
+            {victims.join(', ')}
           </Text>
-          {' — '}
-          {victims.join(', ')}
         </Text>
       );
     }
-    case 'mad_bomber_skip':
-      return (
-        <Text className="text-wolf-muted text-sm italic">
-          No one in blast radius
-        </Text>
-      );
     default:
       return <Text className="text-wolf-muted text-sm">{entry.kind}</Text>;
   }
