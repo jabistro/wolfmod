@@ -16,6 +16,9 @@ import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { showAlert } from '../components/ThemedAlert';
+import { InGameLeaveButton } from '../components/InGameLeaveButton';
+import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
+import { HostMissingBanner } from '../components/HostMissingBanner';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Morning'>;
 type Route = RouteProp<RootStackParamList, 'Morning'>;
@@ -63,6 +66,12 @@ export default function MorningScreen() {
     }
   }, [view?.game.phase, navigation, params.gameId]);
 
+  const { confirmLeave } = useGameLeaveHandler({
+    gameId: params.gameId as Id<'games'>,
+    deviceClientId,
+    isHost: view?.me.isHost,
+  });
+
   if (!deviceClientId || view === undefined) {
     return (
       <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center">
@@ -100,6 +109,7 @@ export default function MorningScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
+      <InGameLeaveButton onPress={confirmLeave} />
       <View className="px-4 pt-10 pb-3 items-center">
         <Text className="text-wolf-muted text-xs tracking-widest">
           DAWN OF DAY {game.dayNumber + 1}
@@ -108,6 +118,14 @@ export default function MorningScreen() {
           MORNING
         </Text>
       </View>
+
+      {view.hostMissing && (
+        <HostMissingBanner
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alive={me.alive}
+        />
+      )}
 
       <Animated.View
         style={{ flex: 1, opacity: fade }}

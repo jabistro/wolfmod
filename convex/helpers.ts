@@ -45,6 +45,24 @@ export function isBotName(name: string): boolean {
 }
 
 /**
+ * True when no player holds the host role — the host explicitly left
+ * mid-game (leaveGame demoted isHost to false). A dead host is still
+ * host and can still drive the game from spectator mode; the banner
+ * fires only on explicit hand-off. Surfaced via each in-game view so
+ * the client can render "HOST HAS LEFT — TAP TO CLAIM HOST".
+ */
+export async function isHostMissing(
+  ctx: MutationCtx | QueryCtx,
+  gameId: Id<'games'>,
+): Promise<boolean> {
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  return !players.some(p => p.isHost);
+}
+
+/**
  * If any of the just-died player ids belonged to a Wolf Cub, flip the
  * `wolfCubVengeance` flag on the game. Called from every site that applies
  * deaths (morning resolution, lynch tally, trigger cascades) so the flag

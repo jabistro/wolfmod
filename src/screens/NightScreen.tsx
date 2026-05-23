@@ -22,6 +22,9 @@ import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { SeatingCircle, type SeatingPlayer } from '../components/SeatingCircle';
 import { showAlert } from '../components/ThemedAlert';
+import { InGameLeaveButton } from '../components/InGameLeaveButton';
+import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
+import { HostMissingBanner } from '../components/HostMissingBanner';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Night'>;
 type Route = RouteProp<RootStackParamList, 'Night'>;
@@ -70,6 +73,12 @@ export default function NightScreen() {
       navigation.replace('EndGame', { gameId: params.gameId });
     }
   }, [view?.game.phase, navigation, params.gameId]);
+
+  const { confirmLeave } = useGameLeaveHandler({
+    gameId: params.gameId as Id<'games'>,
+    deviceClientId,
+    isHost: view?.me.isHost,
+  });
 
   if (!deviceClientId || view === undefined) {
     return (
@@ -268,11 +277,20 @@ export default function NightScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
+      <InGameLeaveButton onPress={confirmLeave} />
       <NightHeader
         nightNumber={game.nightNumber}
         stepLabel={me.alive ? null : stepLabel}
         dead={!me.alive}
       />
+
+      {view.hostMissing && (
+        <HostMissingBanner
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alive={me.alive}
+        />
+      )}
 
       {me.alive ? (
         <>

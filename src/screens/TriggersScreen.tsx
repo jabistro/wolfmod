@@ -17,6 +17,9 @@ import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { SeatingCircle } from '../components/SeatingCircle';
 import { showAlert } from '../components/ThemedAlert';
+import { InGameLeaveButton } from '../components/InGameLeaveButton';
+import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
+import { HostMissingBanner } from '../components/HostMissingBanner';
 import { TRIGGER_DWELL_MS } from '../../convex/triggers';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Triggers'>;
@@ -52,6 +55,12 @@ export default function TriggersScreen() {
     }
   }, [view?.game.phase, navigation, params.gameId]);
 
+  const { confirmLeave } = useGameLeaveHandler({
+    gameId: params.gameId as Id<'games'>,
+    deviceClientId,
+    isHost: view?.me.isHost,
+  });
+
   if (!deviceClientId || view === undefined) {
     return (
       <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center">
@@ -74,24 +83,40 @@ export default function TriggersScreen() {
   const announcementActive =
     announcement != null && Date.now() < announcement.endsAt;
 
+  const withLeave = (child: React.ReactNode) => (
+    <View style={{ flex: 1 }}>
+      <InGameLeaveButton onPress={confirmLeave} />
+      {view.hostMissing && (
+        <View style={{ position: 'absolute', top: 70, left: 0, right: 0, zIndex: 5 }}>
+          <HostMissingBanner
+            gameId={view.game._id}
+            deviceClientId={deviceClientId}
+            alive={me.alive}
+          />
+        </View>
+      )}
+      {child}
+    </View>
+  );
+
   // Active announcement overrides every other view — host AND actor see the
   // same lines for the duration so the village can read the result before
   // the next trigger fires.
   if (announcementActive && announcement) {
-    return <AnnouncementView lines={announcement.lines} />;
+    return withLeave(<AnnouncementView lines={announcement.lines} />);
   }
 
   // Queue empty but still in 'triggers' phase: brief gap while finalize
   // transitions us elsewhere. Show a neutral "Resolving..." rather than a
   // blank screen.
   if (!head) {
-    return <ResolvingView label="RESOLVING NIGHT…" />;
+    return withLeave(<ResolvingView label="RESOLVING NIGHT…" />);
   }
 
   // Caller is the trigger actor. Show their private prompt.
   if (head.isMe) {
     if (head.role === 'Hunter' || head.role === 'Hunter Wolf') {
-      return (
+      return withLeave(
         <HunterPickerView
           gameId={view.game._id}
           deviceClientId={deviceClientId}
@@ -100,17 +125,17 @@ export default function TriggersScreen() {
           totalSeats={view.game.playerCount}
           myId={me._id}
           insetBottom={insets.bottom}
-        />
+        />,
       );
     }
     // Shouldn't reach here but render the resolving view defensively.
-    return <ResolvingView label="RESOLVING NIGHT…" />;
+    return withLeave(<ResolvingView label="RESOLVING NIGHT…" />);
   }
 
   // Caller is NOT the actor. We deliberately do NOT show the head's
   // name because naming the actor would leak who's holding a trigger
   // role.
-  return <ResolvingView label="MORNING UNFOLDS…" />;
+  return withLeave(<ResolvingView label="MORNING UNFOLDS…" />);
 }
 
 // ───── Sub-views ────────────────────────────────────────────────────────────

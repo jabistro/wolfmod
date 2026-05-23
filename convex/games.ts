@@ -6,6 +6,7 @@ import {
   findCaller,
   requireHost,
   isBotName,
+  isHostMissing,
   initializeDayClock,
   DAY_CONFIG_DEFAULTS,
 } from './helpers';
@@ -95,22 +96,47 @@ export const joinGame = mutation({
       .query('games')
       .withIndex('by_room_code', q => q.eq('roomCode', code))
       .first();
-    if (!game) throw new ConvexError("No game with that code. Double-check it with the host.");
-    if (game.phase !== 'lobby') throw new ConvexError('Game has already started.');
+    if (!game)
+      throw new ConvexError("No game with that code. Double-check it with the host.");
 
-    // Reconnect: same device already in this game
-    const existing = await ctx.db
+    // Rejoin path 1 — same device already has a player record in this game.
+    // This works in any phase: pre-start (re-open the app) AND mid-game
+    // (player closed the app or hit back, comes back to keep playing).
+    const sameDevice = await ctx.db
       .query('players')
       .withIndex('by_game_device', q =>
         q.eq('gameId', game._id).eq('deviceClientId', args.deviceClientId),
       )
       .first();
-    if (existing) {
-      return { gameId: game._id, playerId: existing._id, rejoined: true };
+    if (sameDevice) {
+      return { gameId: game._id, playerId: sameDevice._id, rejoined: true };
     }
 
     const trimmedName = args.name.trim();
     if (!trimmedName) throw new ConvexError('Name is required.');
+
+    // Rejoin path 2 — different device (broken phone / reinstall). Match by
+    // name on the active player roster: if there's an existing player with
+    // this name and the device id slot is now stale, claim it by swapping in
+    // the new deviceClientId. Names are unique per-game so this is unambig.
+    // Friend-group trust model: knowing the room code + the player's name
+    // is enough to reclaim the seat.
+    if (game.phase !== 'lobby') {
+      const players = await ctx.db
+        .query('players')
+        .withIndex('by_game', q => q.eq('gameId', game._id))
+        .collect();
+      const byName = players.find(
+        p => p.name.toLowerCase() === trimmedName.toLowerCase(),
+      );
+      if (byName) {
+        await ctx.db.patch(byName._id, { deviceClientId: args.deviceClientId });
+        return { gameId: game._id, playerId: byName._id, rejoined: true };
+      }
+      throw new ConvexError(
+        "Game has already started — type the same name you used to rejoin.",
+      );
+    }
 
     const players = await ctx.db
       .query('players')
@@ -343,6 +369,8 @@ export const leaveGame = mutation({
       return;
     }
 
+    // Host leaving the lobby tears the whole game down — pre-start there's no
+    // meaningful play to preserve.
     if (caller.isHost && game.phase === 'lobby') {
       const allPlayers = await ctx.db
         .query('players')
@@ -357,8 +385,16 @@ export const leaveGame = mutation({
 
     if (game.phase === 'lobby') {
       await ctx.db.delete(caller._id);
+      return;
     }
-    // Mid-game leave handled in later phases (host-claim, spectator transition)
+
+    // Mid-game leave: keep the player record intact so they can rejoin via
+    // Join Game (device match or name fallback). The host case demotes
+    // isHost so other phones can detect the orphaned host slot and show
+    // a CLAIM HOST banner.
+    if (caller.isHost) {
+      await ctx.db.patch(caller._id, { isHost: false });
+    }
   },
 });
 
@@ -499,6 +535,7 @@ export const revealView = query({
     }
 
     const confirmedCount = players.filter(p => p.revealedAt !== undefined).length;
+    const hostMissing = !players.some(p => p.isHost);
 
     return {
       game: {
@@ -513,11 +550,13 @@ export const revealView = query({
         seatPosition: me.seatPosition,
         revealedAt: me.revealedAt,
         isHost: me.isHost,
+        alive: me.alive,
       },
       visibleTeammates,
       confirmedCount,
       totalPlayers: players.length,
       allConfirmed: confirmedCount === players.length,
+      hostMissing,
     };
   },
 });
@@ -576,6 +615,99 @@ export const seedTestPlayers = mutation({
         joinedAt: now,
       });
     }
+  },
+});
+
+/**
+ * Host voluntarily hands off duties while staying in the game. Caller must
+ * be the current host; target must be a living player in the game.
+ */
+export const passHost = mutation({
+  args: {
+    gameId: v.id('games'),
+    targetPlayerId: v.id('players'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const caller = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!caller) throw new ConvexError('You are not in this game.');
+    if (!caller.isHost)
+      throw new ConvexError('Only the host can pass host duties.');
+    if (caller._id === args.targetPlayerId) return;
+
+    const target = await ctx.db.get(args.targetPlayerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new ConvexError('Target is not in this game.');
+    }
+    if (!target.alive) {
+      throw new ConvexError('Can only pass host to a living player.');
+    }
+    if (isBotName(target.name)) {
+      throw new ConvexError("Can't pass host to a bot.");
+    }
+
+    await ctx.db.patch(caller._id, { isHost: false });
+    await ctx.db.patch(args.targetPlayerId, { isHost: true });
+  },
+});
+
+/**
+ * Any living player claims host when the slot is empty (host explicitly
+ * left, or the only host is dead). Cleans up stale isHost flags on dead
+ * records as a side effect.
+ */
+export const claimHost = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new ConvexError('Game not found.');
+    const caller = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!caller) throw new ConvexError('You are not in this game.');
+    if (!caller.alive) {
+      throw new ConvexError('Only living players can claim host.');
+    }
+    if (caller.isHost) return;
+
+    const players = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    const currentHost = players.find(p => p.isHost);
+    if (currentHost) {
+      throw new ConvexError('There is already a host in this game.');
+    }
+
+    await ctx.db.patch(caller._id, { isHost: true });
+  },
+});
+
+/**
+ * Host bails out of a mid-game game without a win condition being met.
+ * Marks the game ended (phase=ended, endedAt now) but doesn't set a winner
+ * — every phone's phase-driven nav routes to EndGame where the absence of
+ * `game.winner` shows the neutral "GAME OVER" banner. Distinct from the
+ * lobby host-leave path (which deletes the game entirely).
+ */
+export const endGameByHost = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new ConvexError('Game not found.');
+    if (game.phase === 'lobby') {
+      throw new ConvexError("Use Leave to close a game that hasn't started yet.");
+    }
+    if (game.phase === 'ended') return;
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+    await ctx.db.patch(args.gameId, {
+      phase: 'ended',
+      endedAt: Date.now(),
+    });
   },
 });
 

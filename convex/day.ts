@@ -895,6 +895,7 @@ export const dayView = query({
     return {
       game: {
         _id: game._id,
+        roomCode: game.roomCode,
         phase: game.phase,
         dayNumber: game.dayNumber,
         nightNumber: game.nightNumber,
@@ -945,6 +946,7 @@ export const dayView = query({
         })),
       currentNomination: nomination,
       cascadeDeaths,
+      hostMissing: !players.some(p => p.isHost),
     };
   },
 });

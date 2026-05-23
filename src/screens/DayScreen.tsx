@@ -21,6 +21,10 @@ import { SeatingCircle } from '../components/SeatingCircle';
 import TimersConfigModal from '../components/TimersConfigModal';
 import BuildModal from '../components/BuildModal';
 import { showAlert } from '../components/ThemedAlert';
+import { InGameLeaveButton } from '../components/InGameLeaveButton';
+import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
+import { HostMissingBanner } from '../components/HostMissingBanner';
+import PassHostPickerModal from '../components/PassHostPickerModal';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Day'>;
 type Route = RouteProp<RootStackParamList, 'Day'>;
@@ -41,6 +45,7 @@ type Nomination = {
 
 type DayGame = {
   _id: Id<'games'>;
+  roomCode: string;
   phase: string;
   dayNumber: number;
   nightNumber: number;
@@ -144,6 +149,17 @@ export default function DayScreen() {
     }
   }, [phase, navigation, params.gameId]);
 
+  const [passPickerOpen, setPassPickerOpen] = useState(false);
+
+  const { confirmLeave } = useGameLeaveHandler({
+    gameId: params.gameId as Id<'games'>,
+    deviceClientId,
+    isHost: view?.me.isHost,
+    onPassHostFirst: view?.me.isHost
+      ? () => setPassPickerOpen(true)
+      : undefined,
+  });
+
   if (!deviceClientId || view === undefined) {
     return (
       <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center">
@@ -163,43 +179,80 @@ export default function DayScreen() {
 
   const { game, me, alive, players, currentNomination } = view;
   const isHost = me.isHost;
+  const hostMissing = view.hostMissing;
+  const passHostCandidates = isHost
+    ? players
+        .filter(p => p.alive && p._id !== me._id && !/^Bot \d+$/.test(p.name))
+        .map(p => ({ _id: p._id, name: p.name }))
+    : undefined;
+
+  const passPicker = passHostCandidates ? (
+    <PassHostPickerModal
+      visible={passPickerOpen}
+      onClose={() => setPassPickerOpen(false)}
+      gameId={game._id}
+      deviceClientId={deviceClientId}
+      candidates={passHostCandidates}
+    />
+  ) : null;
 
   if (currentNomination) {
     const sp = currentNomination.subPhase;
     if (sp === 'results' || currentNomination.resultsRevealed) {
       return (
-        <ResultsView
-          game={game}
-          deviceClientId={deviceClientId}
-          isHost={isHost}
-          nomination={currentNomination}
-          cascadeDeaths={view.cascadeDeaths}
-          players={players}
-        />
+        <>
+          <ResultsView
+            game={game}
+            deviceClientId={deviceClientId}
+            isHost={isHost}
+            nomination={currentNomination}
+            cascadeDeaths={view.cascadeDeaths}
+            players={players}
+            onLeavePress={confirmLeave}
+            hostMissing={hostMissing}
+            meAlive={me.alive}
+            passHostCandidates={passHostCandidates}
+          />
+          {passPicker}
+        </>
       );
     }
     if (sp === 'vote') {
       return (
-        <VoteView
-          game={game}
-          deviceClientId={deviceClientId}
-          meAlive={me.alive}
-          isHost={isHost}
-          nomination={currentNomination}
-        />
+        <>
+          <VoteView
+            game={game}
+            deviceClientId={deviceClientId}
+            meAlive={me.alive}
+            isHost={isHost}
+            nomination={currentNomination}
+            onLeavePress={confirmLeave}
+            hostMissing={hostMissing}
+            passHostCandidates={passHostCandidates}
+          />
+          {passPicker}
+        </>
       );
     }
     return (
-      <TrialView
-        game={game}
-        deviceClientId={deviceClientId}
-        isHost={isHost}
-        nomination={currentNomination}
-      />
+      <>
+        <TrialView
+          game={game}
+          deviceClientId={deviceClientId}
+          isHost={isHost}
+          nomination={currentNomination}
+          onLeavePress={confirmLeave}
+          hostMissing={hostMissing}
+          meAlive={me.alive}
+          passHostCandidates={passHostCandidates}
+        />
+        {passPicker}
+      </>
     );
   }
 
   return (
+    <>
     <DiscussionView
       game={game}
       deviceClientId={deviceClientId}
@@ -208,6 +261,9 @@ export default function DayScreen() {
       meId={me._id}
       alive={alive}
       players={players}
+      onLeavePress={confirmLeave}
+      hostMissing={hostMissing}
+      passHostCandidates={passHostCandidates}
       onBeginNight={async () => {
         try {
           await beginNight({
@@ -222,6 +278,8 @@ export default function DayScreen() {
         }
       }}
     />
+    {passPicker}
+    </>
   );
 }
 
@@ -283,12 +341,14 @@ function DayHeader({
   showCog,
   onCogPress,
   onBuildPress,
+  onLeavePress,
 }: {
   dayNumber: number;
   mode: string;
   showCog?: boolean;
   onCogPress?: () => void;
   onBuildPress?: () => void;
+  onLeavePress?: () => void;
 }) {
   return (
     <View className="px-4 pt-10 pb-3" style={{ position: 'relative' }}>
@@ -300,6 +360,7 @@ function DayHeader({
           {mode}
         </Text>
       </View>
+      {onLeavePress && <InGameLeaveButton onPress={onLeavePress} />}
       <View
         style={{
           position: 'absolute',
@@ -449,6 +510,9 @@ function DiscussionView({
   alive,
   players,
   onBeginNight,
+  onLeavePress,
+  hostMissing,
+  passHostCandidates,
 }: {
   game: DayGame;
   deviceClientId: string;
@@ -463,6 +527,9 @@ function DiscussionView({
     alive: boolean;
   }>;
   onBeginNight: () => Promise<void>;
+  onLeavePress: () => void;
+  hostMissing: boolean;
+  passHostCandidates?: Array<{ _id: Id<'players'>; name: string }>;
 }) {
   const insets = useSafeAreaInsets();
   const now = useNow();
@@ -505,7 +572,16 @@ function DiscussionView({
         showCog={isHost}
         onCogPress={() => setCogOpen(true)}
         onBuildPress={() => setBuildOpen(true)}
+        onLeavePress={onLeavePress}
       />
+
+      {hostMissing && (
+        <HostMissingBanner
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alive={meAlive}
+        />
+      )}
 
       <DayClockBar
         game={game}
@@ -657,6 +733,9 @@ function DiscussionView({
         gameId={game._id}
         deviceClientId={deviceClientId}
         initial={game.config}
+        passHostCandidates={passHostCandidates}
+        roomCode={game.roomCode}
+        canEndGame
       />
 
       <BuildModal
@@ -675,11 +754,19 @@ function TrialView({
   deviceClientId,
   isHost,
   nomination,
+  onLeavePress,
+  hostMissing,
+  meAlive,
+  passHostCandidates,
 }: {
   game: DayGame;
   deviceClientId: string;
   isHost: boolean;
   nomination: Nomination;
+  onLeavePress: () => void;
+  hostMissing: boolean;
+  meAlive: boolean;
+  passHostCandidates?: Array<{ _id: Id<'players'>; name: string }>;
 }) {
   const insets = useSafeAreaInsets();
   const now = useNow();
@@ -756,7 +843,16 @@ function TrialView({
         showCog={isHost}
         onCogPress={() => setCogOpen(true)}
         onBuildPress={() => setBuildOpen(true)}
+        onLeavePress={onLeavePress}
       />
+
+      {hostMissing && (
+        <HostMissingBanner
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alive={meAlive}
+        />
+      )}
 
       <View className="items-center mb-2">
         <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
@@ -857,6 +953,9 @@ function TrialView({
         gameId={game._id}
         deviceClientId={deviceClientId}
         initial={game.config}
+        passHostCandidates={passHostCandidates}
+        roomCode={game.roomCode}
+        canEndGame
       />
 
       <BuildModal
@@ -876,12 +975,18 @@ function VoteView({
   meAlive,
   isHost,
   nomination,
+  onLeavePress,
+  hostMissing,
+  passHostCandidates,
 }: {
   game: DayGame;
   deviceClientId: string;
   meAlive: boolean;
   isHost: boolean;
   nomination: Nomination;
+  onLeavePress: () => void;
+  hostMissing: boolean;
+  passHostCandidates?: Array<{ _id: Id<'players'>; name: string }>;
 }) {
   const insets = useSafeAreaInsets();
   const now = useNow();
@@ -948,7 +1053,16 @@ function VoteView({
         showCog={isHost}
         onCogPress={() => setCogOpen(true)}
         onBuildPress={() => setBuildOpen(true)}
+        onLeavePress={onLeavePress}
       />
+
+      {hostMissing && (
+        <HostMissingBanner
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alive={meAlive}
+        />
+      )}
 
       <TrialStatusBar
         dayRemMs={dayRemainingMs(game, now)}
@@ -1113,6 +1227,9 @@ function VoteView({
         gameId={game._id}
         deviceClientId={deviceClientId}
         initial={game.config}
+        passHostCandidates={passHostCandidates}
+        roomCode={game.roomCode}
+        canEndGame
       />
 
       <BuildModal
@@ -1133,6 +1250,10 @@ function ResultsView({
   nomination,
   cascadeDeaths,
   players,
+  onLeavePress,
+  hostMissing,
+  meAlive,
+  passHostCandidates,
 }: {
   game: DayGame;
   deviceClientId: string;
@@ -1150,6 +1271,10 @@ function ResultsView({
     seatPosition?: number;
     alive: boolean;
   }>;
+  onLeavePress: () => void;
+  hostMissing: boolean;
+  meAlive: boolean;
+  passHostCandidates?: Array<{ _id: Id<'players'>; name: string }>;
 }) {
   const insets = useSafeAreaInsets();
   const continueGame = useMutation(api.day.continueGameAfterVote);
@@ -1196,7 +1321,16 @@ function ResultsView({
         dayNumber={game.dayNumber}
         mode="VOTE RESULT"
         onBuildPress={() => setBuildOpen(true)}
+        onLeavePress={onLeavePress}
       />
+
+      {hostMissing && (
+        <HostMissingBanner
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alive={meAlive}
+        />
+      )}
 
       <TrialStatusBar
         dayRemMs={dayRemainingMs(game, now)}

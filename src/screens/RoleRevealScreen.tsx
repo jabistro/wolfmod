@@ -19,6 +19,9 @@ import { useDeviceId } from '../hooks/useDeviceId';
 import { teamForRole, type Team } from '../data/v1Roles';
 import { showAlert } from '../components/ThemedAlert';
 import RoleCard from '../components/RoleCard';
+import { InGameLeaveButton } from '../components/InGameLeaveButton';
+import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
+import { HostMissingBanner } from '../components/HostMissingBanner';
 
 type Nav = StackNavigationProp<RootStackParamList, 'RoleReveal'>;
 type Route = RouteProp<RootStackParamList, 'RoleReveal'>;
@@ -91,6 +94,12 @@ export default function RoleRevealScreen() {
       navigation.replace('EndGame', { gameId: params.gameId });
     }
   }, [phase, navigation, params.gameId]);
+
+  const { confirmLeave } = useGameLeaveHandler({
+    gameId: params.gameId as Id<'games'>,
+    deviceClientId,
+    isHost: reveal?.me.isHost,
+  });
 
   if (!deviceClientId || reveal === undefined) {
     return (
@@ -190,6 +199,16 @@ export default function RoleRevealScreen() {
   if (isConfirmed) {
     return (
       <SafeAreaView className="flex-1 bg-wolf-bg">
+        <InGameLeaveButton onPress={confirmLeave} />
+        {reveal.hostMissing && (
+          <View style={{ marginTop: 70 }}>
+            <HostMissingBanner
+              gameId={game._id}
+              deviceClientId={deviceClientId}
+              alive={me.alive}
+            />
+          </View>
+        )}
         <View className="flex-1 items-center justify-center px-8">
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             PLAYERS READY
@@ -244,6 +263,7 @@ export default function RoleRevealScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
+      <InGameLeaveButton onPress={confirmLeave} />
       <View className="flex-row items-center px-4 pt-10 pb-3">
         <View className="w-16" />
         <Text className="flex-1 text-wolf-text text-xl font-bold text-center">
@@ -251,6 +271,14 @@ export default function RoleRevealScreen() {
         </Text>
         <View className="w-16" />
       </View>
+
+      {reveal.hostMissing && (
+        <HostMissingBanner
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alive={me.alive}
+        />
+      )}
 
       <View className="px-6 items-center mb-3">
         <Text className="text-wolf-muted text-xs font-bold tracking-widest">

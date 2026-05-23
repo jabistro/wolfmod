@@ -566,6 +566,7 @@ export const triggerView = query({
       head,
       queueLength: queue.length,
       targetables,
+      hostMissing: !players.some(p => p.isHost),
     };
   },
 });

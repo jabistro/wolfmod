@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import { getRoleValue } from '../data/roleValues';
 import TimersConfigModal from '../components/TimersConfigModal';
 import RolesBrowserModal from '../components/RolesBrowserModal';
 import { showAlert } from '../components/ThemedAlert';
+import { useAndroidBack } from '../hooks/useAndroidBack';
 
 // Build the category map for v1 roles once. The role selection modal uses
 // this to power its team tabs (Villagers / Wolves / Team Wolf / Solo) so
@@ -136,13 +137,37 @@ export default function LobbyScreen() {
   const rolesPagerRef = useRef<ScrollView | null>(null);
   const [rolesPagerWidth, setRolesPagerWidth] = useState(SCREEN_WIDTH);
 
-  // When the host starts the game, every player's lobby query observes the phase
-  // change and auto-navigates to the reveal screen.
+  // Phase-driven nav. In the normal flow Lobby only ever transitions to
+  // 'reveal' on host start, but a rejoining player can land on Lobby with the
+  // game already mid-flight — route them to the right screen for the current
+  // phase.
   useEffect(() => {
-    if (lobby?.game.phase === 'reveal') {
+    const phase = lobby?.game.phase;
+    if (phase === 'reveal') {
       navigation.replace('RoleReveal', { gameId: params.gameId });
+    } else if (phase === 'night') {
+      navigation.replace('Night', { gameId: params.gameId });
+    } else if (phase === 'triggers') {
+      navigation.replace('Triggers', { gameId: params.gameId });
+    } else if (phase === 'morning') {
+      navigation.replace('Morning', { gameId: params.gameId });
+    } else if (phase === 'day') {
+      navigation.replace('Day', { gameId: params.gameId });
+    } else if (phase === 'ended') {
+      navigation.replace('EndGame', { gameId: params.gameId });
     }
   }, [lobby?.game.phase, navigation, params.gameId]);
+
+  // Android hardware-back: route to the Leave confirmation. handleLeave is
+  // defined further down (it needs `game` and `isHost`), so we forward via
+  // a ref that the latest render keeps fresh.
+  const handleLeaveRef = useRef<() => void>(() => {});
+  useAndroidBack(
+    useCallback(() => {
+      handleLeaveRef.current();
+      return true;
+    }, []),
+  );
 
   const draftTotal = useMemo(
     () => Object.values(draftCounts).reduce((a, b) => a + b, 0),
@@ -402,6 +427,7 @@ export default function LobbyScreen() {
       ],
     );
   }
+  handleLeaveRef.current = handleLeave;
 
   const seatModalOccupant =
     seatModalIndex !== null ? seatedByPosition.get(seatModalIndex) ?? null : null;
@@ -1057,6 +1083,17 @@ export default function LobbyScreen() {
             voteTimerSec: game.voteTimerSec,
             maxNominationsPerDay: game.maxNominationsPerDay,
           }}
+          passHostCandidates={
+            isHost
+              ? players
+                  .filter(
+                    p =>
+                      p._id !== me?._id && !/^Bot \d+$/.test(p.name),
+                  )
+                  .map(p => ({ _id: p._id, name: p.name }))
+              : undefined
+          }
+          roomCode={game.roomCode}
         />
       )}
     </SafeAreaView>

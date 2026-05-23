@@ -17,6 +17,7 @@ import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { teamForRole, type Team } from '../data/v1Roles';
 import { SeatingCircle } from '../components/SeatingCircle';
+import { useAndroidBack } from '../hooks/useAndroidBack';
 
 type Nav = StackNavigationProp<RootStackParamList, 'EndGame'>;
 type Route = RouteProp<RootStackParamList, 'EndGame'>;
@@ -269,6 +270,12 @@ export default function EndGameScreen() {
       : 'skip',
   );
 
+  const goHome = React.useCallback(() => {
+    navigation.popToTop();
+    return true;
+  }, [navigation]);
+  useAndroidBack(goHome);
+
   if (!deviceClientId || view === undefined) {
     return (
       <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center">
@@ -300,6 +307,28 @@ export default function EndGameScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
+      <TouchableOpacity
+        onPress={() => navigation.popToTop()}
+        hitSlop={8}
+        style={{
+          position: 'absolute',
+          left: 8,
+          top: 40,
+          padding: 8,
+          zIndex: 10,
+        }}
+      >
+        <Text
+          style={{
+            color: '#8A8590',
+            fontSize: 12,
+            fontWeight: '700',
+            letterSpacing: 2,
+          }}
+        >
+          DONE
+        </Text>
+      </TouchableOpacity>
       <View className="px-4 pt-10 pb-2 items-center">
         <Text className="text-wolf-muted text-xs tracking-widest">GAME OVER</Text>
       </View>

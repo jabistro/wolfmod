@@ -2930,6 +2930,7 @@ export const nightView = query({
       targetables,
       alivePlayers: aliveSummaries,
       stepActorStatus,
+      hostMissing: !players.some(p => p.isHost),
     };
   },
 });
@@ -2987,9 +2988,11 @@ export const morningView = query({
         _id: me._id,
         name: me.name,
         isHost: me.isHost,
+        alive: me.alive,
       },
       deaths,
       triggersPending,
+      hostMissing: !players.some(p => p.isHost),
     };
   },
 });
