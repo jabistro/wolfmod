@@ -107,6 +107,7 @@ export default function NightScreen() {
     piState,
     mentalistState,
     witchState,
+    leprechaunState,
     bgState,
     huntressState,
     revealerState,
@@ -205,6 +206,15 @@ export default function NightScreen() {
         />
       )}
 
+      {game.nightStep === 'leprechaun' && leprechaunState && (
+        <LeprechaunPicker
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          leprechaunState={leprechaunState}
+          isGhost={isGhost}
+        />
+      )}
+
       {game.nightStep === 'bodyguard' && bgState && (
         <BodyguardPicker
           gameId={game._id}
@@ -269,6 +279,7 @@ export default function NightScreen() {
     (game.nightStep === 'pi' && piState) ||
     (game.nightStep === 'mentalist' && mentalistState) ||
     (game.nightStep === 'witch' && witchState) ||
+    (game.nightStep === 'leprechaun' && leprechaunState) ||
     (game.nightStep === 'bodyguard' && bgState) ||
     (game.nightStep === 'huntress' && huntressState) ||
     (game.nightStep === 'revealer' && revealerState) ||
@@ -2090,6 +2101,309 @@ function WitchPicker({
           </View>
         </View>
       )}
+    </View>
+  );
+}
+
+// ───── Leprechaun picker ───────────────────────────────────────────────────
+
+function LeprechaunPicker({
+  gameId,
+  deviceClientId,
+  leprechaunState,
+  isGhost,
+}: {
+  gameId: Id<'games'>;
+  deviceClientId: string;
+  leprechaunState: {
+    blocked: boolean;
+    hasActedThisNight: boolean;
+    wolfTarget: { _id: Id<'players'>; name: string } | null;
+    leftNeighbor: { _id: Id<'players'>; name: string } | null;
+    rightNeighbor: { _id: Id<'players'>; name: string } | null;
+    canMoveOff: boolean;
+    tonightRedirect: {
+      direction: 'L' | 'R' | 'leave';
+      originalTargetName: string | null;
+      newTargetName: string | null;
+      blocked: boolean;
+    } | null;
+  };
+  isGhost?: boolean;
+}) {
+  const submitMove = useMutation(api.night.submitLeprechaunMove);
+  const [submitting, setSubmitting] = useState(false);
+  const [confirmDir, setConfirmDir] = useState<'L' | 'R' | null>(null);
+
+  async function submit(direction: 'L' | 'R' | 'leave') {
+    setSubmitting(true);
+    try {
+      await submitMove({
+        gameId,
+        callerDeviceClientId: deviceClientId,
+        direction,
+      });
+      setConfirmDir(null);
+    } catch (e) {
+      showAlert('Could not move', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Post-action: locked waiting view.
+  if (leprechaunState.hasActedThisNight) {
+    const r = leprechaunState.tonightRedirect;
+    return (
+      <View className="flex-1 px-6 pt-2 pb-8">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator color="#D4A017" />
+          {r?.blocked ? (
+            <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+              {isGhost
+                ? 'The Leprechaun has acknowledged the silent night. Waiting…'
+                : 'Acknowledged. Waiting for the night to settle…'}
+            </Text>
+          ) : r?.direction === 'leave' ? (
+            <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+              {isGhost
+                ? `The Leprechaun left the kill on ${r?.originalTargetName ?? '—'}. Waiting…`
+                : `Left the kill on ${r?.originalTargetName ?? '—'}. Waiting…`}
+            </Text>
+          ) : (
+            <View className="mt-6 items-center px-4">
+              <Text className="text-wolf-muted text-xs tracking-widest font-bold mb-2">
+                KILL MOVED
+              </Text>
+              <Text className="text-wolf-text text-base text-center">
+                <Text className="font-bold">
+                  {r?.originalTargetName ?? '—'}
+                </Text>
+                {' → '}
+                <Text className="font-bold">
+                  {r?.newTargetName ?? '—'}
+                </Text>
+              </Text>
+              <Text className="text-wolf-muted text-xs text-center mt-3 italic">
+                {isGhost
+                  ? 'Waiting for the night to settle…'
+                  : 'Your move has been made. Waiting for the night to settle…'}
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // Diseased-blocked night: ACKNOWLEDGE only.
+  if (leprechaunState.blocked) {
+    return (
+      <View className="flex-1 px-6 pt-2 pb-8">
+        <View className="flex-1 items-center justify-center">
+          <View className="bg-wolf-card rounded-xl px-6 py-6 mb-8 w-full">
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3 text-center">
+              TONIGHT'S VICTIM
+            </Text>
+            <Text className="text-wolf-text text-2xl font-bold tracking-widest text-center">
+              NO KILL
+            </Text>
+            <Text className="text-wolf-muted text-sm text-center mt-3 italic">
+              The wolves had no kill tonight.
+            </Text>
+          </View>
+          {!isGhost && (
+            <TouchableOpacity
+              onPress={() => submit('leave')}
+              disabled={submitting}
+              activeOpacity={0.8}
+              className="bg-wolf-accent rounded-xl px-8 py-4"
+              style={{ opacity: submitting ? 0.5 : 1 }}
+            >
+              {submitting ? (
+                <ActivityIndicator color="#0F0F14" />
+              ) : (
+                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                  ACKNOWLEDGE
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  }
+
+  // Normal pre-action picker.
+  const target = leprechaunState.wolfTarget;
+  const left = leprechaunState.leftNeighbor;
+  const right = leprechaunState.rightNeighbor;
+  const canMove = leprechaunState.canMoveOff;
+
+  return (
+    <View className="flex-1">
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}
+      >
+        <View className="bg-wolf-card rounded-xl px-4 py-3 mt-2 mb-4">
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1">
+            TONIGHT'S VICTIM
+          </Text>
+          {target ? (
+            <Text className="text-wolf-text text-2xl font-bold tracking-widest">
+              {target.name.toUpperCase()}
+            </Text>
+          ) : (
+            <Text className="text-wolf-muted text-sm italic">
+              No victim tonight.
+            </Text>
+          )}
+          {!canMove && (
+            <Text className="text-wolf-muted text-xs mt-2 italic">
+              You've already moved a kill off this player. Only LEAVE is
+              available.
+            </Text>
+          )}
+        </View>
+
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
+          MOVE THE KILL
+        </Text>
+        <View style={{ gap: 10 }}>
+          <TouchableOpacity
+            onPress={() => left && canMove && setConfirmDir('L')}
+            disabled={!left || !canMove || submitting}
+            activeOpacity={0.75}
+            className="bg-wolf-card rounded-xl px-4 py-4"
+            style={{
+              borderWidth: 1,
+              borderColor: left && canMove ? '#5BA0E5' : '#2A2A38',
+              opacity: left && canMove ? 1 : 0.4,
+            }}
+          >
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+              MOVE LEFT
+            </Text>
+            <Text
+              className="text-base font-bold tracking-widest mt-1"
+              style={{ color: left && canMove ? '#5BA0E5' : '#5A5560' }}
+            >
+              → {left ? left.name.toUpperCase() : '—'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => submit('leave')}
+            disabled={submitting}
+            activeOpacity={0.75}
+            className="bg-wolf-card rounded-xl px-4 py-4"
+            style={{
+              borderWidth: 1,
+              borderColor: '#D4A017',
+              opacity: submitting ? 0.4 : 1,
+            }}
+          >
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+              LEAVE THE KILL
+            </Text>
+            <Text
+              className="text-base font-bold tracking-widest mt-1"
+              style={{ color: '#D4A017' }}
+            >
+              ON {target ? target.name.toUpperCase() : '—'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => right && canMove && setConfirmDir('R')}
+            disabled={!right || !canMove || submitting}
+            activeOpacity={0.75}
+            className="bg-wolf-card rounded-xl px-4 py-4"
+            style={{
+              borderWidth: 1,
+              borderColor: right && canMove ? '#5BA0E5' : '#2A2A38',
+              opacity: right && canMove ? 1 : 0.4,
+            }}
+          >
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+              MOVE RIGHT
+            </Text>
+            <Text
+              className="text-base font-bold tracking-widest mt-1"
+              style={{ color: right && canMove ? '#5BA0E5' : '#5A5560' }}
+            >
+              → {right ? right.name.toUpperCase() : '—'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+
+      {/* Move confirmation modal — only for L/R (LEAVE is safe). */}
+      <Modal
+        visible={confirmDir != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmDir(null)}
+      >
+        <Pressable
+          onPress={() => !submitting && setConfirmDir(null)}
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <Pressable
+            onPress={e => e.stopPropagation()}
+            className="bg-wolf-surface rounded-2xl w-full p-6"
+          >
+            <Text className="text-wolf-text text-lg font-bold mb-2 text-center">
+              Move the kill onto{' '}
+              {confirmDir === 'L'
+                ? left?.name ?? '—'
+                : right?.name ?? '—'}
+              ?
+            </Text>
+            <Text className="text-wolf-muted text-sm text-center mb-5">
+              You won't be able to move a kill off{' '}
+              {target?.name ?? '—'} again later.
+            </Text>
+            <View style={{ gap: 10 }}>
+              <TouchableOpacity
+                onPress={() => confirmDir && submit(confirmDir)}
+                disabled={submitting}
+                activeOpacity={0.8}
+                className="bg-wolf-card rounded-xl py-4 items-center"
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#5BA0E5',
+                  opacity: submitting ? 0.5 : 1,
+                }}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#5BA0E5" />
+                ) : (
+                  <Text
+                    className="text-base font-bold tracking-widest"
+                    style={{ color: '#5BA0E5' }}
+                  >
+                    CONFIRM
+                  </Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => !submitting && setConfirmDir(null)}
+                disabled={submitting}
+                className="py-3 items-center"
+              >
+                <Text className="text-wolf-muted text-sm">Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

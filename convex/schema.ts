@@ -104,6 +104,15 @@ export default defineSchema({
     wolfCubVengeance: v.optional(v.boolean()),
 
     /**
+     * Lifetime set of players the Leprechaun has previously moved a wolf
+     * kill OFF of. Each entry is one-and-done — the Leprechaun cannot
+     * redirect a kill targeting that same player again later in the game.
+     * Includes the Leprechaun themselves if they ever moved a kill off
+     * themselves. Grows across nights; never cleared.
+     */
+    leprechaunMovedOff: v.optional(v.array(v.id('players'))),
+
+    /**
      * Death-trigger queue. Populated when Hunter / Hunter Wolf dies
      * (overnight or via lynch); each entry gets a 10 s dwell so the
      * actor can decide whom to shoot. Mad Bomber is NOT queued — its

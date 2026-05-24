@@ -77,6 +77,10 @@ const V1_OVERRIDES: Record<string, Partial<Record<Theme, Art>>> = {
     chibi: { image: require('../../roles_chibi_medium/mad_bomber.jpg'), thumb: require('../../roles_chibi_thumbs/mad_bomber.jpg') },
     '16bit': { image: require('../../roles_16bit_medium/mad_bomber.jpg'), thumb: require('../../roles_16bit_thumbs/mad_bomber.jpg') },
   },
+  Leprechaun: {
+    chibi: { image: require('../../roles_chibi_medium/leprechaun.jpg'), thumb: require('../../roles_chibi_thumbs/leprechaun.jpg') },
+    '16bit': { image: require('../../roles_16bit_medium/leprechaun.jpg'), thumb: require('../../roles_16bit_thumbs/leprechaun.jpg') },
+  },
   Werewolf: {
     chibi: { image: require('../../roles_chibi_medium/werewolf.jpg'), thumb: require('../../roles_chibi_thumbs/werewolf.jpg') },
     '16bit': { image: require('../../roles_16bit_medium/werewolf.jpg'), thumb: require('../../roles_16bit_thumbs/werewolf.jpg') },

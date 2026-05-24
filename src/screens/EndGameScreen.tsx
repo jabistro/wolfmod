@@ -127,6 +127,32 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
       return <Text className="text-wolf-text text-sm">Poisoned {t}</Text>;
     case 'witch_done':
       return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
+    case 'leprechaun_redirect': {
+      if (entry.outcome === 'blocked') {
+        return (
+          <Text className="text-wolf-text text-sm">
+            Wolves had no kill —{' '}
+            <Text className="font-bold" style={{ color: '#E0A030' }}>
+              ACKNOWLEDGED
+            </Text>
+          </Text>
+        );
+      }
+      if (entry.outcome === 'leave') {
+        return (
+          <Text className="text-wolf-text text-sm">Left the kill on {t}</Text>
+        );
+      }
+      const dest = entry.secondTargetName ?? '—';
+      return (
+        <Text className="text-wolf-text text-sm">
+          Moved kill from {t} →{' '}
+          <Text className="font-bold" style={{ color: '#5BA0E5' }}>
+            {dest}
+          </Text>
+        </Text>
+      );
+    }
     case 'huntress_shot':
       return (
         <Text className="text-wolf-text text-sm">

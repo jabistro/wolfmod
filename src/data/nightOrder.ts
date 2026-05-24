@@ -11,6 +11,7 @@ export const NIGHT_STEPS = [
   'pi',
   'mentalist',
   'witch',
+  'leprechaun',
   'bodyguard',
   'huntress',
   'revealer',
@@ -41,6 +42,8 @@ export function nightStepLabel(step: NightStep): string {
       return 'The mentalist is awake';
     case 'witch':
       return 'The witch is awake';
+    case 'leprechaun':
+      return 'The leprechaun is awake';
     case 'bodyguard':
       return 'The bodyguard is awake';
     case 'huntress':

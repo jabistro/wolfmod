@@ -836,6 +836,40 @@ export const endGameView = query({
         delayedWounds.add(deathKey(a.nightNumber, a.targetPlayerId));
       }
     }
+    // Leprechaun redirect: precompute the effective target for each night's
+    // FIRST wolf_kill row (sorted by resolvedAt). Only the first kill is
+    // redirectable per house rules; subsequent kills (cub vengeance) resolve
+    // un-redirected. Empty when no leprechaun ever moved a kill.
+    const wolfKillEffectiveTarget = new Map<Id<'nightActions'>, Id<'players'>>();
+    {
+      const killsByNight = new Map<number, typeof actions>();
+      const redirectByNight = new Map<number, typeof actions[number]>();
+      for (const a of actions) {
+        if (a.actionType === 'wolf_kill') {
+          const list = killsByNight.get(a.nightNumber) ?? [];
+          list.push(a);
+          killsByNight.set(a.nightNumber, list);
+        }
+        if (a.actionType === 'leprechaun_redirect') {
+          const dir = a.result?.direction;
+          if (dir === 'L' || dir === 'R') {
+            redirectByNight.set(a.nightNumber, a);
+          }
+        }
+      }
+      for (const [night, kills] of killsByNight) {
+        const first = kills
+          .slice()
+          .sort((x, y) => x.resolvedAt - y.resolvedAt)[0];
+        if (!first) continue;
+        const redirect = redirectByNight.get(night);
+        const newId = redirect?.result?.newTargetId as
+          | Id<'players'>
+          | undefined;
+        if (newId) wolfKillEffectiveTarget.set(first._id, newId);
+      }
+    }
+
     const historyByPlayer = new Map<Id<'players'>, HistoryEntry[]>();
     const pushEntry = (
       playerId: Id<'players'>,
@@ -866,12 +900,18 @@ export const endGameView = query({
       };
 
       if (a.actionType === 'wolf_kill') {
+        // Outcome reflects the FINAL target (post-Leprechaun-redirect). The
+        // wolves' chosen target stays in `targetName` for the "Targeted X"
+        // narration, but KILLED/SAVED/DELAYED is computed against whoever
+        // actually faced the kill after any redirect. Otherwise a redirected
+        // kill would render "Targeted JASON — SAVED" even when Mary died.
+        const effectiveId = wolfKillEffectiveTarget.get(a._id) ?? a.targetPlayerId;
         const delayed =
-          a.targetPlayerId &&
-          delayedWounds.has(deathKey(a.nightNumber, a.targetPlayerId));
+          effectiveId &&
+          delayedWounds.has(deathKey(a.nightNumber, effectiveId));
         const killed =
-          a.targetPlayerId &&
-          deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+          effectiveId &&
+          deaths.has(deathKey(a.nightNumber, effectiveId));
         baseEntry.outcome = delayed ? 'delayed' : killed ? 'killed' : 'saved';
         // Team decision — attribute to every wolf-team player who was alive
         // at the start of this night. Wolves act first in NIGHT_STEPS, so a
@@ -957,6 +997,24 @@ export const endGameView = query({
           !!a.targetPlayerId &&
           deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
         baseEntry.outcome = killed ? 'killed' : 'missed';
+      }
+
+      // Leprechaun redirect. `targetName` is the wolves' original target;
+      // `secondTargetName` is the new target on L/R moves; `outcome` carries
+      // the direction ('L' | 'R' | 'leave') or 'blocked' for diseased-night
+      // acknowledgements. The client switches on outcome to render the row.
+      if (a.actionType === 'leprechaun_redirect') {
+        const result = (a.result ?? {}) as {
+          direction?: 'L' | 'R' | 'leave';
+          newTargetId?: Id<'players'>;
+          blocked?: boolean;
+        };
+        if (result.newTargetId) {
+          baseEntry.secondTargetName = nameFor(result.newTargetId);
+        }
+        baseEntry.outcome = result.blocked
+          ? 'blocked'
+          : result.direction ?? null;
       }
 
       // Mad Bomber's blast — populate victim names from the result blob

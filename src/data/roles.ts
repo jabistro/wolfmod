@@ -50,7 +50,7 @@ export const ROLES: Role[] = [
   { name: 'Insomniac',               category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),               thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Diseased',                category: 'villagers', image: require('../../roles_ghibli_medium/diseased.jpg'),                thumb: require('../../roles_ghibli_thumbs/diseased.jpg') },
   { name: 'Tough Girl',              category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),              thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
-  { name: 'Leprechaun',              category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),              thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
+  { name: 'Leprechaun',              category: 'villagers', image: require('../../roles_ghibli_medium/leprechaun.jpg'),                thumb: require('../../roles_ghibli_thumbs/leprechaun.jpg') },
   { name: 'Revealer',                category: 'villagers', image: require('../../roles_ghibli_medium/revealer.jpg'),                thumb: require('../../roles_ghibli_thumbs/revealer.jpg') },
   { name: 'Mad Bomber',           category: 'villagers', image: require('../../roles_ghibli_medium/mad_bomber.jpg'),           thumb: require('../../roles_ghibli_thumbs/mad_bomber.jpg') },
   { name: 'Huntress',                category: 'villagers', image: require('../../roles_ghibli_medium/huntress.jpg'),                thumb: require('../../roles_ghibli_thumbs/huntress.jpg') },

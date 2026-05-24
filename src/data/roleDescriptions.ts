@@ -44,7 +44,7 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
   'Exposer': 'Wakes every night. Once per game, may pick a player to be publicly outed by morning.',
   'Insomniac': 'Each night, learns whether at least one of their neighbors performed a night action.',
   'Tough Girl': 'Survives the first wolf attack until the next night. If only she and one wolf remain, village wins.',
-  'Leprechaun': 'Each night, may shove the wolves\' kill to a player adjacent to their original target.',
+  'Leprechaun': 'Each night, may move the wolves\' kill to a player adjacent to their original target.',
   'Village Idiot': 'Their vote always lands on elimination — never on the no-lynch.',
   'Robber': 'Night one, swipes another player\'s card and assumes their role.',
   'Old Woman': 'Each night, sends one player away — they miss the next day entirely.',

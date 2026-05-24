@@ -85,6 +85,8 @@ function activePlayersForStep(step: NightStep, alive: Player[]): Player[] {
       return alive.filter(p => p.role === 'Mentalist');
     case 'witch':
       return alive.filter(p => p.role === 'Witch');
+    case 'leprechaun':
+      return alive.filter(p => p.role === 'Leprechaun');
     case 'bodyguard':
       return alive.filter(p => p.role === 'Bodyguard');
     case 'huntress':
@@ -119,6 +121,8 @@ function stepIsInGame(step: NightStep, selectedRoles: string[]): boolean {
       return set.has('Mentalist');
     case 'witch':
       return set.has('Witch');
+    case 'leprechaun':
+      return set.has('Leprechaun');
     case 'bodyguard':
       return set.has('Bodyguard');
     case 'huntress':
@@ -238,6 +242,18 @@ async function isStepComplete(
       const dones = await getNightActions(ctx, gameId, nightNumber, 'witch_done');
       return dones.length >= actors.length;
     }
+    case 'leprechaun': {
+      // Leprechaun's step is complete when each leprechaun has submitted a
+      // 'leprechaun_redirect' row — whether they moved the kill or left it,
+      // or acknowledged a diseased-blocked night.
+      const acts = await getNightActions(
+        ctx,
+        gameId,
+        nightNumber,
+        'leprechaun_redirect',
+      );
+      return acts.length >= actors.length;
+    }
     case 'bodyguard': {
       const protects = await getNightActions(ctx, gameId, nightNumber, 'bg_protect');
       return protects.length >= actors.length;
@@ -287,6 +303,29 @@ function piTrioResult(
   const right = allPlayers.find(p => p.seatPosition === rightSeat);
   const trio = [target, left, right].filter((p): p is Player => !!p);
   return trio.some(p => p.role && isWolfTeam(p.role)) ? 'wolf' : 'village';
+}
+
+/**
+ * Walk seats from `startSeat` in `step` direction (skip-dead) and return the
+ * id of the first alive seat encountered. Returns null if no other alive
+ * seat exists. App convention (Mad Bomber, Leprechaun): right = step -1,
+ * left = step +1.
+ */
+function nextAliveSeatId(
+  startSeat: number,
+  step: 1 | -1,
+  total: number,
+  bySeat: Map<number, Player>,
+): Id<'players'> | null {
+  let cursor = startSeat;
+  for (let i = 0; i < total; i++) {
+    cursor = ((cursor + step) % total + total) % total;
+    if (cursor === startSeat) break;
+    const p = bySeat.get(cursor);
+    if (!p || !p.alive) continue;
+    return p._id;
+  }
+  return null;
 }
 
 /**
@@ -438,6 +477,22 @@ async function autoResolveStep(
       }
       return;
     }
+    case 'leprechaun': {
+      // Bot leprechaun always leaves the kill in place — no move-off spend.
+      // On diseased nights the row still records direction='leave' (no wolf
+      // kill exists to redirect anyway).
+      for (const lp of actors) {
+        await ctx.db.insert('nightActions', {
+          gameId,
+          nightNumber,
+          actorPlayerId: lp._id,
+          actionType: 'leprechaun_redirect',
+          result: { direction: 'leave' },
+          resolvedAt: now,
+        });
+      }
+      return;
+    }
     case 'bodyguard': {
       const bg = actors[0];
       const lastProtected = bg.roleState?.bgLastProtected as
@@ -570,8 +625,39 @@ async function resolveMorning(
   }
 
   const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
+  // Leprechaun redirect: only applies to the FIRST wolf_kill row (oldest by
+  // resolvedAt). A direction of 'L' or 'R' swaps that kill's effective
+  // target to result.newTargetId; 'leave' is a no-op for resolution.
+  // Downstream protections (BG, witch save, TG resist) and the Diseased
+  // trigger all key off the EFFECTIVE target so the redirect propagates
+  // naturally.
+  const sortedKills = kills.slice().sort((a, b) => a.resolvedAt - b.resolvedAt);
+  const redirects = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'leprechaun_redirect',
+  );
+  let firstKillOverride: Id<'players'> | null = null;
+  for (const r of redirects) {
+    const dir = r.result?.direction;
+    if (dir === 'L' || dir === 'R') {
+      const newId = r.result?.newTargetId as Id<'players'> | undefined;
+      if (newId) firstKillOverride = newId;
+      break;
+    }
+  }
+  const effectiveKillTarget = (
+    k: (typeof kills)[number],
+  ): Id<'players'> | undefined => {
+    if (firstKillOverride && sortedKills[0]?._id === k._id) {
+      return firstKillOverride;
+    }
+    return k.targetPlayerId as Id<'players'> | undefined;
+  };
   for (const kill of kills) {
-    if (kill.targetPlayerId) addCandidate(kill.targetPlayerId, 'wolf', true);
+    const id = effectiveKillTarget(kill);
+    if (id) addCandidate(id, 'wolf', true);
   }
 
   const witchPoisons = await getNightActions(ctx, gameId, nightNumber, 'witch_poison');
@@ -635,8 +721,9 @@ async function resolveMorning(
   // poison or arrows). They get wounded and die at the next morning.
   const tgsToWound = new Set<Id<'players'>>();
   for (const k of kills) {
-    if (!k.targetPlayerId) continue;
-    const tg = await ctx.db.get(k.targetPlayerId);
+    const effId = effectiveKillTarget(k);
+    if (!effId) continue;
+    const tg = await ctx.db.get(effId);
     if (!tg || tg.role !== 'Tough Guy') continue;
     if (tg.roleState?.toughGuyWounded) continue;
     if (protectedTargets.has(tg._id)) continue; // BG cleanly saved, no wound
@@ -690,8 +777,9 @@ async function resolveMorning(
   // this morning, set the carryover flag so the next wolves step inserts a
   // `wolf_blocked` action instead of a kill.
   for (const k of kills) {
-    if (!k.targetPlayerId) continue;
-    const t = await ctx.db.get(k.targetPlayerId);
+    const effId = effectiveKillTarget(k);
+    if (!effId) continue;
+    const t = await ctx.db.get(effId);
     if (!t || t.role !== 'Diseased') continue;
     if (t.alive) continue; // saved by BG or witch — no trigger
     await ctx.db.patch(gameId, { wolvesBlockedNextNight: true });
@@ -2049,6 +2137,167 @@ export const submitWitchDone = mutation({
   },
 });
 
+// ───── Leprechaun ──────────────────────────────────────────────────────────
+//
+// After Witch, before Bodyguard. The Leprechaun sees the wolves' chosen
+// kill target for tonight and chooses one of:
+//   - LEAVE  : kill stays put (no cost)
+//   - LEFT/R : move the kill to the next-alive seat L/R of the target
+//
+// "Move OFF" is a lifetime per-target limit. Once the kill has been moved
+// off a given player, that player can never have a kill moved off them
+// again later in the game. LEAVE never spends. The list grows monotonically
+// on `games.leprechaunMovedOff`.
+//
+// Diseased-blocked night: Leprechaun is still woken and acknowledges that
+// the wolves had no kill tonight. No move-off cost.
+//
+// Wolf Cub vengeance: Leprechaun sees only the FIRST wolf_kill row. The
+// second kill resolves un-Leprechauned.
+//
+// resolveMorning honors the redirect by overriding the FIRST wolf_kill row's
+// target via `effectiveKillTarget` — the wolf_kill row itself stays pristine
+// so refreshStep can wipe leprechaun_redirect cleanly.
+
+export const submitLeprechaunMove = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    direction: v.union(v.literal('L'), v.literal('R'), v.literal('leave')),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || game.nightStep !== 'leprechaun') {
+      throw new Error('The leprechaun is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Leprechaun') {
+      throw new Error('Only the leprechaun can act.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'leprechaun_redirect',
+      )
+    ) {
+      throw new Error('Already acted tonight.');
+    }
+
+    // Diseased-blocked night: only an acknowledgement is meaningful. We
+    // accept any direction submission but never patch a wolf_kill (there
+    // isn't one) and never spend a move-off.
+    const blockedRows = await getNightActions(
+      ctx,
+      args.gameId,
+      game.nightNumber,
+      'wolf_blocked',
+    );
+    if (blockedRows.length > 0) {
+      await ctx.db.insert('nightActions', {
+        gameId: args.gameId,
+        nightNumber: game.nightNumber,
+        actorPlayerId: me._id,
+        actionType: 'leprechaun_redirect',
+        result: { direction: 'leave', blocked: true },
+        resolvedAt: Date.now(),
+      });
+      await maybeAdvance(ctx, args.gameId);
+      return;
+    }
+
+    const kills = await getNightActions(
+      ctx,
+      args.gameId,
+      game.nightNumber,
+      'wolf_kill',
+    );
+    if (kills.length === 0) {
+      throw new Error('No wolf kill recorded tonight.');
+    }
+    // Wolf Cub vengeance: leprechaun only acts on the wolves' FIRST kill.
+    const firstKill = kills
+      .slice()
+      .sort((a, b) => a.resolvedAt - b.resolvedAt)[0];
+    const originalTargetId = firstKill.targetPlayerId as
+      | Id<'players'>
+      | undefined;
+    if (!originalTargetId) {
+      throw new Error('Wolf kill has no target.');
+    }
+
+    if (args.direction === 'leave') {
+      await ctx.db.insert('nightActions', {
+        gameId: args.gameId,
+        nightNumber: game.nightNumber,
+        actorPlayerId: me._id,
+        actionType: 'leprechaun_redirect',
+        targetPlayerId: originalTargetId,
+        result: { direction: 'leave', originalTargetId },
+        resolvedAt: Date.now(),
+      });
+      await maybeAdvance(ctx, args.gameId);
+      return;
+    }
+
+    // Move-off path. Check lifetime per-target limit on the ORIGINAL target.
+    const movedOff = (game.leprechaunMovedOff ?? []) as Id<'players'>[];
+    if (movedOff.includes(originalTargetId)) {
+      throw new Error(
+        'Already used your move on that target — only LEAVE is available.',
+      );
+    }
+
+    const originalTarget = await ctx.db.get(originalTargetId);
+    if (!originalTarget || typeof originalTarget.seatPosition !== 'number') {
+      throw new Error('Original target has no seat.');
+    }
+
+    const all = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    const bySeat = new Map<number, Player>();
+    for (const p of all) {
+      if (typeof p.seatPosition === 'number') bySeat.set(p.seatPosition, p);
+    }
+    const stepDir: 1 | -1 = args.direction === 'L' ? 1 : -1;
+    const newTargetId = nextAliveSeatId(
+      originalTarget.seatPosition,
+      stepDir,
+      game.playerCount,
+      bySeat,
+    );
+    if (!newTargetId) {
+      throw new Error('No alive neighbor in that direction.');
+    }
+
+    await ctx.db.patch(args.gameId, {
+      leprechaunMovedOff: [...movedOff, originalTargetId],
+    });
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'leprechaun_redirect',
+      targetPlayerId: originalTargetId,
+      result: {
+        direction: args.direction,
+        originalTargetId,
+        newTargetId,
+      },
+      resolvedAt: Date.now(),
+    });
+
+    await maybeAdvance(ctx, args.gameId);
+  },
+});
+
 /**
  * Idempotent advance — anyone can call it; the engine only moves forward
  * when the current step is complete AND the dwell deadline has passed.
@@ -2112,6 +2361,7 @@ const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
   pi: ['pi_check', 'pi_skip'],
   mentalist: ['mentalist_check'],
   witch: ['witch_save', 'witch_poison', 'witch_done'],
+  leprechaun: ['leprechaun_redirect'],
   bodyguard: ['bg_protect'],
   huntress: ['huntress_shot', 'huntress_skip'],
   revealer: ['revealer_shot', 'revealer_skip'],
@@ -2161,10 +2411,35 @@ export const refreshStep = mutation({
         q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
       )
       .collect();
+    // Leprechaun: capture any move-off entries contributed by this night's
+    // redirects BEFORE deleting them, so we can pop them off `leprechaunMovedOff`.
+    const lepRevertIds = new Set<string>();
+    if (step === 'leprechaun') {
+      for (const a of actions) {
+        if (a.actionType !== 'leprechaun_redirect') continue;
+        const dir = a.result?.direction;
+        if (dir === 'L' || dir === 'R') {
+          const orig = a.result?.originalTargetId;
+          if (orig) lepRevertIds.add(orig as unknown as string);
+        }
+      }
+    }
     for (const a of actions) {
       if (types.has(a.actionType)) {
         await ctx.db.delete(a._id);
       }
+    }
+
+    // Leprechaun: revert the lifetime move-off list to the state it was in
+    // before this night's redirects landed. The list is monotonically
+    // growing across the game, so popping only entries that match this
+    // night's wiped redirect rows preserves prior-night history.
+    if (step === 'leprechaun' && lepRevertIds.size > 0) {
+      const current = (game.leprechaunMovedOff ?? []) as Id<'players'>[];
+      const next = current.filter(
+        id => !lepRevertIds.has(id as unknown as string),
+      );
+      await ctx.db.patch(args.gameId, { leprechaunMovedOff: next });
     }
 
     // Clear step-scoped ephemeral roleState. Today this only matters for the
@@ -2611,6 +2886,127 @@ export const nightView = query({
       };
     }
 
+    // Leprechaun-only state. Sees the wolves' first kill target (or the
+    // diseased-blocked signal); picks LEFT / LEAVE / RIGHT. LEFT/RIGHT are
+    // greyed when the target has previously been moved off (lifetime limit).
+    // Post-action, `tonightRedirect` captures the choice for the locked
+    // waiting view.
+    let leprechaunState: {
+      blocked: boolean;
+      hasActedThisNight: boolean;
+      wolfTarget: { _id: Id<'players'>; name: string } | null;
+      leftNeighbor: { _id: Id<'players'>; name: string } | null;
+      rightNeighbor: { _id: Id<'players'>; name: string } | null;
+      canMoveOff: boolean;
+      tonightRedirect: {
+        direction: 'L' | 'R' | 'leave';
+        originalTargetName: string | null;
+        newTargetName: string | null;
+        blocked: boolean;
+      } | null;
+    } | null = null;
+    const lepActor = actorForRole('Leprechaun', 'leprechaun');
+    if (lepActor) {
+      const playerById = new Map(players.map(p => [p._id, p]));
+      const bySeat = new Map<number, Player>();
+      for (const p of players) {
+        if (typeof p.seatPosition === 'number') bySeat.set(p.seatPosition, p);
+      }
+      const myActions = await ctx.db
+        .query('nightActions')
+        .withIndex('by_game_night', q =>
+          q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
+        )
+        .collect();
+      const lepRedirect = myActions.find(
+        a =>
+          a.actorPlayerId === lepActor._id &&
+          a.actionType === 'leprechaun_redirect',
+      );
+      const hasActedThisNight = !!lepRedirect;
+      const blocked = myActions.some(a => a.actionType === 'wolf_blocked');
+
+      let wolfTarget: { _id: Id<'players'>; name: string } | null = null;
+      let leftNeighbor: { _id: Id<'players'>; name: string } | null = null;
+      let rightNeighbor: { _id: Id<'players'>; name: string } | null = null;
+      let canMoveOff = true;
+      if (!blocked) {
+        const killRows = myActions
+          .filter(a => a.actionType === 'wolf_kill')
+          .slice()
+          .sort((a, b) => a.resolvedAt - b.resolvedAt);
+        const firstKill = killRows[0];
+        const targetId = firstKill?.targetPlayerId as
+          | Id<'players'>
+          | undefined;
+        if (targetId) {
+          const t = playerById.get(targetId);
+          if (t) wolfTarget = { _id: t._id, name: t.name };
+          const movedOff = (game.leprechaunMovedOff ?? []) as Id<'players'>[];
+          canMoveOff = !movedOff.includes(targetId);
+          if (t && typeof t.seatPosition === 'number') {
+            const leftId = nextAliveSeatId(
+              t.seatPosition,
+              1,
+              game.playerCount,
+              bySeat,
+            );
+            if (leftId) {
+              const lp = playerById.get(leftId);
+              if (lp) leftNeighbor = { _id: lp._id, name: lp.name };
+            }
+            const rightId = nextAliveSeatId(
+              t.seatPosition,
+              -1,
+              game.playerCount,
+              bySeat,
+            );
+            if (rightId) {
+              const rp = playerById.get(rightId);
+              if (rp) rightNeighbor = { _id: rp._id, name: rp.name };
+            }
+          }
+        }
+      }
+
+      let tonightRedirect:
+        | {
+            direction: 'L' | 'R' | 'leave';
+            originalTargetName: string | null;
+            newTargetName: string | null;
+            blocked: boolean;
+          }
+        | null = null;
+      if (lepRedirect) {
+        const result = (lepRedirect.result ?? {}) as {
+          direction?: 'L' | 'R' | 'leave';
+          originalTargetId?: Id<'players'>;
+          newTargetId?: Id<'players'>;
+          blocked?: boolean;
+        };
+        const origId = result.originalTargetId;
+        const newId = result.newTargetId;
+        tonightRedirect = {
+          direction: result.direction ?? 'leave',
+          originalTargetName: origId
+            ? playerById.get(origId)?.name ?? null
+            : null,
+          newTargetName: newId ? playerById.get(newId)?.name ?? null : null,
+          blocked: !!result.blocked,
+        };
+      }
+
+      leprechaunState = {
+        blocked,
+        hasActedThisNight,
+        wolfTarget,
+        leftNeighbor,
+        rightNeighbor,
+        canMoveOff,
+        tonightRedirect,
+      };
+    }
+
     // Reviler-only state. Solo antagonist; same shape as revealerState.
     let revilerState: {
       hasActedThisNight: boolean;
@@ -2856,6 +3252,7 @@ export const nightView = query({
         pi: 'Paranormal Investigator',
         mentalist: 'Mentalist',
         witch: 'Witch',
+        leprechaun: 'Leprechaun',
         bodyguard: 'Bodyguard',
         huntress: 'Huntress',
         revealer: 'Revealer',
@@ -2923,6 +3320,7 @@ export const nightView = query({
       piState,
       mentalistState,
       witchState,
+      leprechaunState,
       bgState,
       huntressState,
       revealerState,
