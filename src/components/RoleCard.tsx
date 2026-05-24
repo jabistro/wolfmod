@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, Image, StyleSheet } from 'react-native';
 import { ROLES, CATEGORIES, type Role } from '../data/roles';
+import { getDisplayArt } from '../data/themeArt';
+import { useTheme } from '../contexts/ThemeContext';
 import { getRoleValue } from '../data/roleValues';
 import { getRoleDescription } from '../data/roleDescriptions';
 
@@ -15,6 +17,7 @@ type Props = {
 };
 
 export default function RoleCard({ role, width = 280 }: Props) {
+  const { theme } = useTheme();
   const roleData = ROLES.find(r => r.name === role);
   if (!roleData) return null;
 
@@ -36,7 +39,7 @@ export default function RoleCard({ role, width = 280 }: Props) {
         <View style={styles.headerSpacer} />
       </View>
       <Image
-        source={roleData.image}
+        source={getDisplayArt(role, theme).image}
         style={{ width, height: imageHeight }}
         resizeMode="cover"
       />

@@ -8,7 +8,7 @@ import type { RootStackParamList } from '../navigation/types';
 type HomeNavProp = StackNavigationProp<RootStackParamList, 'Home'>;
 
 const NAV_BUTTONS = ['PLAY', 'MODCLOCK', 'ROLES', 'SETTINGS'];
-const DISABLED_BUTTONS = new Set(['SETTINGS']);
+const DISABLED_BUTTONS = new Set<string>();
 
 export default function HomeScreen() {
   const navigation = useNavigation<HomeNavProp>();
@@ -17,6 +17,7 @@ export default function HomeScreen() {
     if (label === 'PLAY') navigation.navigate('PlayMenu');
     if (label === 'ROLES') navigation.navigate('Roles');
     if (label === 'MODCLOCK') navigation.navigate('ClockSetup');
+    if (label === 'SETTINGS') navigation.navigate('Settings');
   }
 
   return (

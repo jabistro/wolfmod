@@ -13,6 +13,8 @@ import { ConvexProvider, ConvexReactClient } from 'convex/react';
 LogBox.ignoreLogs([/^\[CONVEX /]);
 import HomeScreen from './src/screens/HomeScreen';
 import RolesScreen from './src/screens/RolesScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
+import ThemesScreen from './src/screens/ThemesScreen';
 import ClockSetupScreen from './src/screens/ClockSetupScreen';
 import ClockScreen from './src/screens/ClockScreen';
 import SplashScreen from './src/screens/SplashScreen';
@@ -27,6 +29,7 @@ import MorningScreen from './src/screens/MorningScreen';
 import DayScreen from './src/screens/DayScreen';
 import EndGameScreen from './src/screens/EndGameScreen';
 import { AlertHost } from './src/components/ThemedAlert';
+import { ThemeProvider } from './src/contexts/ThemeContext';
 import type { RootStackParamList } from './src/navigation/types';
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -51,6 +54,7 @@ export default function App() {
 
   return (
     <ConvexProvider client={convex}>
+      <ThemeProvider>
       <SafeAreaProvider>
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0F0F14' }}>
           <NavigationContainer theme={AppTheme}>
@@ -63,6 +67,8 @@ export default function App() {
             >
               <Stack.Screen name="Home" component={HomeScreen} />
               <Stack.Screen name="Roles" component={RolesScreen} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Settings" component={SettingsScreen} />
+              <Stack.Screen name="Themes" component={ThemesScreen} />
               <Stack.Screen name="ClockSetup" component={ClockSetupScreen} />
               <Stack.Screen name="Clock" component={ClockScreen} options={{ gestureEnabled: false, animationEnabled: false }} />
               <Stack.Screen name="PlayMenu" component={PlayMenuScreen} />
@@ -82,6 +88,7 @@ export default function App() {
           <AlertHost />
         </GestureHandlerRootView>
       </SafeAreaProvider>
+      </ThemeProvider>
     </ConvexProvider>
   );
 }

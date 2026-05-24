@@ -1,6 +1,8 @@
 export type RootStackParamList = {
   Home: undefined;
   Roles: undefined;
+  Settings: undefined;
+  Themes: undefined;
   ClockSetup: undefined;
   Clock: {
     dayDuration: number;

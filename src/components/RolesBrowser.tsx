@@ -14,6 +14,8 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { ROLES, CATEGORIES, type Role } from '../data/roles';
+import { getDisplayArt } from '../data/themeArt';
+import { useTheme } from '../contexts/ThemeContext';
 import { getRoleValue } from '../data/roleValues';
 import RoleCard from './RoleCard';
 
@@ -36,6 +38,7 @@ type Props = {
 };
 
 export default function RolesBrowser({ sortMode }: Props) {
+  const { theme } = useTheme();
   const [activeIndex, setActiveIndex] = useState(0);
   const [modalRoleList, setModalRoleList] = useState<Role[] | null>(null);
   const [modalIndex, setModalIndex] = useState(0);
@@ -155,7 +158,7 @@ export default function RolesBrowser({ sortMode }: Props) {
                       }}
                       style={[styles.card, { marginLeft: col === 0 ? 0 : GAP }]}
                     >
-                      <Image source={item.thumb} style={styles.cardImage} resizeMode="cover" />
+                      <Image source={getDisplayArt(item.name, theme).thumb} style={styles.cardImage} resizeMode="cover" />
                       {(() => {
                         const colors = getBarColors(item);
                         if (colors.length === 1) {

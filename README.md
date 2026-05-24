@@ -128,8 +128,8 @@ src/
 assets/
   images/                # logo, icon, splash, gifs
   sounds/                # ModClock bell + gavel
-roles_medium/            # role card art (medium)
-roles_thumbs/            # role card art (thumbnails)
+roles_ghibli_medium/            # role card art (medium)
+roles_ghibli_thumbs/            # role card art (thumbnails)
 ```
 
 ---
