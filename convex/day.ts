@@ -271,6 +271,67 @@ export const nominate = mutation({
   },
 });
 
+// Host can undo a misheard / mistaken nomination during accusation or
+// defense. The nomination slot is refunded so the cancelled trial does not
+// count against the day's budget; if the host re-nominates, that fresh call
+// to `nominate` decrements as usual. Voting sub-phase is intentionally
+// excluded — once votes can be cast, the trial is committed.
+export const cancelNomination = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'day') throw new Error('Not currently in day.');
+    const nom = game.currentNomination;
+    if (!nom) throw new Error('No active nomination.');
+    if (nom.subPhase !== 'accusation' && nom.subPhase !== 'defense') {
+      throw new Error('Too late to cancel — voting has already opened.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    // Defensive: votes can't be cast before the vote sub-phase, but if any
+    // stale row exists it would leak into a re-nom that reuses this index.
+    const stale = await ctx.db
+      .query('nominationVotes')
+      .withIndex('by_game_nomination', q =>
+        q
+          .eq('gameId', args.gameId)
+          .eq('dayNumber', game.dayNumber)
+          .eq('nominationIndex', nom.nominationIndex),
+      )
+      .collect();
+    for (const row of stale) {
+      await ctx.db.delete(row._id);
+    }
+
+    const now = Date.now();
+    const dayClockRemaining = game.dayPausedRemainingMs ?? 0;
+    const nominationsUsed = game.nominationsThisDay ?? 0;
+
+    const basePatch: Partial<Doc<'games'>> = {
+      currentNomination: undefined,
+      nominationsThisDay: Math.max(0, nominationsUsed - 1),
+    };
+
+    if (dayClockRemaining > 0) {
+      await ctx.db.patch(args.gameId, {
+        ...basePatch,
+        dayEndsAt: now + dayClockRemaining,
+        dayPausedRemainingMs: undefined,
+      });
+    } else {
+      await ctx.db.patch(args.gameId, {
+        ...basePatch,
+        dayEndsAt: now,
+        dayPausedRemainingMs: undefined,
+      });
+    }
+  },
+});
+
 // ───── Trial-clock mutations (accusation / defense / vote) ─────────────────
 
 export const startTrialClock = mutation({

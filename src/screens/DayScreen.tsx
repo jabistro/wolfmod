@@ -775,7 +775,9 @@ function TrialView({
   const resetClock = useMutation(api.day.resetTrialClock);
   const endAccusation = useMutation(api.day.endAccusation);
   const endDefense = useMutation(api.day.endDefense);
-  const [busy, setBusy] = useState<'toggle' | 'reset' | 'advance' | null>(null);
+  const cancelNomination = useMutation(api.day.cancelNomination);
+  const [busy, setBusy] = useState<'toggle' | 'reset' | 'advance' | 'cancel' | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [cogOpen, setCogOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
 
@@ -827,6 +829,20 @@ function TrialView({
       }
     } catch (e) {
       showAlert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function confirmCancelNomination() {
+    setBusy('cancel');
+    try {
+      await cancelNomination({
+        gameId: game._id,
+        callerDeviceClientId: deviceClientId,
+      });
+      setCancelOpen(false);
+    } catch (e) {
+      showAlert('Could not cancel', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -926,26 +942,90 @@ function TrialView({
         }}
       >
         {isHost ? (
-          <TouchableOpacity
-            onPress={advance}
-            disabled={busy !== null}
-            style={{ opacity: busy === 'advance' ? 0.4 : 1 }}
-            className="bg-wolf-accent rounded-xl py-5 items-center"
-          >
-            {busy === 'advance' ? (
-              <ActivityIndicator color="#0F0F14" />
-            ) : (
-              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-                {isAccusation ? 'END ACCUSATION' : 'END DEFENSE'}
+          <>
+            <TouchableOpacity
+              onPress={advance}
+              disabled={busy !== null}
+              style={{ opacity: busy === 'advance' ? 0.4 : 1 }}
+              className="bg-wolf-accent rounded-xl py-5 items-center"
+            >
+              {busy === 'advance' ? (
+                <ActivityIndicator color="#0F0F14" />
+              ) : (
+                <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                  {isAccusation ? 'END ACCUSATION' : 'END DEFENSE'}
+                </Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setCancelOpen(true)}
+              disabled={busy !== null}
+              className="py-3 mt-1"
+            >
+              <Text className="text-wolf-muted text-xs tracking-widest text-center">
+                CANCEL NOMINATION
               </Text>
-            )}
-          </TouchableOpacity>
+            </TouchableOpacity>
+          </>
         ) : (
           <Text className="text-wolf-muted text-xs tracking-widest text-center">
             {isAccusation ? 'ACCUSER IS SPEAKING' : 'ACCUSED IS DEFENDING'}
           </Text>
         )}
       </View>
+
+      {/* Cancel-nomination confirmation modal */}
+      <Modal
+        visible={cancelOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => (busy === 'cancel' ? undefined : setCancelOpen(false))}
+      >
+        <Pressable
+          onPress={() => (busy === 'cancel' ? undefined : setCancelOpen(false))}
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <Pressable
+            onPress={e => e.stopPropagation()}
+            className="bg-wolf-surface rounded-2xl w-full p-6"
+          >
+            <Text className="text-wolf-text text-lg font-bold mb-2 text-center">
+              Cancel nomination?
+            </Text>
+            <Text className="text-wolf-muted text-sm text-center mb-5">
+              {(nomination.nominee?.name ?? 'This player').toUpperCase()} comes off
+              the stand and this nomination is refunded to today's budget.
+            </Text>
+            <TouchableOpacity
+              onPress={confirmCancelNomination}
+              disabled={busy === 'cancel'}
+              style={{ opacity: busy === 'cancel' ? 0.4 : 1 }}
+              className="bg-wolf-card rounded-xl py-4 mb-2"
+            >
+              {busy === 'cancel' ? (
+                <ActivityIndicator color="#F0EDE8" />
+              ) : (
+                <Text className="text-wolf-red text-center font-extrabold tracking-widest">
+                  CANCEL NOMINATION
+                </Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => setCancelOpen(false)}
+              disabled={busy === 'cancel'}
+              className="py-2"
+            >
+              <Text className="text-wolf-muted text-center">Never mind</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <TimersConfigModal
         visible={cogOpen}
