@@ -66,9 +66,21 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
           : entry.outcome === 'delayed'
             ? '#E0A030'
             : '#5BA0E5';
+      const redirected =
+        entry.secondTargetName != null && entry.secondTargetName !== t;
       return (
         <Text className="text-wolf-text text-sm">
-          Targeted {t} —{' '}
+          Targeted {t}
+          {redirected ? (
+            <>
+              {' '}
+              →{' '}
+              <Text className="font-bold" style={{ color: '#5BA0E5' }}>
+                {entry.secondTargetName}
+              </Text>
+            </>
+          ) : null}{' '}
+          —{' '}
           <Text className="font-bold" style={{ color }}>
             {label}
           </Text>

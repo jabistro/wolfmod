@@ -905,7 +905,16 @@ export const endGameView = query({
         // narration, but KILLED/SAVED/DELAYED is computed against whoever
         // actually faced the kill after any redirect. Otherwise a redirected
         // kill would render "Targeted JASON — SAVED" even when Mary died.
+        // When redirected, `secondTargetName` carries the effective victim so
+        // the end-game row can read "Targeted A → B — KILLED".
         const effectiveId = wolfKillEffectiveTarget.get(a._id) ?? a.targetPlayerId;
+        if (
+          effectiveId &&
+          a.targetPlayerId &&
+          effectiveId !== a.targetPlayerId
+        ) {
+          baseEntry.secondTargetName = nameFor(effectiveId);
+        }
         const delayed =
           effectiveId &&
           delayedWounds.has(deathKey(a.nightNumber, effectiveId));
