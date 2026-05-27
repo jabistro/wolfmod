@@ -14,6 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ROLES, CATEGORIES, type Role, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
 import RoleCard from './RoleCard';
+import { getDisplayArt } from '../data/themeArt';
+import { useTheme } from '../contexts/ThemeContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COLUMNS = 3;
@@ -49,6 +51,7 @@ type Props = {
 type Entry = { role: Role; count: number };
 
 export default function BuildModal({ visible, onClose, selectedRoles }: Props) {
+  const { theme } = useTheme();
   const [enlarged, setEnlarged] = useState<Role | null>(null);
 
   const { entries, balance } = useMemo(() => {
@@ -115,7 +118,7 @@ export default function BuildModal({ visible, onClose, selectedRoles }: Props) {
               >
                 <View>
                   <Image
-                    source={role.thumb}
+                    source={getDisplayArt(role.name, theme).thumb}
                     style={styles.cardImage}
                     resizeMode="cover"
                   />
