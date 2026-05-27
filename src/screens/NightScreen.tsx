@@ -2338,72 +2338,58 @@ function LeprechaunPicker({
         </View>
       </ScrollView>
 
-      {/* Move confirmation modal — only for L/R (LEAVE is safe). */}
-      <Modal
-        visible={confirmDir != null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setConfirmDir(null)}
-      >
-        <Pressable
-          onPress={() => !submitting && setConfirmDir(null)}
+      {/* Move confirmation overlay — mirrors the other night-role confirms. */}
+      {confirmDir && (
+        <View
           style={{
-            flex: 1,
-            backgroundColor: 'rgba(0,0,0,0.85)',
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.92)',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: 24,
+            padding: 32,
           }}
         >
-          <Pressable
-            onPress={e => e.stopPropagation()}
-            className="bg-wolf-surface rounded-2xl w-full p-6"
-          >
-            <Text className="text-wolf-text text-lg font-bold mb-2 text-center">
-              Move the kill onto{' '}
-              {confirmDir === 'L'
-                ? left?.name ?? '—'
-                : right?.name ?? '—'}
-              ?
-            </Text>
-            <Text className="text-wolf-muted text-sm text-center mb-5">
-              You won't be able to move a kill off{' '}
-              {target?.name ?? '—'} again later.
-            </Text>
-            <View style={{ gap: 10 }}>
-              <TouchableOpacity
-                onPress={() => confirmDir && submit(confirmDir)}
-                disabled={submitting}
-                activeOpacity={0.8}
-                className="bg-wolf-card rounded-xl py-4 items-center"
-                style={{
-                  borderWidth: 1,
-                  borderColor: '#5BA0E5',
-                  opacity: submitting ? 0.5 : 1,
-                }}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#5BA0E5" />
-                ) : (
-                  <Text
-                    className="text-base font-bold tracking-widest"
-                    style={{ color: '#5BA0E5' }}
-                  >
-                    CONFIRM
-                  </Text>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => !submitting && setConfirmDir(null)}
-                disabled={submitting}
-                className="py-3 items-center"
-              >
-                <Text className="text-wolf-muted text-sm">Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
+            MOVE KILL
+          </Text>
+          <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
+            {(confirmDir === 'L' ? left?.name : right?.name)?.toUpperCase() ?? '—'}
+          </Text>
+          <Text className="text-wolf-muted text-sm text-center mb-10">
+            You won't be able to move a kill off {target?.name ?? '—'} again later.
+          </Text>
+          <View className="flex-row" style={{ gap: 14 }}>
+            <TouchableOpacity
+              onPress={() => setConfirmDir(null)}
+              disabled={submitting}
+              className="bg-wolf-card rounded-xl py-4 px-10"
+              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
+            >
+              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
+                NO
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => submit(confirmDir)}
+              disabled={submitting}
+              style={{ opacity: submitting ? 0.4 : 1 }}
+              className="bg-wolf-accent rounded-xl py-4 px-10"
+            >
+              {submitting ? (
+                <ActivityIndicator color="#0F0F14" />
+              ) : (
+                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                  YES
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
