@@ -930,7 +930,10 @@ export const dayView = query({
         for (const p of alive) {
           if (p._id === nom.nominatedPlayerId) continue;
           if (!votedIds.has(p._id)) {
-            livesVoters.push(`${p.name} (no vote)`);
+            // Vote default: if a player doesn't vote before the timer ends,
+            // house rules treat it as a LIVES vote. Keep the display list
+            // clean by showing only the player's name.
+            livesVoters.push(p.name);
           }
         }
       }
