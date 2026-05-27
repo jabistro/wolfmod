@@ -134,9 +134,23 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
     case 'bg_protect':
       return <Text className="text-wolf-text text-sm">Protected {t}</Text>;
     case 'witch_save':
-      return <Text className="text-wolf-text text-sm">Saved {t}</Text>;
+      return (
+        <Text className="text-wolf-text text-sm">
+          {t} —{' '}
+          <Text className="font-bold" style={{ color: '#5BA0E5' }}>
+            SAVED
+          </Text>
+        </Text>
+      );
     case 'witch_poison':
-      return <Text className="text-wolf-text text-sm">Poisoned {t}</Text>;
+      return (
+        <Text className="text-wolf-text text-sm">
+          {t} —{' '}
+          <Text className="font-bold" style={{ color: '#B03A2E' }}>
+            POISONED
+          </Text>
+        </Text>
+      );
     case 'witch_done':
       return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
     case 'leprechaun_redirect': {
