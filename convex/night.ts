@@ -1754,7 +1754,7 @@ export const submitMentalistCheck = mutation({
       throw new Error('Targets must be alive.');
     }
 
-    const sameTeam =
+    const sameTeam: 'same' | 'different' =
       teamForRole(first.role || '') === teamForRole(second.role || '')
         ? 'same'
         : 'different';

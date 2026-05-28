@@ -70,7 +70,7 @@ export default function App() {
               <Stack.Screen name="Settings" component={SettingsScreen} />
               <Stack.Screen name="Themes" component={ThemesScreen} />
               <Stack.Screen name="ClockSetup" component={ClockSetupScreen} />
-              <Stack.Screen name="Clock" component={ClockScreen} options={{ gestureEnabled: false, animationEnabled: false }} />
+              <Stack.Screen name="Clock" component={ClockScreen} options={{ gestureEnabled: false, animation: 'none' }} />
               <Stack.Screen name="PlayMenu" component={PlayMenuScreen} />
               <Stack.Screen name="CreateGame" component={CreateGameScreen} />
               <Stack.Screen name="JoinGame" component={JoinGameScreen} />
