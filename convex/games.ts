@@ -436,7 +436,11 @@ export const startGame = mutation({
       const seat = player.seatPosition;
       if (typeof seat !== 'number') continue;
       const role = shuffled[seat];
-      const patch: { role: string; revealedAt?: number } = { role };
+      const patch: {
+        role: string;
+        originalRole: string;
+        revealedAt?: number;
+      } = { role, originalRole: role };
       if (isBotName(player.name)) patch.revealedAt = now;
       await ctx.db.patch(player._id, patch);
     }
@@ -819,6 +823,11 @@ export const endGameView = query({
       dayNumber: number | null;
     };
     const deathByPlayer = new Map<Id<'players'>, DeathInfo>();
+    // Night number on which each Cursed converted, keyed by player id.
+    // Populated from cursed_conversion action rows; empty when no Cursed
+    // ever converted. End-game view annotates these players with the
+    // conversion arc.
+    const cursedConversionByPlayer = new Map<Id<'players'>, number>();
     for (const a of actions) {
       if (a.actionType === 'death' && a.targetPlayerId) {
         deaths.add(deathKey(a.nightNumber, a.targetPlayerId));
@@ -834,6 +843,11 @@ export const endGameView = query({
       }
       if (a.actionType === 'tough_guy_wounded' && a.targetPlayerId) {
         delayedWounds.add(deathKey(a.nightNumber, a.targetPlayerId));
+      }
+      if (a.actionType === 'cursed_conversion' && a.actorPlayerId) {
+        if (!cursedConversionByPlayer.has(a.actorPlayerId)) {
+          cursedConversionByPlayer.set(a.actorPlayerId, a.nightNumber);
+        }
       }
     }
     // Leprechaun redirect: precompute the effective target for each night's
@@ -880,8 +894,50 @@ export const endGameView = query({
       historyByPlayer.set(playerId, list);
     };
 
+    // Per-night set of players who had any protectable kill source aimed at
+    // them — wolf effective target, witch poison, huntress shot, revealer
+    // hit on a wolf-team target, reviler hit on a special villager. Used
+    // by the bg_protect row to render SAVED when BG actually prevented a
+    // death (vs no-op nights with no incoming attack).
+    const incomingKillByNight = new Map<number, Set<Id<'players'>>>();
+    const addIncoming = (night: number, id: Id<'players'>) => {
+      let s = incomingKillByNight.get(night);
+      if (!s) {
+        s = new Set();
+        incomingKillByNight.set(night, s);
+      }
+      s.add(id);
+    };
+    for (const a of actions) {
+      if (a.actionType === 'wolf_kill') {
+        const eff = wolfKillEffectiveTarget.get(a._id) ?? a.targetPlayerId;
+        if (eff) addIncoming(a.nightNumber, eff);
+      } else if (a.actionType === 'witch_poison' && a.targetPlayerId) {
+        addIncoming(a.nightNumber, a.targetPlayerId);
+      } else if (a.actionType === 'huntress_shot' && a.targetPlayerId) {
+        addIncoming(a.nightNumber, a.targetPlayerId);
+      } else if (a.actionType === 'revealer_shot' && a.targetPlayerId) {
+        const t = players.find(p => p._id === a.targetPlayerId);
+        if (t?.role && isWolfTeam(t.role)) {
+          addIncoming(a.nightNumber, a.targetPlayerId);
+        }
+      } else if (a.actionType === 'reviler_shot' && a.targetPlayerId) {
+        const t = players.find(p => p._id === a.targetPlayerId);
+        const isSpecial =
+          !!t?.role &&
+          teamForRole(t.role) === 'village' &&
+          t.role !== 'Villager';
+        if (isSpecial) addIncoming(a.nightNumber, a.targetPlayerId);
+      }
+    }
+
     for (const a of actions) {
       if (a.actionType === 'death') continue; // resolution row, not a choice
+      // The conversion reveal is already communicated via the "Cursed →
+      // Werewolf (nN)" subtitle under the player's name. The bare action
+      // row would just clutter the per-night history list.
+      if (a.actionType === 'cursed_conversion') continue;
+      if (a.actionType === 'cursed_conversion_ack') continue;
       const result = (a.result ?? {}) as {
         team?: string;
         firstId?: Id<'players'>;
@@ -902,11 +958,11 @@ export const endGameView = query({
       if (a.actionType === 'wolf_kill') {
         // Outcome reflects the FINAL target (post-Leprechaun-redirect). The
         // wolves' chosen target stays in `targetName` for the "Targeted X"
-        // narration, but KILLED/SAVED/DELAYED is computed against whoever
-        // actually faced the kill after any redirect. Otherwise a redirected
-        // kill would render "Targeted JASON — SAVED" even when Mary died.
-        // When redirected, `secondTargetName` carries the effective victim so
-        // the end-game row can read "Targeted A → B — KILLED".
+        // narration, but KILLED/SAVED/DELAYED/CONVERTED is computed against
+        // whoever actually faced the kill after any redirect. Otherwise a
+        // redirected kill would render "Targeted JASON — SAVED" even when
+        // Mary died. When redirected, `secondTargetName` carries the
+        // effective victim so the row can read "Targeted A → B — KILLED".
         const effectiveId = wolfKillEffectiveTarget.get(a._id) ?? a.targetPlayerId;
         if (
           effectiveId &&
@@ -915,20 +971,35 @@ export const endGameView = query({
         ) {
           baseEntry.secondTargetName = nameFor(effectiveId);
         }
+        const converted =
+          effectiveId &&
+          cursedConversionByPlayer.get(effectiveId) === a.nightNumber;
         const delayed =
           effectiveId &&
           delayedWounds.has(deathKey(a.nightNumber, effectiveId));
         const killed =
           effectiveId &&
           deaths.has(deathKey(a.nightNumber, effectiveId));
-        baseEntry.outcome = delayed ? 'delayed' : killed ? 'killed' : 'saved';
+        baseEntry.outcome = converted
+          ? 'converted'
+          : delayed
+            ? 'delayed'
+            : killed
+              ? 'killed'
+              : 'saved';
         // Team decision — attribute to every wolf-team player who was alive
         // at the start of this night. Wolves act first in NIGHT_STEPS, so a
         // wolf who died during night N still made (or witnessed) night N's
         // pick. A wolf who died on day N has death.nightNumber = N-1, so
-        // night N+ is correctly excluded.
+        // night N+ is correctly excluded. Ex-Cursed wolves are excluded
+        // from nights before AND including their conversion night — they
+        // weren't with the pack when the choice was made.
         for (const p of players) {
           if (!p.role || !isWolfTeam(p.role)) continue;
+          const conversionNight = cursedConversionByPlayer.get(p._id);
+          if (conversionNight != null && a.nightNumber <= conversionNight) {
+            continue;
+          }
           const death = deathByPlayer.get(p._id);
           if (death && a.nightNumber > death.nightNumber) continue;
           pushEntry(p._id, baseEntry);
@@ -938,9 +1009,13 @@ export const endGameView = query({
 
       if (a.actionType === 'wolf_blocked') {
         // Diseased carryover — wolves skipped their pick. Same alive-at-night
-        // filter as wolf_kill: only wolves who were around to lose the pick.
+        // + conversion filter as wolf_kill.
         for (const p of players) {
           if (!p.role || !isWolfTeam(p.role)) continue;
+          const conversionNight = cursedConversionByPlayer.get(p._id);
+          if (conversionNight != null && a.nightNumber <= conversionNight) {
+            continue;
+          }
           const death = deathByPlayer.get(p._id);
           if (death && a.nightNumber > death.nightNumber) continue;
           pushEntry(p._id, baseEntry);
@@ -1008,6 +1083,17 @@ export const endGameView = query({
         baseEntry.outcome = killed ? 'killed' : 'missed';
       }
 
+      // Bodyguard protect. Outcome 'saved' when the protected target had
+      // an incoming kill source this night (wolf attack, poison, etc.) —
+      // BG's call actually mattered. Otherwise no outcome and the row
+      // renders as bare "Protected X".
+      if (a.actionType === 'bg_protect' && a.targetPlayerId) {
+        const incoming = incomingKillByNight.get(a.nightNumber);
+        if (incoming?.has(a.targetPlayerId)) {
+          baseEntry.outcome = 'saved';
+        }
+      }
+
       // Leprechaun redirect. `targetName` is the wolves' original target;
       // `secondTargetName` is the new target on L/R moves; `outcome` carries
       // the direction ('L' | 'R' | 'leave') or 'blocked' for diseased-night
@@ -1068,6 +1154,9 @@ export const endGameView = query({
           _id: p._id,
           name: p.name,
           role: p.role ?? null,
+          originalRole: p.originalRole ?? null,
+          cursedConvertedAtNight:
+            cursedConversionByPlayer.get(p._id) ?? null,
           alive: p.alive,
           seatPosition: p.seatPosition,
           isMe: p._id === me?._id,

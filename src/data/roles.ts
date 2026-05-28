@@ -130,7 +130,7 @@ export const ROLES: Role[] = [
   // ── Solo ───────────────────────────────────────────────────────────────────
   // blue+darkred
   { name: 'Blighted',                category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),      thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),      barColors: ['#4A90D9', '#8B1818'] },
-  { name: 'Cursed',                  category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),        thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),        barColors: ['#4A90D9', '#8B1818'] },
+  { name: 'Cursed',                  category: 'solo', image: require('../../roles_ghibli_medium/cursed.jpg'),        thumb: require('../../roles_ghibli_thumbs/cursed.jpg'),        barColors: ['#4A90D9', '#8B1818'] },
   { name: 'Doppelgänger',            category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),  thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),  barColors: ['#4A90D9', '#8B1818'] },
   { name: 'Drunk',                   category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),         thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),         barColors: ['#4A90D9', '#8B1818'] },
   { name: 'Grave Robber',            category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),  thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),  barColors: ['#4A90D9', '#8B1818'] },

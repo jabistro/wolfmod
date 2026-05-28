@@ -112,6 +112,7 @@ export default function NightScreen() {
     huntressState,
     revealerState,
     revilerState,
+    cursedConversionState,
     targetables,
     stepActorStatus,
   } = view;
@@ -266,6 +267,16 @@ export default function NightScreen() {
           isGhost={isGhost}
         />
       )}
+
+      {game.nightStep === 'cursed_conversion' && cursedConversionState && (
+        <CursedRevealView
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          isMine={cursedConversionState.isMine}
+          acknowledged={cursedConversionState.acknowledged}
+          convertedNames={cursedConversionState.convertedNames}
+        />
+      )}
     </>
   );
 
@@ -283,7 +294,8 @@ export default function NightScreen() {
     (game.nightStep === 'bodyguard' && bgState) ||
     (game.nightStep === 'huntress' && huntressState) ||
     (game.nightStep === 'revealer' && revealerState) ||
-    (game.nightStep === 'reviler' && revilerState)
+    (game.nightStep === 'reviler' && revilerState) ||
+    (game.nightStep === 'cursed_conversion' && cursedConversionState)
   );
 
   return (
@@ -306,7 +318,9 @@ export default function NightScreen() {
       {me.alive ? (
         <>
           {pickerTree}
-          {!isMyStep && <WaitingView role={me.role} />}
+          {!isMyStep && !cursedConversionState && (
+            <WaitingView role={me.role} />
+          )}
         </>
       ) : (
         <View
@@ -513,6 +527,109 @@ function NightHeader({
           {stepLabel.toUpperCase()}
         </Text>
       ) : null}
+    </View>
+  );
+}
+
+// ───── Cursed conversion reveal ────────────────────────────────────────────
+//
+// Shown to the converted Cursed (and dead spectators) during the
+// cursed_conversion night step. The body sentence has YOU / ARE / A / WOLF
+// rendered in red so the four red words read top-to-bottom as the subliminal
+// "you are a wolf". The OK button is required for the alive converted
+// Cursed — the step holds until they tap it (alongside the dwell) so they
+// can't miss the reveal by looking away. Dead spectators see the reveal
+// passively, no button.
+
+function CursedRevealView({
+  gameId,
+  deviceClientId,
+  isMine,
+  acknowledged,
+  convertedNames,
+}: {
+  gameId: Id<'games'>;
+  deviceClientId: string;
+  isMine: boolean;
+  acknowledged: boolean;
+  convertedNames: string[];
+}) {
+  const submitAck = useMutation(api.night.submitCursedAck);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleAck() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await submitAck({ gameId, callerDeviceClientId: deviceClientId });
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (isMine && acknowledged) {
+    return (
+      <View className="flex-1 px-6 pt-2 pb-8">
+        <View className="flex-1 items-center justify-center">
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
+            A CURSE TAKES HOLD
+          </Text>
+          <ActivityIndicator color="#D4A017" />
+          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+            Your fate is sealed. Waiting for morning…
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View className="flex-1 px-6 pt-2 pb-8">
+      <View className="flex-1 items-center justify-center">
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
+          A CURSE TAKES HOLD
+        </Text>
+        <View
+          className="bg-wolf-card rounded-2xl px-6 py-6"
+          style={{ maxWidth: 360 }}
+        >
+          <Text className="text-wolf-text text-base leading-6 text-center">
+            <Text className="text-wolf-red font-extrabold">YOU</Text>
+            {' were targeted tonight, but '}
+            <Text className="text-wolf-red font-extrabold">ARE</Text>
+            {' still alive. '}
+            <Text className="text-wolf-red font-extrabold">A</Text>
+            {' curse converts you into a '}
+            <Text className="text-wolf-red font-extrabold">WOLF</Text>
+            {' now.'}
+          </Text>
+        </View>
+        {!isMine && convertedNames.length > 0 && (
+          <Text className="text-wolf-muted text-xs tracking-widest mt-6 text-center px-4">
+            {convertedNames.join(', ').toUpperCase()} HAS BEEN CURSED
+          </Text>
+        )}
+      </View>
+
+      {isMine && (
+        <TouchableOpacity
+          onPress={handleAck}
+          disabled={submitting}
+          activeOpacity={0.75}
+          className="bg-wolf-accent rounded-xl py-4 items-center"
+          style={{ opacity: submitting ? 0.4 : 1 }}
+        >
+          {submitting ? (
+            <ActivityIndicator color="#0F0F14" />
+          ) : (
+            <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+              OK
+            </Text>
+          )}
+        </TouchableOpacity>
+      )}
     </View>
   );
 }

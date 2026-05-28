@@ -182,6 +182,12 @@ export default defineSchema({
     name: v.string(),
     seatPosition: v.optional(v.number()),
     role: v.optional(v.string()),
+    /**
+     * Set once at deal time and never mutated. Lets end-game show a
+     * converted Cursed as "Cursed → Werewolf" alongside their current
+     * (post-conversion) role.
+     */
+    originalRole: v.optional(v.string()),
     alive: v.boolean(),
     isHost: v.boolean(),
     deviceClientId: v.string(),

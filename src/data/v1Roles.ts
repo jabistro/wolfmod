@@ -28,6 +28,8 @@ export const V1_ROLES = [
   // Solo / wolf-aligned
   'Minion',
   'Reviler',
+  // Solo / convertible
+  'Cursed',
 ] as const;
 
 export type V1Role = (typeof V1_ROLES)[number];

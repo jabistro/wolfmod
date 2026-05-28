@@ -59,13 +59,17 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
           ? 'KILLED'
           : entry.outcome === 'delayed'
             ? 'DEATH DELAYED'
-            : 'SAVED';
+            : entry.outcome === 'converted'
+              ? 'CONVERTED'
+              : 'SAVED';
       const color =
         entry.outcome === 'killed'
           ? '#B03A2E'
           : entry.outcome === 'delayed'
             ? '#E0A030'
-            : '#5BA0E5';
+            : entry.outcome === 'converted'
+              ? '#D4A017'
+              : '#5BA0E5';
       const redirected =
         entry.secondTargetName != null && entry.secondTargetName !== t;
       return (
@@ -132,6 +136,16 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
     case 'mentalist_skip':
       return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
     case 'bg_protect':
+      if (entry.outcome === 'saved') {
+        return (
+          <Text className="text-wolf-text text-sm">
+            Protected {t} —{' '}
+            <Text className="font-bold" style={{ color: '#5BA0E5' }}>
+              SAVED
+            </Text>
+          </Text>
+        );
+      }
       return <Text className="text-wolf-text text-sm">Protected {t}</Text>;
     case 'witch_save':
       return (
@@ -413,6 +427,13 @@ export default function EndGameScreen() {
             const history = (p.history ?? []) as HistoryEntry[];
             const hasHistory = history.length > 0;
             const isExpanded = expandedIds.has(p._id);
+            // A Cursed who never converted ends the game with role === 'Cursed';
+            // a converted one has role === 'Werewolf' with originalRole pointing
+            // back to 'Cursed' + a conversion night number from the server.
+            const wasConverted =
+              p.originalRole === 'Cursed' &&
+              p.role !== 'Cursed' &&
+              p.cursedConvertedAtNight != null;
             return (
               <View
                 key={p._id}
@@ -437,8 +458,13 @@ export default function EndGameScreen() {
                         <Text className="text-wolf-accent text-xs"> (you)</Text>
                       )}
                     </Text>
+                    {wasConverted && (
+                      <Text className="text-wolf-muted text-xs italic uppercase">
+                        Cursed → Werewolf (n{p.cursedConvertedAtNight})
+                      </Text>
+                    )}
                     {!p.alive && (
-                      <Text className="text-wolf-muted text-xs italic">
+                      <Text className="text-wolf-muted text-xs italic uppercase">
                         {p.eliminationLabel
                           ? `eliminated ${p.eliminationLabel}`
                           : 'eliminated'}

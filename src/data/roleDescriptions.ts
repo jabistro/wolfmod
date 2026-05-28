@@ -95,7 +95,7 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
   'Sorceress': 'Wolf-team. Each night, may check whether a chosen player is the Seer.',
 
   // ── Solo ──────────────────────────────────────────────────────────────────
-  'Cursed': 'Starts on the village team. If wolves attack, joins the pack instead of dying.',
+  'Cursed': 'Starts on the village team. If the wolves attack, survives the night and joins the pack by morning. Wakes with the wolves from the following night onward.',
   'Doppelgänger': 'On night one, copies another player\'s role and joins their team.',
   'Tanner': 'Wins solo only if voted out by the village during the day.',
   'Cult Leader': 'Each night, recruits a player into the cult. Wins when the cult outnumbers the village.',

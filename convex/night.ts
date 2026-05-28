@@ -99,6 +99,10 @@ function activePlayersForStep(step: NightStep, alive: Player[]): Player[] {
       return alive.filter(p => p.role === 'Revealer');
     case 'reviler':
       return alive.filter(p => p.role === 'Reviler');
+    case 'cursed_conversion':
+      // No actor input. The step computes & writes conversion rows on
+      // entry and just dwells so the converted Cursed can read the reveal.
+      return [];
   }
 }
 
@@ -131,6 +135,8 @@ function stepIsInGame(step: NightStep, selectedRoles: string[]): boolean {
       return set.has('Revealer');
     case 'reviler':
       return set.has('Reviler');
+    case 'cursed_conversion':
+      return set.has('Cursed');
   }
 }
 
@@ -273,6 +279,26 @@ async function isStepComplete(
       const shots = await getNightActions(ctx, gameId, nightNumber, 'reviler_shot');
       const skips = await getNightActions(ctx, gameId, nightNumber, 'reviler_skip');
       return shots.length + skips.length >= actors.length;
+    }
+    case 'cursed_conversion': {
+      // Conversion rows are written inline in enterStep. Step is complete
+      // only when every converted Cursed has acknowledged the reveal via
+      // `submitCursedAck`. If no one converted this night, completes
+      // immediately (acks=0 >= conversions=0). Dwell still gates advance
+      // separately for cloak symmetry.
+      const conversions = await getNightActions(
+        ctx,
+        gameId,
+        nightNumber,
+        'cursed_conversion',
+      );
+      const acks = await getNightActions(
+        ctx,
+        gameId,
+        nightNumber,
+        'cursed_conversion_ack',
+      );
+      return acks.length >= conversions.length;
     }
   }
 }
@@ -557,6 +583,9 @@ async function autoResolveStep(
       }
       return;
     }
+    case 'cursed_conversion':
+      // Conversion is computed inline in enterStep, not here.
+      return;
   }
 }
 
@@ -742,6 +771,28 @@ async function resolveMorning(
     }
     // else: another death source (poison, huntress, etc.) — they die from
     // that; we deliberately don't burn the wound on a TG who's dying anyway.
+  }
+
+  // Cursed conversion. Any cursed_conversion row written this night already
+  // verified (at the cursed_conversion step) that the wolves' effective
+  // target was an unprotected Cursed who survived all other death sources.
+  // Suppress the wolf death candidate so the Cursed lives, and flip their
+  // role to 'Werewolf' so all downstream logic (win-condition parity,
+  // tomorrow night's wolf wake, seer reads, etc.) treats them as wolf-team.
+  // originalRole on the player still reads 'Cursed' so end-game can show
+  // the conversion arc.
+  const cursedConversions = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'cursed_conversion',
+  );
+  const convertedCursedIds = new Set<Id<'players'>>();
+  for (const c of cursedConversions) {
+    const cid = c.actorPlayerId as Id<'players'> | undefined;
+    if (!cid) continue;
+    convertedCursedIds.add(cid);
+    candidates.delete(cid);
   }
 
   for (const [targetId, c] of candidates) {
@@ -958,6 +1009,17 @@ async function resolveMorning(
   //     (already applied above) folds into the morning death list.
   // Self-inflicted wolf-on-wolf Hunter Wolf deaths don't get to shoot when
   // there's no Leprechaun — see suppressedSelfWolfKills above.
+  // Flip Cursed → Werewolf after deaths/cascades land but before the
+  // win-condition check. This makes parity reflect the new pack size
+  // immediately (1-wolf + freshly-converted-Cursed becomes 2 wolves for
+  // counting). They wake with the pack starting next night via the
+  // standard wolf-recognition path that reads current `role`.
+  for (const cid of convertedCursedIds) {
+    const cursed = await ctx.db.get(cid);
+    if (!cursed || !cursed.alive) continue;
+    await ctx.db.patch(cid, { role: 'Werewolf' });
+  }
+
   const hunterDeaths = (
     await filterRoles(ctx, newDeadIds, ['Hunter', 'Hunter Wolf'])
   ).filter(id => !suppressedSelfWolfKills.has(id));
@@ -1007,6 +1069,130 @@ async function filterRoles(
     if (p?.role && roles.includes(p.role)) out.push(id);
   }
   return out;
+}
+
+// ───── Cursed conversion ───────────────────────────────────────────────────
+//
+// Runs at the cursed_conversion night step (the last step before morning),
+// after every other role has acted and locked in its decisions. Walks every
+// alive Cursed and writes a `cursed_conversion` action row for each one who:
+//
+//   - is the effective wolf-kill target (post-Leprechaun redirect), AND
+//   - is not protected by Bodyguard or Witch save, AND
+//   - is not going to die from another source tonight (Witch poison,
+//     Huntress shot, Reviler hit, etc.) that BG didn't also protect from.
+//
+// The wolf_kill row stays pristine (Leprechaun-style). The `cursed_conversion`
+// row is the trigger the reveal screen reads, and morning resolution consumes
+// the row to suppress the wolf death AND patch the player's `role` from
+// 'Cursed' to 'Werewolf'. Per house rule: BG protection on a Cursed blocks
+// both the death AND the conversion — they stay village.
+
+async function resolveCursedConversionsForNight(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  nightNumber: number,
+): Promise<void> {
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  const cursedPlayers = players.filter(
+    p => p.alive && p.role === 'Cursed',
+  );
+  if (cursedPlayers.length === 0) return;
+
+  // Effective wolf targets after the Leprechaun redirect on the first kill.
+  const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
+  const sortedKills = kills.slice().sort((a, b) => a.resolvedAt - b.resolvedAt);
+  const redirects = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'leprechaun_redirect',
+  );
+  let firstKillOverride: Id<'players'> | null = null;
+  for (const r of redirects) {
+    const dir = r.result?.direction;
+    if (dir === 'L' || dir === 'R') {
+      const newId = r.result?.newTargetId as Id<'players'> | undefined;
+      if (newId) firstKillOverride = newId;
+      break;
+    }
+  }
+  const effectiveTargets = new Set<Id<'players'>>();
+  for (const k of kills) {
+    if (firstKillOverride && sortedKills[0]?._id === k._id) {
+      effectiveTargets.add(firstKillOverride);
+    } else if (k.targetPlayerId) {
+      effectiveTargets.add(k.targetPlayerId);
+    }
+  }
+
+  // BG covers everything (including the conversion itself); Witch save
+  // covers the wolf attack. A protected Cursed stays a villager.
+  const protectedTargets = new Set<Id<'players'>>();
+  const bgProtects = await getNightActions(ctx, gameId, nightNumber, 'bg_protect');
+  const bgProtectedIds = new Set<Id<'players'>>();
+  for (const bg of bgProtects) {
+    if (bg.targetPlayerId) {
+      protectedTargets.add(bg.targetPlayerId);
+      bgProtectedIds.add(bg.targetPlayerId);
+    }
+  }
+  const witchSaves = await getNightActions(ctx, gameId, nightNumber, 'witch_save');
+  for (const s of witchSaves) {
+    if (s.targetPlayerId) protectedTargets.add(s.targetPlayerId);
+  }
+
+  // Independent kill sources that would still kill the Cursed unless BG
+  // also protected them. If any of these land, the Cursed dies — no
+  // conversion (you can't convert a corpse).
+  const otherKillTargets = new Set<Id<'players'>>();
+  const witchPoisons = await getNightActions(ctx, gameId, nightNumber, 'witch_poison');
+  for (const p of witchPoisons) {
+    if (p.targetPlayerId && !bgProtectedIds.has(p.targetPlayerId)) {
+      otherKillTargets.add(p.targetPlayerId);
+    }
+  }
+  const huntressShots = await getNightActions(ctx, gameId, nightNumber, 'huntress_shot');
+  for (const h of huntressShots) {
+    if (h.targetPlayerId && !bgProtectedIds.has(h.targetPlayerId)) {
+      otherKillTargets.add(h.targetPlayerId);
+    }
+  }
+  const revealerShots = await getNightActions(ctx, gameId, nightNumber, 'revealer_shot');
+  for (const rs of revealerShots) {
+    if (!rs.targetPlayerId) continue;
+    const target = players.find(p => p._id === rs.targetPlayerId);
+    if (target?.role && isWolfTeam(target.role) && !bgProtectedIds.has(rs.targetPlayerId)) {
+      otherKillTargets.add(rs.targetPlayerId);
+    }
+  }
+  const revilerShots = await getNightActions(ctx, gameId, nightNumber, 'reviler_shot');
+  for (const rs of revilerShots) {
+    if (!rs.targetPlayerId) continue;
+    const target = players.find(p => p._id === rs.targetPlayerId);
+    if (target && isSpecialVillager(target.role) && !bgProtectedIds.has(rs.targetPlayerId)) {
+      otherKillTargets.add(rs.targetPlayerId);
+    }
+  }
+
+  const now = Date.now();
+  for (const cursed of cursedPlayers) {
+    if (!effectiveTargets.has(cursed._id)) continue;
+    if (protectedTargets.has(cursed._id)) continue;
+    if (otherKillTargets.has(cursed._id)) continue;
+    await ctx.db.insert('nightActions', {
+      gameId,
+      nightNumber,
+      actorPlayerId: cursed._id,
+      actionType: 'cursed_conversion',
+      targetPlayerId: cursed._id,
+      result: { willConvert: true },
+      resolvedAt: now,
+    });
+  }
 }
 
 // ───── Step engine ──────────────────────────────────────────────────────────
@@ -1095,6 +1281,10 @@ export async function enterStep(
       actionType: 'wolf_blocked',
       resolvedAt: Date.now(),
     });
+  } else if (step === 'cursed_conversion') {
+    // No actor input — compute conversion eligibility inline so the dwell
+    // window already has the row to read for the Cursed's private reveal.
+    await resolveCursedConversionsForNight(ctx, gameId, game.nightNumber);
   } else if (
     (actors.length > 0 && actors.every(a => isBotName(a.name))) ||
     witchHasNothingLeft ||
@@ -1990,6 +2180,65 @@ export const submitRevilerSkip = mutation({
   },
 });
 
+// ───── Cursed conversion ack ────────────────────────────────────────────────
+//
+// Tapping OK on the reveal screen records a `cursed_conversion_ack` row.
+// `isStepComplete` for cursed_conversion gates on every converted Cursed
+// having an ack, so the step won't auto-advance on dwell expiry alone —
+// the converted Cursed can't miss the screen by looking away briefly.
+// Dwell still runs as the MINIMUM time (cloak symmetry). Host stall
+// override remains the safety valve if a Cursed never taps.
+
+export const submitCursedAck = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || game.nightStep !== 'cursed_conversion') {
+      throw new Error('Not in the cursed conversion step.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Cursed') {
+      throw new Error('Only a converted Cursed can acknowledge.');
+    }
+    // Caller must actually be one of tonight's converted Cursed.
+    const myConversion = await findMyAction(
+      ctx,
+      args.gameId,
+      game.nightNumber,
+      me._id,
+      'cursed_conversion',
+    );
+    if (!myConversion) {
+      throw new Error('You were not converted tonight.');
+    }
+    // Idempotent — repeat taps from a flaky network shouldn't unblock
+    // the step prematurely.
+    const existingAck = await findMyAction(
+      ctx,
+      args.gameId,
+      game.nightNumber,
+      me._id,
+      'cursed_conversion_ack',
+    );
+    if (existingAck) return;
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'cursed_conversion_ack',
+      resolvedAt: Date.now(),
+    });
+
+    await maybeAdvance(ctx, args.gameId);
+  },
+});
+
 // ───── Witch ────────────────────────────────────────────────────────────────
 //
 // Three mutations: save (consumes the save potion to revive tonight's wolf
@@ -2395,6 +2644,7 @@ const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
   huntress: ['huntress_shot', 'huntress_skip'],
   revealer: ['revealer_shot', 'revealer_skip'],
   reviler: ['reviler_shot', 'reviler_skip'],
+  cursed_conversion: ['cursed_conversion', 'cursed_conversion_ack'],
 };
 
 /**
@@ -3073,6 +3323,49 @@ export const nightView = query({
       };
     }
 
+    // Cursed conversion reveal. Populated only when the cursed_conversion
+    // step is active AND tonight produced a conversion. Visible to:
+    //   - the alive Cursed whose conversion fired (`isMine: true`), OR
+    //   - dead spectators during the cursed_conversion step (ghost mirror).
+    // An unconverted living Cursed sees the generic WaitingView — they have
+    // no way to tell whether the wolves targeted them tonight.
+    let cursedConversionState: {
+      isMine: boolean;
+      acknowledged: boolean;
+      convertedNames: string[];
+    } | null = null;
+    if (step === 'cursed_conversion') {
+      const conversions = await getNightActions(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        'cursed_conversion',
+      );
+      if (conversions.length > 0) {
+        const playerById = new Map(players.map(p => [p._id, p]));
+        const convertedNames = conversions
+          .map(c =>
+            c.actorPlayerId ? playerById.get(c.actorPlayerId)?.name ?? null : null,
+          )
+          .filter((n): n is string => !!n);
+        const isMine =
+          me.alive &&
+          me.role === 'Cursed' &&
+          conversions.some(c => c.actorPlayerId === me._id);
+        if (isMine || !me.alive) {
+          const acks = await getNightActions(
+            ctx,
+            args.gameId,
+            game.nightNumber,
+            'cursed_conversion_ack',
+          );
+          const acknowledged =
+            isMine && acks.some(a => a.actorPlayerId === me._id);
+          cursedConversionState = { isMine, acknowledged, convertedNames };
+        }
+      }
+    }
+
     // Revealer-only state. No usage flag (every night, optional);
     // hasActedThisNight drives the locked waiting view.
     let revealerState: {
@@ -3277,8 +3570,16 @@ export const nightView = query({
           actorName: string | null;
         }
       | null = null;
-    if (!me.alive && step && step !== 'wolves') {
-      const ROLE_BY_STEP: Record<Exclude<NightStep, 'wolves'>, string> = {
+    if (
+      !me.alive &&
+      step &&
+      step !== 'wolves' &&
+      step !== 'cursed_conversion'
+    ) {
+      const ROLE_BY_STEP: Record<
+        Exclude<NightStep, 'wolves' | 'cursed_conversion'>,
+        string
+      > = {
         seer: 'Seer',
         pi: 'Paranormal Investigator',
         mentalist: 'Mentalist',
@@ -3289,7 +3590,8 @@ export const nightView = query({
         revealer: 'Revealer',
         reviler: 'Reviler',
       };
-      const roleName = ROLE_BY_STEP[step as Exclude<NightStep, 'wolves'>];
+      const roleName =
+        ROLE_BY_STEP[step as Exclude<NightStep, 'wolves' | 'cursed_conversion'>];
       if (roleName) {
         const active = stepActors.find(a => a.role === roleName);
         if (active) {
@@ -3356,6 +3658,7 @@ export const nightView = query({
       huntressState,
       revealerState,
       revilerState,
+      cursedConversionState,
       targetables,
       alivePlayers: aliveSummaries,
       stepActorStatus,
