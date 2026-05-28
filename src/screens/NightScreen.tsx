@@ -698,7 +698,9 @@ function WolvesPicker({
           })}
         </View>
 
-        {/* Seating circle — selectable seats are non-wolf alive players. */}
+        {/* Seating circle — selectable seats are any alive players (wolves
+            may target each other, including themselves; this keeps the
+            Leprechaun from confirming every kill target as a villager). */}
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
             totalSeats={totalSeats}

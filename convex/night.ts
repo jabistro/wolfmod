@@ -623,6 +623,14 @@ async function resolveMorning(
       addCandidate(p._id, 'tough_guy', false);
     }
   }
+  // Leprechaun in the game = plausible deniability for wolf-on-wolf kills.
+  // Without a Leprechaun, wolves who target a fellow wolf are obviously
+  // abusing the mechanic to farm their own death powers (Wolf Cub vengeance,
+  // Hunter Wolf shot), so we suppress those benefits below. The Lep counts
+  // even if dead — at the table the wolves don't necessarily know that, and
+  // they may have been hoping for a redirect.
+  const leprechaunInGame = allPlayersForTG.some(p => p.role === 'Leprechaun');
+  const roleById = new Map(allPlayersForTG.map(p => [p._id, p.role ?? '']));
 
   const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
   // Leprechaun redirect: only applies to the FIRST wolf_kill row (oldest by
@@ -753,6 +761,21 @@ async function resolveMorning(
     newDeadIds.push(targetId);
   }
 
+  // Self-inflicted wolf-team deaths (wolves voted to kill one of their own)
+  // forfeit their death powers when there's no Leprechaun in the game — see
+  // the leprechaunInGame comment above. Cause === 'wolf' and dead player is
+  // wolf-team is the signature. With a Lep present, this set stays empty
+  // and all powers fire normally.
+  const suppressedSelfWolfKills = new Set<Id<'players'>>();
+  if (!leprechaunInGame) {
+    for (const id of newDeadIds) {
+      const cause = candidates.get(id)?.cause;
+      if (cause !== 'wolf') continue;
+      const role = roleById.get(id);
+      if (role && isWolfTeam(role)) suppressedSelfWolfKills.add(id);
+    }
+  }
+
   // Tough Guy wound persistence. Only flag survivors — if a TG was in
   // tgsToWound but somehow died anyway (defensive: e.g., wound flag race),
   // we skip the patch. The `tough_guy_wounded` action row gives the
@@ -789,8 +812,14 @@ async function resolveMorning(
   // Wolf Cub trigger. If the cub died from any source this morning,
   // remaining wolves get 2 kills next night. The flag sits alongside the
   // Diseased flag — at the next wolves step, Diseased block takes priority
-  // (vengeance is wasted in that case, per house rules).
-  await flagCubDeathIfApplicable(ctx, gameId, newDeadIds);
+  // (vengeance is wasted in that case, per house rules). Self-inflicted
+  // wolf-on-wolf cub kills are excluded when there's no Leprechaun (no
+  // farming the vengeance bonus).
+  await flagCubDeathIfApplicable(
+    ctx,
+    gameId,
+    newDeadIds.filter(id => !suppressedSelfWolfKills.has(id)),
+  );
 
   // Persist PI usage across nights — once they investigate, they're spent
   // for the rest of the game.
@@ -927,11 +956,11 @@ async function resolveMorning(
   //     the actor decides.
   //   * No Hunter/HW died → straight to morning. The bomber's cascade
   //     (already applied above) folds into the morning death list.
-  const hunterDeaths = await filterRoles(
-    ctx,
-    newDeadIds,
-    ['Hunter', 'Hunter Wolf'],
-  );
+  // Self-inflicted wolf-on-wolf Hunter Wolf deaths don't get to shoot when
+  // there's no Leprechaun — see suppressedSelfWolfKills above.
+  const hunterDeaths = (
+    await filterRoles(ctx, newDeadIds, ['Hunter', 'Hunter Wolf'])
+  ).filter(id => !suppressedSelfWolfKills.has(id));
   if (hunterDeaths.length === 0) {
     await ctx.db.patch(gameId, { phase: 'morning', nightStep: undefined });
     await recordWinIfReached(ctx, gameId);
@@ -1196,9 +1225,9 @@ export const submitWolfVote = mutation({
       throw new Error('Invalid target.');
     }
     if (!target.alive) throw new Error('Target is already eliminated.');
-    if (isWolfTeam(target.role || '')) {
-      throw new Error('Wolves cannot kill each other.');
-    }
+    // Wolves may target each other (and themselves). The Leprechaun would
+    // otherwise be able to confirm every wolf-kill target as a villager;
+    // allowing wolf-on-wolf kills keeps the redirect's signal noisy.
     // On a Wolf Cub vengeance night the wolves pick TWO victims sequentially.
     // Reject voting for someone who was already locked in as kill #1, and
     // reject any vote once the night's kill quota has already been met (the
@@ -3181,7 +3210,9 @@ export const nightView = query({
       const v = targetablesViewer;
       let pool: Player[] = [];
       if (step === 'wolves') {
-        pool = alive.filter(p => !isWolfTeam(p.role || ''));
+        // Wolves may target each other (and themselves) — see submitWolfVote
+        // for the Leprechaun-signaling rationale.
+        pool = alive;
       } else if (step === 'seer') {
         pool = alive.filter(p => p._id !== v._id);
       } else if (step === 'pi') {
