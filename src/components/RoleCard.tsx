@@ -26,6 +26,12 @@ export default function RoleCard({ role, width = 280 }: Props) {
   const description = getRoleDescription(role);
   const valueText = value > 0 ? `+${value}` : `${value}`;
   const imageHeight = width * (4 / 3);
+  // Narrow cards (used on RoleReveal when the player has many teammates) need
+  // a smaller name font so single-word roles like "WEREWOLF" fit on one line.
+  // Multi-word names wrap to two lines naturally — no ellipsis.
+  const isNarrow = width < 220;
+  const nameFontSize = isNarrow ? 14 : 16;
+  const nameLetterSpacing = isNarrow ? 0.5 : 1;
 
   return (
     <View style={[styles.card, { width }]}>
@@ -33,7 +39,12 @@ export default function RoleCard({ role, width = 280 }: Props) {
         <View style={[styles.valueBadge, { backgroundColor: teamColor }]}>
           <Text style={styles.valueText}>{valueText}</Text>
         </View>
-        <Text style={styles.name} numberOfLines={1}>
+        <Text
+          style={[
+            styles.name,
+            { fontSize: nameFontSize, letterSpacing: nameLetterSpacing },
+          ]}
+        >
           {role.toUpperCase()}
         </Text>
         <View style={styles.headerSpacer} />

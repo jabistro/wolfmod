@@ -16,7 +16,6 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
-import { teamForRole, type Team } from '../data/v1Roles';
 import { showAlert } from '../components/ThemedAlert';
 import RoleCard from '../components/RoleCard';
 import { InGameLeaveButton } from '../components/InGameLeaveButton';
@@ -27,12 +26,6 @@ type Nav = StackNavigationProp<RootStackParamList, 'RoleReveal'>;
 type Route = RouteProp<RootStackParamList, 'RoleReveal'>;
 
 const HOLD_DELAY_MS = 1000;
-
-const TEAM_COLORS: Record<Team, { bg: string; label: string }> = {
-  village: { bg: '#4A90D9', label: 'VILLAGE' },
-  wolf: { bg: '#8B1818', label: 'WOLF TEAM' },
-  solo: { bg: '#8B6436', label: 'SOLO' },
-};
 
 export default function RoleRevealScreen() {
   const navigation = useNavigation<Nav>();
@@ -142,9 +135,18 @@ export default function RoleRevealScreen() {
     );
   }
 
-  const team = teamForRole(me.role);
-  const teamColor = TEAM_COLORS[team];
   const isConfirmed = me.revealedAt !== undefined;
+
+  // Tiered shrink so the card + pack list always fit between the headers and
+  // the HOLD button without scrolling. Widest case in Ultimate Werewolf is
+  // ~6 wolves + a Minion = 6 visible teammates.
+  const packCount = visibleTeammates.length;
+  const cardWidth = packCount >= 4 ? 200 : 240;
+  const packTextStyle =
+    packCount >= 4
+      ? { fontSize: 12, lineHeight: 16 }
+      : { fontSize: 14, lineHeight: 20 };
+  const packTopMargin = packCount >= 4 ? 12 : 16;
 
   function onPressIn() {
     setIsPressed(true);
@@ -291,22 +293,21 @@ export default function RoleRevealScreen() {
       <View className="flex-1 items-center justify-center px-6">
         {revealed ? (
           <Animated.View style={{ alignItems: 'center', opacity: fadeAnim }}>
-            <RoleCard role={me.role} width={240} />
-            <View
-              className="mt-3 rounded-full px-4 py-1"
-              style={{ backgroundColor: teamColor.bg }}
-            >
-              <Text className="text-wolf-bg text-xs font-extrabold tracking-widest">
-                {teamColor.label}
-              </Text>
-            </View>
+            <RoleCard role={me.role} width={cardWidth} />
             {visibleTeammates.length > 0 && (
-              <View className="mt-6 items-center">
-                <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
+              <View style={{ marginTop: packTopMargin, alignItems: 'center' }}>
+                <Text
+                  className="text-wolf-muted text-xs font-bold tracking-widest mb-1"
+                  numberOfLines={1}
+                >
                   {me.role === 'Minion' ? 'THE WOLVES' : 'YOUR PACK'}
                 </Text>
                 {visibleTeammates.map(t => (
-                  <Text key={t.name} className="text-wolf-text text-sm">
+                  <Text
+                    key={t.name}
+                    className="text-wolf-text"
+                    style={packTextStyle}
+                  >
                     {t.name} <Text className="text-wolf-muted">({t.role})</Text>
                   </Text>
                 ))}
