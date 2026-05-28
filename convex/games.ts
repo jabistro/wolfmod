@@ -908,6 +908,22 @@ export const endGameView = query({
       }
       s.add(id);
     };
+    // Witches always submit a `witch_done` row to close their turn, even on
+    // nights they also saved or poisoned. We want the history list to show
+    // "Passed" only on truly idle nights, so track which (witch, night) pairs
+    // had an active save/poison and suppress the redundant done row below.
+    const witchActed = new Set<string>();
+    const witchActedKey = (actorId: Id<'players'>, night: number) =>
+      `${actorId}:${night}`;
+    for (const a of actions) {
+      if (
+        (a.actionType === 'witch_save' || a.actionType === 'witch_poison') &&
+        a.actorPlayerId
+      ) {
+        witchActed.add(witchActedKey(a.actorPlayerId, a.nightNumber));
+      }
+    }
+
     for (const a of actions) {
       if (a.actionType === 'wolf_kill') {
         const eff = wolfKillEffectiveTarget.get(a._id) ?? a.targetPlayerId;
@@ -938,6 +954,16 @@ export const endGameView = query({
       // row would just clutter the per-night history list.
       if (a.actionType === 'cursed_conversion') continue;
       if (a.actionType === 'cursed_conversion_ack') continue;
+      // A witch_done row alongside a same-night witch_save / witch_poison is
+      // just the turn-closer — collapse it so the night shows only the action
+      // taken, not action + Passed.
+      if (
+        a.actionType === 'witch_done' &&
+        a.actorPlayerId &&
+        witchActed.has(witchActedKey(a.actorPlayerId, a.nightNumber))
+      ) {
+        continue;
+      }
       const result = (a.result ?? {}) as {
         team?: string;
         firstId?: Id<'players'>;
