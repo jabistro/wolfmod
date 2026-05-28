@@ -3100,6 +3100,7 @@ export const nightView = query({
       poisonedTonight: boolean;
       hasActedThisNight: boolean;
       tonightVictims: Array<{ _id: Id<'players'>; name: string }>;
+      tonightSaveTarget: { _id: Id<'players'>; name: string } | null;
       tonightPoisonTarget: { _id: Id<'players'>; name: string } | null;
     } | null = null;
     const witchActor = actorForRole('Witch', 'witch');
@@ -3137,6 +3138,23 @@ export const nightView = query({
           }
         }
       }
+      let tonightSaveTarget:
+        | { _id: Id<'players'>; name: string }
+        | null = null;
+      if (savedTonight) {
+        const saveAction = myActions.find(
+          a =>
+            a.actorPlayerId === witchActor._id &&
+            a.actionType === 'witch_save',
+        );
+        const targetId = saveAction?.targetPlayerId;
+        if (targetId) {
+          const target = playerById.get(targetId);
+          if (target) {
+            tonightSaveTarget = { _id: target._id, name: target.name };
+          }
+        }
+      }
       let tonightPoisonTarget:
         | { _id: Id<'players'>; name: string }
         | null = null;
@@ -3161,6 +3179,7 @@ export const nightView = query({
         poisonedTonight,
         hasActedThisNight,
         tonightVictims,
+        tonightSaveTarget,
         tonightPoisonTarget,
       };
     }

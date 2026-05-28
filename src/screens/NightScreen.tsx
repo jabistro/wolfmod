@@ -1799,6 +1799,7 @@ function WitchPicker({
     poisonedTonight: boolean;
     hasActedThisNight: boolean;
     tonightVictims: Array<{ _id: Id<'players'>; name: string }>;
+    tonightSaveTarget: { _id: Id<'players'>; name: string } | null;
     tonightPoisonTarget: { _id: Id<'players'>; name: string } | null;
   };
   isGhost?: boolean;
@@ -1879,6 +1880,14 @@ function WitchPicker({
               ? "The Witch's turn is over. Waiting for the night to settle…"
               : 'Your turn is over. Waiting for the night to settle…'}
           </Text>
+          {witchState.tonightSaveTarget && (
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4">
+              <Text className="font-bold" style={{ color: '#5BA0E5' }}>
+                SAVED:
+              </Text>{' '}
+              {witchState.tonightSaveTarget.name}
+            </Text>
+          )}
           {witchState.tonightPoisonTarget && (
             <Text className="text-wolf-text text-sm text-center mt-4 px-4">
               <Text className="text-wolf-red font-bold">POISONED:</Text>{' '}
