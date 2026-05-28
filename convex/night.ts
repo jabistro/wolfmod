@@ -47,14 +47,22 @@ type Player = Doc<'players'>;
 // Dwell starts when the step is entered. If a real player's action lands
 // before the deadline, the step still holds until the deadline. A scheduled
 // `dwellTick` runs at the deadline and advances if conditions are met.
+//
+// When an action lands AFTER the deadline (slow decider), the dwell would
+// otherwise be exhausted and the step would advance instantly — leaving
+// ghosts/spectators no time to observe what just happened. To prevent that,
+// every action mutation calls `ensureReadingWindow` instead of `maybeAdvance`,
+// which bumps the deadline forward by `REVEAL_WINDOW_MS` (only if needed).
 
 const STEP_DWELL_MIN_MS = 6000;
 const STEP_DWELL_MAX_MS = 12000;
 
-// Guaranteed remaining dwell after an info-role submits, so the result modal
-// stays on-screen long enough to read even if the original dwell was about to
-// expire.
-const INFO_READING_WINDOW_MS = 4000;
+// Guaranteed remaining dwell after any night action is submitted, so the
+// acting player can read their own result (info roles) AND ghosts/spectators
+// have time to observe what just happened on the table before the step
+// advances. Only bumps the deadline when it would otherwise be sooner — fast
+// actors still get the full original dwell, preserving cloak variance.
+const REVEAL_WINDOW_MS = 5000;
 
 // How long past the dwell deadline the host has to wait before the
 // "Skip Ahead" override becomes available.
@@ -1347,14 +1355,20 @@ async function advanceFromCurrentStep(
 }
 
 /**
- * After an info-role action (Seer/PI/Mentalist), make sure there's still
- * enough remaining dwell for the player to read their result before the step
- * advances. Bumps `nightStepEndsAt` only if it's about to expire — most of
- * the time this is a no-op, preserving the original cloaking variance.
+ * Called from every action-mutation right after the `nightActions` row is
+ * inserted. Ensures there's still enough remaining dwell for:
+ *   - the actor to read their own result (Seer/PI/Mentalist), and
+ *   - ghosts/spectators to observe the new action row on the table
+ * before the step advances. Bumps `nightStepEndsAt` only if it's about to
+ * expire — most of the time this is a no-op, preserving the original
+ * cloaking variance.
  *
  * When we do bump, we also schedule a fresh `dwellTick` at the new deadline.
  * The original tick will still fire at the old time, but will no-op via the
  * dwell check; the new tick is the one that ultimately advances.
+ *
+ * Use this in place of `maybeAdvance` from action mutations. It does not
+ * itself attempt to advance — the scheduled tick (old or new) handles that.
  */
 async function ensureReadingWindow(
   ctx: MutationCtx,
@@ -1363,10 +1377,10 @@ async function ensureReadingWindow(
 ): Promise<void> {
   const game = await ctx.db.get(gameId);
   if (!game || game.phase !== 'night' || game.nightStep !== step) return;
-  const minEndsAt = Date.now() + INFO_READING_WINDOW_MS;
+  const minEndsAt = Date.now() + REVEAL_WINDOW_MS;
   if ((game.nightStepEndsAt ?? 0) >= minEndsAt) return;
   await ctx.db.patch(gameId, { nightStepEndsAt: minEndsAt });
-  await ctx.scheduler.runAfter(INFO_READING_WINDOW_MS, internal.night.dwellTick, {
+  await ctx.scheduler.runAfter(REVEAL_WINDOW_MS, internal.night.dwellTick, {
     gameId,
     expectedStep: step,
   });
@@ -1496,9 +1510,9 @@ export const submitWolfVote = mutation({
       });
       // Wolf Cub vengeance: if more kills are still required, reset every
       // wolf's wolfVote so the picker re-prompts for the next target. Do
-      // NOT advance the step. Otherwise (required kills satisfied), try
-      // to advance immediately — if the dwell hasn't elapsed yet,
-      // maybeAdvance is a no-op and the scheduled dwellTick handles it.
+      // NOT advance the step. Otherwise (required kills satisfied), gate
+      // the advance on a guaranteed reveal window so ghosts can see the
+      // wolf_kill row before the step transitions.
       const required = computeRequiredKills(
         game,
         refreshed.filter(p => p.alive),
@@ -1514,7 +1528,7 @@ export const submitWolfVote = mutation({
         }
         return;
       }
-      await maybeAdvance(ctx, args.gameId);
+      await ensureReadingWindow(ctx, args.gameId, 'wolves');
     }
   },
 });
@@ -1664,9 +1678,9 @@ export const submitPISkip = mutation({
       resolvedAt: Date.now(),
     });
 
-    // pi_skip completes the PI's step contribution → try to advance now in
-    // case the dwell deadline has already passed.
-    await maybeAdvance(ctx, args.gameId);
+    // pi_skip completes the PI's step contribution → ensure ghosts have a
+    // moment to read "PI passed" before the step transitions.
+    await ensureReadingWindow(ctx, args.gameId, 'pi');
   },
 });
 
@@ -1824,10 +1838,10 @@ export const submitBGProtect = mutation({
       resolvedAt: Date.now(),
     });
 
-    // Try to advance — if the dwell deadline already passed (slow decider),
-    // the scheduled `dwellTick` has already fired and won't fire again, so we
-    // need this trigger. If dwell is still active, this is a no-op.
-    await maybeAdvance(ctx, args.gameId);
+    // Guaranteed reveal window so ghosts can read the protect target before
+    // the step transitions, even if the BG took longer than the original
+    // dwell to decide.
+    await ensureReadingWindow(ctx, args.gameId, 'bodyguard');
   },
 });
 
@@ -1896,7 +1910,7 @@ export const submitHuntressShot = mutation({
       resolvedAt: Date.now(),
     });
 
-    await maybeAdvance(ctx, args.gameId);
+    await ensureReadingWindow(ctx, args.gameId, 'huntress');
   },
 });
 
@@ -1943,7 +1957,7 @@ export const submitHuntressSkip = mutation({
       resolvedAt: Date.now(),
     });
 
-    await maybeAdvance(ctx, args.gameId);
+    await ensureReadingWindow(ctx, args.gameId, 'huntress');
   },
 });
 
@@ -2009,7 +2023,7 @@ export const submitRevealerShot = mutation({
       resolvedAt: Date.now(),
     });
 
-    await maybeAdvance(ctx, args.gameId);
+    await ensureReadingWindow(ctx, args.gameId, 'revealer');
   },
 });
 
@@ -2056,7 +2070,7 @@ export const submitRevealerSkip = mutation({
       resolvedAt: Date.now(),
     });
 
-    await maybeAdvance(ctx, args.gameId);
+    await ensureReadingWindow(ctx, args.gameId, 'revealer');
   },
 });
 
@@ -2129,7 +2143,7 @@ export const submitRevilerShot = mutation({
       resolvedAt: Date.now(),
     });
 
-    await maybeAdvance(ctx, args.gameId);
+    await ensureReadingWindow(ctx, args.gameId, 'reviler');
   },
 });
 
@@ -2176,7 +2190,7 @@ export const submitRevilerSkip = mutation({
       resolvedAt: Date.now(),
     });
 
-    await maybeAdvance(ctx, args.gameId);
+    await ensureReadingWindow(ctx, args.gameId, 'reviler');
   },
 });
 
@@ -2409,9 +2423,10 @@ export const submitWitchDone = mutation({
       resolvedAt: Date.now(),
     });
 
-    // Same pattern as BG: covers the slow-decider case where the scheduled
-    // `dwellTick` already fired before the player finished.
-    await maybeAdvance(ctx, args.gameId);
+    // Guaranteed reveal window so ghosts can read the witch's final state
+    // (save/poison rows) before the step transitions, even if the witch
+    // took longer than the original dwell to finish.
+    await ensureReadingWindow(ctx, args.gameId, 'witch');
   },
 });
 
@@ -2484,7 +2499,7 @@ export const submitLeprechaunMove = mutation({
         result: { direction: 'leave', blocked: true },
         resolvedAt: Date.now(),
       });
-      await maybeAdvance(ctx, args.gameId);
+      await ensureReadingWindow(ctx, args.gameId, 'leprechaun');
       return;
     }
 
@@ -2518,7 +2533,7 @@ export const submitLeprechaunMove = mutation({
         result: { direction: 'leave', originalTargetId },
         resolvedAt: Date.now(),
       });
-      await maybeAdvance(ctx, args.gameId);
+      await ensureReadingWindow(ctx, args.gameId, 'leprechaun');
       return;
     }
 
@@ -2572,15 +2587,16 @@ export const submitLeprechaunMove = mutation({
       resolvedAt: Date.now(),
     });
 
-    await maybeAdvance(ctx, args.gameId);
+    await ensureReadingWindow(ctx, args.gameId, 'leprechaun');
   },
 });
 
 /**
  * Idempotent advance — anyone can call it; the engine only moves forward
  * when the current step is complete AND the dwell deadline has passed.
- * Used after info-role acts (currently just the Seer) where the player
- * needs a moment to read the result before the night ends.
+ * Used by clients after the result-modal dismissal on info-role screens
+ * (Seer/PI/Mentalist) to nudge the engine, in case the scheduled dwell tick
+ * hasn't yet fired.
  */
 export const tickNight = mutation({
   args: {
