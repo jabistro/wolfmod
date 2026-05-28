@@ -169,6 +169,12 @@ export default function LobbyScreen() {
     }, []),
   );
 
+  // Voluntary-leave guard. leaveGame() deletes our player row, which makes
+  // lobby.me go null on the next reactive update — same shape as host-kick.
+  // Without this flag the "removed" screen would flash between mutation
+  // resolve and navigation.popToTop().
+  const leftIntentionallyRef = useRef(false);
+
   const draftTotal = useMemo(
     () => Object.values(draftCounts).reduce((a, b) => a + b, 0),
     [draftCounts],
@@ -193,6 +199,25 @@ export default function LobbyScreen() {
       <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center px-8">
         <Text className="text-wolf-text text-lg text-center mb-6">
           This game no longer exists.
+        </Text>
+        <TouchableOpacity
+          onPress={() => navigation.popToTop()}
+          className="bg-wolf-accent rounded-xl px-6 py-3"
+        >
+          <Text className="text-wolf-bg font-bold tracking-widest">HOME</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+  if (lobby.me === null && !leftIntentionallyRef.current) {
+    handleLeaveRef.current = () => navigation.popToTop();
+    return (
+      <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center px-8">
+        <Text className="text-wolf-text text-lg text-center mb-3">
+          The host removed you from this game.
+        </Text>
+        <Text className="text-wolf-muted text-center mb-6">
+          You can rejoin with the room code if they invite you back.
         </Text>
         <TouchableOpacity
           onPress={() => navigation.popToTop()}
@@ -413,6 +438,7 @@ export default function LobbyScreen() {
           style: 'destructive',
           onPress: async () => {
             if (!deviceClientId) return;
+            leftIntentionallyRef.current = true;
             try {
               await leaveGame({
                 gameId: game._id,
@@ -420,6 +446,7 @@ export default function LobbyScreen() {
               });
               navigation.popToTop();
             } catch (e) {
+              leftIntentionallyRef.current = false;
               showAlert('Error', e instanceof Error ? e.message : String(e));
             }
           },
