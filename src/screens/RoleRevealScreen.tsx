@@ -207,7 +207,6 @@ export default function RoleRevealScreen() {
             <HostMissingBanner
               gameId={game._id}
               deviceClientId={deviceClientId}
-              alive={me.alive}
             />
           </View>
         )}
@@ -278,7 +277,6 @@ export default function RoleRevealScreen() {
         <HostMissingBanner
           gameId={game._id}
           deviceClientId={deviceClientId}
-          alive={me.alive}
         />
       )}
 

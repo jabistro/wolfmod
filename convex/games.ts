@@ -624,7 +624,8 @@ export const seedTestPlayers = mutation({
 
 /**
  * Host voluntarily hands off duties while staying in the game. Caller must
- * be the current host; target must be a living player in the game.
+ * be the current host; target can be any human player in the game (alive or
+ * eliminated — short-handed groups often promote the first-dead to mod).
  */
 export const passHost = mutation({
   args: {
@@ -643,9 +644,6 @@ export const passHost = mutation({
     if (!target || target.gameId !== args.gameId) {
       throw new ConvexError('Target is not in this game.');
     }
-    if (!target.alive) {
-      throw new ConvexError('Can only pass host to a living player.');
-    }
     if (isBotName(target.name)) {
       throw new ConvexError("Can't pass host to a bot.");
     }
@@ -656,9 +654,9 @@ export const passHost = mutation({
 });
 
 /**
- * Any living player claims host when the slot is empty (host explicitly
- * left, or the only host is dead). Cleans up stale isHost flags on dead
- * records as a side effect.
+ * Any human player claims host when the slot is empty (host explicitly
+ * left, or the only host is dead). Eliminated players are allowed — they
+ * often stick around and can step up to moderate.
  */
 export const claimHost = mutation({
   args: {
@@ -670,9 +668,6 @@ export const claimHost = mutation({
     if (!game) throw new ConvexError('Game not found.');
     const caller = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!caller) throw new ConvexError('You are not in this game.');
-    if (!caller.alive) {
-      throw new ConvexError('Only living players can claim host.');
-    }
     if (caller.isHost) return;
 
     const players = await ctx.db

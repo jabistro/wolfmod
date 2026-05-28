@@ -229,7 +229,7 @@ export default function TimersConfigModal({
             >
               {(passHostCandidates ?? []).length === 0 ? (
                 <Text className="text-wolf-muted text-sm text-center py-6">
-                  No living players to pass host to.
+                  No other players to pass host to.
                 </Text>
               ) : (
                 (passHostCandidates ?? []).map(c => (

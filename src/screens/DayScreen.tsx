@@ -182,7 +182,7 @@ export default function DayScreen() {
   const hostMissing = view.hostMissing;
   const passHostCandidates = isHost
     ? players
-        .filter(p => p.alive && p._id !== me._id && !/^Bot \d+$/.test(p.name))
+        .filter(p => p._id !== me._id && !/^Bot \d+$/.test(p.name))
         .map(p => ({ _id: p._id, name: p.name }))
     : undefined;
 
@@ -579,7 +579,6 @@ function DiscussionView({
         <HostMissingBanner
           gameId={game._id}
           deviceClientId={deviceClientId}
-          alive={meAlive}
         />
       )}
 
@@ -866,7 +865,6 @@ function TrialView({
         <HostMissingBanner
           gameId={game._id}
           deviceClientId={deviceClientId}
-          alive={meAlive}
         />
       )}
 
@@ -1140,7 +1138,6 @@ function VoteView({
         <HostMissingBanner
           gameId={game._id}
           deviceClientId={deviceClientId}
-          alive={meAlive}
         />
       )}
 
@@ -1408,7 +1405,6 @@ function ResultsView({
         <HostMissingBanner
           gameId={game._id}
           deviceClientId={deviceClientId}
-          alive={meAlive}
         />
       )}
 

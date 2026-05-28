@@ -123,7 +123,6 @@ export default function MorningScreen() {
         <HostMissingBanner
           gameId={game._id}
           deviceClientId={deviceClientId}
-          alive={me.alive}
         />
       )}
 

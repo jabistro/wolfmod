@@ -8,16 +8,14 @@ import { showAlert } from './ThemedAlert';
 type Props = {
   gameId: Id<'games'>;
   deviceClientId: string;
-  alive: boolean;
 };
 
 /**
- * Shown across the top of every in-game screen when no living player holds
- * the host role (host explicitly left, or the only host is dead). Living
- * players get a TAP TO CLAIM HOST affordance; dead players just see the
- * status message.
+ * Shown across the top of every in-game screen when no player holds the
+ * host role (host explicitly left, or the only host is dead). Any human
+ * player — alive or eliminated — can tap to claim host.
  */
-export function HostMissingBanner({ gameId, deviceClientId, alive }: Props) {
+export function HostMissingBanner({ gameId, deviceClientId }: Props) {
   const claimHost = useMutation(api.games.claimHost);
   const [busy, setBusy] = useState(false);
 
@@ -33,35 +31,6 @@ export function HostMissingBanner({ gameId, deviceClientId, alive }: Props) {
     } finally {
       setBusy(false);
     }
-  }
-
-  if (!alive) {
-    return (
-      <View
-        style={{
-          backgroundColor: '#3A1F1F',
-          paddingVertical: 10,
-          paddingHorizontal: 16,
-          marginHorizontal: 16,
-          marginBottom: 8,
-          borderRadius: 10,
-          borderWidth: 1,
-          borderColor: '#B03A2E',
-        }}
-      >
-        <Text
-          style={{
-            color: '#F0EDE8',
-            fontSize: 12,
-            fontWeight: '700',
-            letterSpacing: 1.5,
-            textAlign: 'center',
-          }}
-        >
-          NO HOST — WAITING FOR SOMEONE TO CLAIM
-        </Text>
-      </View>
-    );
   }
 
   return (

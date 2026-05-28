@@ -311,7 +311,6 @@ export default function NightScreen() {
         <HostMissingBanner
           gameId={game._id}
           deviceClientId={deviceClientId}
-          alive={me.alive}
         />
       )}
 

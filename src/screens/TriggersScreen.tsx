@@ -91,7 +91,6 @@ export default function TriggersScreen() {
           <HostMissingBanner
             gameId={view.game._id}
             deviceClientId={deviceClientId}
-            alive={me.alive}
           />
         </View>
       )}
