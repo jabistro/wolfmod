@@ -96,7 +96,7 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
 
   // ── Solo ──────────────────────────────────────────────────────────────────
   'Cursed': 'Starts on the village team. If the wolves attack, survives the night and joins the pack by morning. Wakes with the wolves from the following night onward.',
-  'Doppelgänger': 'On night one, copies another player\'s role and joins their team.',
+  'Doppelganger': 'On night one, picks a player. When they\'re eliminated, becomes that player\'s role.',
   'Tanner': 'Wins solo only if voted out by the village during the day.',
   'Cult Leader': 'Each night, recruits a player into the cult. Wins when the cult outnumbers the village.',
   // TODO: verify Bezier variant

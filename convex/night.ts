@@ -111,6 +111,12 @@ function activePlayersForStep(step: NightStep, alive: Player[]): Player[] {
       // No actor input. The step computes & writes conversion rows on
       // entry and just dwells so the converted Cursed can read the reveal.
       return [];
+    case 'doppelganger_dawn':
+    case 'doppelganger_dusk':
+      // Same shape as cursed_conversion — no picker. Reveals are gated on
+      // each converted Doppelganger acking via `submitDoppelgangerAck`,
+      // which clears their `pendingDoppelgangerReveal` field.
+      return [];
   }
 }
 
@@ -145,6 +151,9 @@ function stepIsInGame(step: NightStep, selectedRoles: string[]): boolean {
       return set.has('Reviler');
     case 'cursed_conversion':
       return set.has('Cursed');
+    case 'doppelganger_dawn':
+    case 'doppelganger_dusk':
+      return set.has('Doppelganger');
   }
 }
 
@@ -308,6 +317,13 @@ async function isStepComplete(
       );
       return acks.length >= conversions.length;
     }
+    case 'doppelganger_dawn':
+    case 'doppelganger_dusk':
+      // No ack required — the converted Doppelganger reads the modal during
+      // the dwell window and the step auto-advances when the dwell elapses.
+      // Cleanup of pendingDoppelgangerReveal happens in advanceFromCurrentStep
+      // so the field is gone by the time the next step renders.
+      return true;
   }
 }
 
@@ -593,6 +609,10 @@ async function autoResolveStep(
     }
     case 'cursed_conversion':
       // Conversion is computed inline in enterStep, not here.
+      return;
+    case 'doppelganger_dawn':
+    case 'doppelganger_dusk':
+      // Detection is inline in enterStep; bot acks are handled there too.
       return;
   }
 }
@@ -1006,6 +1026,11 @@ async function resolveMorning(
     );
     for (const id of blastDead) newDeadIds.push(id);
   }
+  // MB cascade victims trigger 'day'-phase Doppelganger conversions
+  // (deferred reveal at the next dawn step). Direct night-kill deaths
+  // were already handled at the dusk step before morning resolution.
+  // Hooked at applyTriggerDeath so every cascade death (including chains)
+  // is covered without double-walking the list here.
 
   // Hunter / Hunter Wolf among the newly-dead each generate a queued
   // trigger. Two paths now:
@@ -1203,6 +1228,389 @@ async function resolveCursedConversionsForNight(
   }
 }
 
+// ───── Doppelganger conversion ─────────────────────────────────────────────
+//
+// Doppelganger picks a target on the first night. When that target dies
+// from any cause, the Doppelganger inherits the target's role at the moment
+// of death (current role — so a Cursed that already converted reads as
+// Werewolf, etc.) with a blank-slate state (fresh shots, fresh potions,
+// fresh cub vengeance — every per-role counter resets because we replace
+// roleState entirely with `{ pendingDoppelgangerReveal: {…} }`).
+//
+// Reveal timing depends on when the target died:
+//   - night kills (wolves/poison/huntress/revealer/reviler): the dusk step
+//     PREDICTS the death and applies the conversion + private reveal at
+//     end-of-night, before morning is announced. They play the next day
+//     as the new role.
+//   - morning kills (Hunter/HW shot, Mad Bomber cascade): conversion is
+//     applied during morning resolution / trigger handling and the reveal
+//     is deferred to the dawn step of the next night, so onlookers can't
+//     spot the new wolf at the table mid-day.
+//   - day kills (lynch, post-lynch Hunter triggers, lynch cascades):
+//     same deferred-to-dawn reveal as morning kills.
+
+/**
+ * Applies one Doppelganger conversion. Patches role to the victim's role at
+ * death, blanks roleState, drops in the pending-reveal sentinel, clears
+ * doppelgangerTarget so the same Doppelganger can't fire twice, and writes
+ * a `doppelganger_conversion` action row for end-game history.
+ */
+async function applyDoppelgangerConversion(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  nightNumber: number,
+  doppelganger: Doc<'players'>,
+  victim: Doc<'players'>,
+  triggerPhase: 'night' | 'day',
+): Promise<void> {
+  const newRole = victim.role ?? 'Villager';
+  await ctx.db.patch(doppelganger._id, {
+    role: newRole,
+    doppelgangerTarget: undefined,
+    roleState: {
+      pendingDoppelgangerReveal: {
+        fromRole: doppelganger.role ?? 'Doppelganger',
+        toRole: newRole,
+        triggerPhase,
+        atNight: nightNumber,
+        victimId: victim._id,
+        victimName: victim.name,
+      },
+    },
+  });
+  // Stamp the conversion row under nightNumber: 0 so it groups with the
+  // pre-game pick — semantically, "Doppelganged X" is a pregame decision
+  // even though the row gets written when X actually dies. The real
+  // fire-night is preserved in `result.firedAtNight` so end-game's
+  // "Doppelganger → X (nN)" subtitle still surfaces when conversion
+  // actually landed.
+  await ctx.db.insert('nightActions', {
+    gameId,
+    nightNumber: 0,
+    actorPlayerId: doppelganger._id,
+    actionType: 'doppelganger_conversion',
+    targetPlayerId: victim._id,
+    result: {
+      fromRole: doppelganger.role ?? 'Doppelganger',
+      toRole: newRole,
+      triggerPhase,
+      firedAtNight: nightNumber,
+    },
+    resolvedAt: Date.now(),
+  });
+
+  // Becoming the Leprechaun grants fresh save potential per house rules —
+  // the lifetime move-off list on the game record holds the prior Lep's
+  // exhausted targets and needs to clear so the new Lep can redirect kills
+  // away from any of them again. (Wolf-cub vengeance stays on; it's a
+  // wolf-team reaction to losing the original cub, not a per-cub power.)
+  if (newRole === 'Leprechaun') {
+    await ctx.db.patch(gameId, { leprechaunMovedOff: [] });
+  }
+}
+
+/**
+ * For each Doppelganger whose target ID is in `justDiedIds`, fire the
+ * conversion. Called from morning resolution (MB cascades, triggerPhase
+ * = 'day'), trigger death (Hunter/HW shots, 'day'), and lynch tally
+ * ('day'). The dusk step has its own dedicated path that runs BEFORE
+ * morning resolution.
+ */
+export async function fireDoppelgangerConversionsForDeaths(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  nightNumber: number,
+  justDiedIds: readonly Id<'players'>[],
+  triggerPhase: 'night' | 'day',
+): Promise<void> {
+  if (justDiedIds.length === 0) return;
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  const playerById = new Map(players.map(p => [p._id, p]));
+  const doppelgangers = players.filter(
+    p =>
+      p.alive &&
+      p.doppelgangerTarget !== undefined &&
+      justDiedIds.includes(p.doppelgangerTarget),
+  );
+  for (const d of doppelgangers) {
+    if (!d.doppelgangerTarget) continue;
+    const victim = playerById.get(d.doppelgangerTarget);
+    if (!victim) continue;
+    await applyDoppelgangerConversion(
+      ctx,
+      gameId,
+      nightNumber,
+      d,
+      victim,
+      triggerPhase,
+    );
+  }
+}
+
+/**
+ * Predicts who will die from direct night actions this night, mirroring the
+ * survival logic in `resolveMorning` (wolves + poison + huntress + revealer
+ * + reviler, minus BG/witch protection, Cursed conversion survival, and
+ * Tough Guy first-attack survival). Run at the dusk step BEFORE morning
+ * resolution so Doppelganger reveals can fire end-of-night.
+ *
+ * Returns a map of victim ID → the role they hold at the moment of death.
+ * The role is the player's CURRENT role field — i.e., a Cursed who dies
+ * from poison (no conversion) reads as 'Cursed', not 'Werewolf'.
+ *
+ * Caller is expected to have already let cursed_conversion run earlier in
+ * the same night so the `cursed_conversion` rows are in place.
+ */
+async function predictNightVictims(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  nightNumber: number,
+): Promise<Map<Id<'players'>, string>> {
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  const playerById = new Map(players.map(p => [p._id, p]));
+
+  type Candidate = { cause: string; protectable: boolean };
+  const candidates = new Map<Id<'players'>, Candidate>();
+  const addCandidate = (
+    id: Id<'players'>,
+    cause: string,
+    protectable: boolean,
+  ) => {
+    const existing = candidates.get(id);
+    if (!existing) {
+      candidates.set(id, { cause, protectable });
+      return;
+    }
+    if (!existing.protectable) return;
+    if (!protectable) candidates.set(id, { cause, protectable: false });
+  };
+
+  // Wounded Tough Guys die this morning regardless of protection.
+  for (const p of players) {
+    if (p.alive && p.role === 'Tough Guy' && p.roleState?.toughGuyWounded) {
+      addCandidate(p._id, 'tough_guy', false);
+    }
+  }
+
+  // Wolves + Leprechaun redirect — mirrors resolveMorning's effectiveKillTarget.
+  const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
+  const sortedKills = kills.slice().sort((a, b) => a.resolvedAt - b.resolvedAt);
+  const redirects = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'leprechaun_redirect',
+  );
+  let firstKillOverride: Id<'players'> | null = null;
+  for (const r of redirects) {
+    const dir = r.result?.direction;
+    if (dir === 'L' || dir === 'R') {
+      const newId = r.result?.newTargetId as Id<'players'> | undefined;
+      if (newId) firstKillOverride = newId;
+      break;
+    }
+  }
+  const effectiveKillTargetId = (
+    k: (typeof kills)[number],
+  ): Id<'players'> | undefined => {
+    if (firstKillOverride && sortedKills[0]?._id === k._id) {
+      return firstKillOverride;
+    }
+    return k.targetPlayerId as Id<'players'> | undefined;
+  };
+  for (const k of kills) {
+    const id = effectiveKillTargetId(k);
+    if (id) addCandidate(id, 'wolf', true);
+  }
+
+  const witchPoisons = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'witch_poison',
+  );
+  for (const p of witchPoisons) {
+    if (p.targetPlayerId) addCandidate(p.targetPlayerId, 'poison', true);
+  }
+
+  const huntressShots = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'huntress_shot',
+  );
+  for (const h of huntressShots) {
+    if (h.targetPlayerId) addCandidate(h.targetPlayerId, 'huntress', true);
+  }
+
+  const revealerShots = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'revealer_shot',
+  );
+  for (const rs of revealerShots) {
+    if (!rs.targetPlayerId || !rs.actorPlayerId) continue;
+    const target = playerById.get(rs.targetPlayerId);
+    if (!target) continue;
+    if (target.role && isWolfTeam(target.role)) {
+      addCandidate(rs.targetPlayerId, 'revealer', true);
+    } else {
+      addCandidate(rs.actorPlayerId, 'revealer-miss', false);
+    }
+  }
+
+  const revilerShots = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'reviler_shot',
+  );
+  for (const rs of revilerShots) {
+    if (!rs.targetPlayerId || !rs.actorPlayerId) continue;
+    const target = playerById.get(rs.targetPlayerId);
+    if (!target) continue;
+    if (isSpecialVillager(target.role)) {
+      addCandidate(rs.targetPlayerId, 'reviler', true);
+    } else {
+      addCandidate(rs.actorPlayerId, 'reviler-miss', false);
+    }
+  }
+
+  // Cursed who survive their wolf attack don't die — remove from candidates.
+  const cursedConversions = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'cursed_conversion',
+  );
+  for (const c of cursedConversions) {
+    const cid = c.actorPlayerId as Id<'players'> | undefined;
+    if (cid) candidates.delete(cid);
+  }
+
+  // Protections.
+  const protectedTargets = new Set<Id<'players'>>();
+  const bgProtects = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'bg_protect',
+  );
+  for (const bg of bgProtects) {
+    if (bg.targetPlayerId) protectedTargets.add(bg.targetPlayerId);
+  }
+  const witchSaves = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'witch_save',
+  );
+  for (const s of witchSaves) {
+    if (s.targetPlayerId) protectedTargets.add(s.targetPlayerId);
+  }
+
+  // Tough Guy first-attack survival: dropped from candidates if their ONLY
+  // pending cause is 'wolf' and they're not wounded yet and not BG-protected.
+  for (const k of kills) {
+    const effId = effectiveKillTargetId(k);
+    if (!effId) continue;
+    const tg = playerById.get(effId);
+    if (!tg || tg.role !== 'Tough Guy') continue;
+    if (tg.roleState?.toughGuyWounded) continue;
+    if (protectedTargets.has(tg._id)) continue;
+    const cand = candidates.get(tg._id);
+    if (cand?.cause === 'wolf') {
+      candidates.delete(tg._id);
+    }
+  }
+
+  // Final filter: remove protected + already-dead.
+  const victims = new Map<Id<'players'>, string>();
+  for (const [targetId, c] of candidates) {
+    if (c.protectable && protectedTargets.has(targetId)) continue;
+    const target = playerById.get(targetId);
+    if (!target || !target.alive) continue;
+    victims.set(targetId, target.role ?? 'Villager');
+  }
+  return victims;
+}
+
+/**
+ * Runs at the start of the dusk step. Predicts night-kill victims, then
+ * fires Doppelganger conversions for any whose target appears among them.
+ */
+/**
+ * Inserts a `doppelganger_conversion_reveal` action row for every converted
+ * Doppelganger whose phase matches the active reveal step. End-game history
+ * renders it as a "CONVERSION" marker on the night the player actually
+ * learned their new role — separate from the conversion row that may have
+ * been written on an earlier night when the target was lynched.
+ */
+async function stampDoppelgangerRevealMarkers(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  nightNumber: number,
+  step: 'doppelganger_dawn' | 'doppelganger_dusk',
+): Promise<void> {
+  const expectedPhase = step === 'doppelganger_dawn' ? 'day' : 'night';
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  const now = Date.now();
+  for (const p of players) {
+    if (!p.alive) continue;
+    const pending = p.roleState?.pendingDoppelgangerReveal;
+    if (pending?.triggerPhase !== expectedPhase) continue;
+    await ctx.db.insert('nightActions', {
+      gameId,
+      nightNumber,
+      actorPlayerId: p._id,
+      actionType: 'doppelganger_conversion_reveal',
+      resolvedAt: now,
+    });
+  }
+}
+
+async function resolveDoppelgangerDuskConversions(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  nightNumber: number,
+): Promise<void> {
+  const victims = await predictNightVictims(ctx, gameId, nightNumber);
+  if (victims.size === 0) return;
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  const doppelgangers = players.filter(
+    p =>
+      p.alive &&
+      p.doppelgangerTarget !== undefined &&
+      victims.has(p.doppelgangerTarget),
+  );
+  for (const d of doppelgangers) {
+    if (!d.doppelgangerTarget) continue;
+    const victim = players.find(p => p._id === d.doppelgangerTarget);
+    if (!victim) continue;
+    await applyDoppelgangerConversion(
+      ctx,
+      gameId,
+      nightNumber,
+      d,
+      victim,
+      'night',
+    );
+  }
+}
+
 // ───── Step engine ──────────────────────────────────────────────────────────
 //
 // The engine has three primitives:
@@ -1293,6 +1701,16 @@ export async function enterStep(
     // No actor input — compute conversion eligibility inline so the dwell
     // window already has the row to read for the Cursed's private reveal.
     await resolveCursedConversionsForNight(ctx, gameId, game.nightNumber);
+  } else if (step === 'doppelganger_dusk') {
+    // Predict tonight's victims and fire any same-night Doppelganger
+    // conversions before morning resolution runs. The step auto-advances
+    // on dwell expiry — no ack required.
+    await resolveDoppelgangerDuskConversions(ctx, gameId, game.nightNumber);
+    await stampDoppelgangerRevealMarkers(ctx, gameId, game.nightNumber, step);
+  } else if (step === 'doppelganger_dawn') {
+    // Pending reveals were written earlier during the day/morning death
+    // sites; this step just dwells so the converted player can read them.
+    await stampDoppelgangerRevealMarkers(ctx, gameId, game.nightNumber, step);
   } else if (
     (actors.length > 0 && actors.every(a => isBotName(a.name))) ||
     witchHasNothingLeft ||
@@ -1346,11 +1764,42 @@ async function advanceFromCurrentStep(
   if (!game) return;
   const step = isNightStep(game.nightStep) ? game.nightStep : undefined;
   if (!step) return;
+  // Doppelganger reveal steps auto-advance on dwell; clear the pending-reveal
+  // flags here so the field is gone by the time the next step renders. If
+  // the field stayed set, the dawn step on the FOLLOWING night would treat
+  // these as a fresh batch and replay the modal.
+  if (step === 'doppelganger_dawn' || step === 'doppelganger_dusk') {
+    await clearDoppelgangerRevealsForStep(ctx, gameId, step);
+  }
   const next = nextNightStep(step);
   if (next) {
     await enterStep(ctx, gameId, next);
   } else {
     await resolveMorning(ctx, gameId, game.nightNumber);
+  }
+}
+
+/**
+ * Removes `pendingDoppelgangerReveal` from every alive player whose phase
+ * matches the just-completed reveal step. Called from advanceFromCurrentStep
+ * when leaving a doppelganger_dawn / doppelganger_dusk step.
+ */
+async function clearDoppelgangerRevealsForStep(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  step: 'doppelganger_dawn' | 'doppelganger_dusk',
+): Promise<void> {
+  const expectedPhase = step === 'doppelganger_dawn' ? 'day' : 'night';
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  for (const p of players) {
+    const pending = p.roleState?.pendingDoppelgangerReveal;
+    if (pending?.triggerPhase !== expectedPhase) continue;
+    const { pendingDoppelgangerReveal, ...rest } = p.roleState ?? {};
+    void pendingDoppelgangerReveal;
+    await ctx.db.patch(p._id, { roleState: rest });
   }
 }
 
@@ -2661,6 +3110,8 @@ const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
   revealer: ['revealer_shot', 'revealer_skip'],
   reviler: ['reviler_shot', 'reviler_skip'],
   cursed_conversion: ['cursed_conversion', 'cursed_conversion_ack'],
+  doppelganger_dawn: ['doppelganger_conversion_reveal'],
+  doppelganger_dusk: ['doppelganger_conversion', 'doppelganger_conversion_reveal'],
 };
 
 /**
@@ -3401,6 +3852,48 @@ export const nightView = query({
       }
     }
 
+    // Doppelganger reveal state. Populated during the dawn / dusk steps.
+    // Visible to:
+    //   - the converted Doppelganger themselves (`isMine: true`, includes
+    //     fromRole/toRole so the modal can say "you were X, you are now Y")
+    //   - dead spectators during these steps (ghost mirror — sees the
+    //     converted name + the new role, per the "ghosts get full night
+    //     info" house rule)
+    let doppelgangerRevealState: {
+      isMine: boolean;
+      fromRole?: string;
+      toRole?: string;
+      conversions: Array<{ name: string; toRole: string }>;
+    } | null = null;
+    if (step === 'doppelganger_dawn' || step === 'doppelganger_dusk') {
+      const expectedPhase = step === 'doppelganger_dawn' ? 'day' : 'night';
+      const convertedPlayers = players.filter(
+        p =>
+          p.alive &&
+          p.roleState?.pendingDoppelgangerReveal?.triggerPhase ===
+            expectedPhase,
+      );
+      if (convertedPlayers.length > 0 || !me.alive) {
+        const conversions = convertedPlayers.map(p => ({
+          name: p.name,
+          toRole: (p.roleState?.pendingDoppelgangerReveal?.toRole ??
+            p.role ??
+            'Villager') as string,
+        }));
+        const mine = convertedPlayers.find(p => p._id === me._id);
+        const isMine = !!mine;
+        if (isMine || !me.alive) {
+          const pending = mine?.roleState?.pendingDoppelgangerReveal;
+          doppelgangerRevealState = {
+            isMine,
+            fromRole: pending?.fromRole,
+            toRole: pending?.toRole,
+            conversions,
+          };
+        }
+      }
+    }
+
     // Revealer-only state. No usage flag (every night, optional);
     // hasActedThisNight drives the locked waiting view.
     let revealerState: {
@@ -3609,10 +4102,18 @@ export const nightView = query({
       !me.alive &&
       step &&
       step !== 'wolves' &&
-      step !== 'cursed_conversion'
+      step !== 'cursed_conversion' &&
+      step !== 'doppelganger_dawn' &&
+      step !== 'doppelganger_dusk'
     ) {
       const ROLE_BY_STEP: Record<
-        Exclude<NightStep, 'wolves' | 'cursed_conversion'>,
+        Exclude<
+          NightStep,
+          'wolves'
+          | 'cursed_conversion'
+          | 'doppelganger_dawn'
+          | 'doppelganger_dusk'
+        >,
         string
       > = {
         seer: 'Seer',
@@ -3626,7 +4127,15 @@ export const nightView = query({
         reviler: 'Reviler',
       };
       const roleName =
-        ROLE_BY_STEP[step as Exclude<NightStep, 'wolves' | 'cursed_conversion'>];
+        ROLE_BY_STEP[
+          step as Exclude<
+            NightStep,
+            'wolves'
+            | 'cursed_conversion'
+            | 'doppelganger_dawn'
+            | 'doppelganger_dusk'
+          >
+        ];
       if (roleName) {
         const active = stepActors.find(a => a.role === roleName);
         if (active) {
@@ -3694,6 +4203,7 @@ export const nightView = query({
       revealerState,
       revilerState,
       cursedConversionState,
+      doppelgangerRevealState,
       targetables,
       alivePlayers: aliveSummaries,
       stepActorStatus,

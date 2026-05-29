@@ -28,10 +28,13 @@ export default function RoleCard({ role, width = 280 }: Props) {
   const imageHeight = width * (4 / 3);
   // Narrow cards (used on RoleReveal when the player has many teammates) need
   // a smaller name font so single-word roles like "WEREWOLF" fit on one line.
-  // Multi-word names wrap to two lines naturally — no ellipsis.
+  // Multi-word names wrap to two lines naturally at the space; single-word
+  // names get locked to one line with auto-shrink so a long name like
+  // "DOPPELGANGER" doesn't break mid-word in the header.
   const isNarrow = width < 220;
   const nameFontSize = isNarrow ? 14 : 16;
   const nameLetterSpacing = isNarrow ? 0.5 : 1;
+  const isMultiWord = role.includes(' ');
 
   return (
     <View style={[styles.card, { width }]}>
@@ -40,6 +43,9 @@ export default function RoleCard({ role, width = 280 }: Props) {
           <Text style={styles.valueText}>{valueText}</Text>
         </View>
         <Text
+          numberOfLines={isMultiWord ? 2 : 1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.7}
           style={[
             styles.name,
             { fontSize: nameFontSize, letterSpacing: nameLetterSpacing },

@@ -30,6 +30,7 @@ export const V1_ROLES = [
   'Reviler',
   // Solo / convertible
   'Cursed',
+  'Doppelganger',
 ] as const;
 
 export type V1Role = (typeof V1_ROLES)[number];
@@ -52,6 +53,16 @@ export const WOLF_TEAM_ROLES = [
 
 export function isWolfTeam(role: string): boolean {
   return (WOLF_TEAM_ROLES as readonly string[]).includes(role);
+}
+
+/**
+ * Roles that may only appear once in a build. Multiple Leprechauns would
+ * create a "whose redirect fires first?" ambiguity; multiple Doppelgangers
+ * would leak each other's identities at first-night seat selection.
+ */
+export const SINGLETON_ROLES = ['Leprechaun', 'Doppelganger'] as const;
+export function isSingletonRole(name: string): boolean {
+  return (SINGLETON_ROLES as readonly string[]).includes(name);
 }
 
 export const TEAM_VILLAGE = 'village' as const;

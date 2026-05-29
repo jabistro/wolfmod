@@ -1,7 +1,7 @@
 import { mutation, query, type MutationCtx } from './_generated/server';
 import { v, ConvexError } from 'convex/values';
 import type { Id } from './_generated/dataModel';
-import { isWolfTeam, teamForRole } from '../src/data/v1Roles';
+import { isWolfTeam, teamForRole, SINGLETON_ROLES } from '../src/data/v1Roles';
 import {
   findCaller,
   requireHost,
@@ -350,6 +350,15 @@ export const setRoles = mutation({
     if (game.phase !== 'lobby') throw new Error('Roles are locked once the game has started.');
 
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    const counts = new Map<string, number>();
+    for (const r of args.roles) counts.set(r, (counts.get(r) ?? 0) + 1);
+    for (const r of SINGLETON_ROLES) {
+      if ((counts.get(r) ?? 0) > 1) {
+        throw new Error(`Only one ${r} is allowed per game.`);
+      }
+    }
+
     await ctx.db.patch(args.gameId, { selectedRoles: args.roles });
   },
 });
@@ -432,6 +441,8 @@ export const startGame = mutation({
     // (real bots can't tap "OK").
     const shuffled = shuffle(game.selectedRoles);
     const now = Date.now();
+    let botDoppelgangerId: Id<'players'> | null = null;
+    const seatOrder: Id<'players'>[] = [];
     for (const player of players) {
       const seat = player.seatPosition;
       if (typeof seat !== 'number') continue;
@@ -441,8 +452,22 @@ export const startGame = mutation({
         originalRole: string;
         revealedAt?: number;
       } = { role, originalRole: role };
-      if (isBotName(player.name)) patch.revealedAt = now;
+      if (isBotName(player.name)) {
+        patch.revealedAt = now;
+        if (role === 'Doppelganger') botDoppelgangerId = player._id;
+      }
       await ctx.db.patch(player._id, patch);
+      seatOrder.push(player._id);
+    }
+
+    // If a bot ended up as the Doppelganger, auto-pick a random non-self
+    // target so the conversion still has somewhere to land during testing.
+    if (botDoppelgangerId) {
+      const candidates = seatOrder.filter(id => id !== botDoppelgangerId);
+      if (candidates.length > 0) {
+        const pick = candidates[Math.floor(Math.random() * candidates.length)];
+        await ctx.db.patch(botDoppelgangerId, { doppelgangerTarget: pick });
+      }
     }
 
     await ctx.db.patch(args.gameId, { phase: 'reveal' });
@@ -463,12 +488,58 @@ export const confirmRoleReveal = mutation({
     if (!me) throw new Error('You are not in this game.');
     if (me.revealedAt !== undefined) return;
 
+    // Doppelganger must pick their target before they're counted ready —
+    // the client routes them through the seat picker, which calls
+    // `confirmDoppelgangerTarget` instead. This guard is the defensive
+    // backstop in case the picker is bypassed.
+    if (me.role === 'Doppelganger' && me.doppelgangerTarget === undefined) {
+      throw new Error('Pick your Doppelganger target before confirming.');
+    }
+
     await ctx.db.patch(me._id, { revealedAt: Date.now() });
     // Phase advances to 'day' only when the host explicitly taps BEGIN DAY 1
     // (see `beginDayFromReveal`). Auto-transitioning would start the day
     // clock — and possibly night actions later — before everyone has put
     // their phones face-down. Host-gating gives the table a clean "ready?"
     // beat.
+  },
+});
+
+/**
+ * Doppelganger seat-picker submission. Atomically records the target and
+ * marks the Doppelganger ready, so the host's "X of Y ready" counter only
+ * ticks up once the pick is in.
+ */
+export const confirmDoppelgangerTarget = mutation({
+  args: {
+    gameId: v.id('games'),
+    targetPlayerId: v.id('players'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'reveal') throw new Error('Not in reveal phase.');
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me) throw new Error('You are not in this game.');
+    if (me.role !== 'Doppelganger') {
+      throw new Error('Only the Doppelganger picks a target here.');
+    }
+    if (me.revealedAt !== undefined) return;
+
+    const target = await ctx.db.get(args.targetPlayerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new Error('Invalid target.');
+    }
+    if (target._id === me._id) {
+      throw new Error("You can't pick yourself.");
+    }
+
+    await ctx.db.patch(me._id, {
+      doppelgangerTarget: args.targetPlayerId,
+      revealedAt: Date.now(),
+    });
   },
 });
 
@@ -541,6 +612,23 @@ export const revealView = query({
     const confirmedCount = players.filter(p => p.revealedAt !== undefined).length;
     const hostMissing = !players.some(p => p.isHost);
 
+    // Doppelganger picker roster: every other player. The Doppelganger sees
+    // names + seat numbers (no roles) and taps one to lock in their target.
+    const doppelgangerCandidates =
+      me.role === 'Doppelganger' && me.revealedAt === undefined
+        ? players
+            .filter(p => p._id !== me._id)
+            .map(p => ({
+              _id: p._id,
+              name: p.name,
+              seatPosition: p.seatPosition,
+            }))
+            .sort(
+              (a, b) =>
+                (a.seatPosition ?? 0) - (b.seatPosition ?? 0),
+            )
+        : [];
+
     return {
       game: {
         _id: game._id,
@@ -555,8 +643,10 @@ export const revealView = query({
         revealedAt: me.revealedAt,
         isHost: me.isHost,
         alive: me.alive,
+        doppelgangerTarget: me.doppelgangerTarget,
       },
       visibleTeammates,
+      doppelgangerCandidates,
       confirmedCount,
       totalPlayers: players.length,
       allConfirmed: confirmedCount === players.length,
@@ -845,6 +935,31 @@ export const endGameView = query({
         }
       }
     }
+    // Doppelganger conversions: parallel structure to cursedConversionByPlayer
+    // but also retains the toRole so end-game can show "Doppelganger →
+    // Werewolf (n3)" etc.
+    const doppelgangerConversionByPlayer = new Map<
+      Id<'players'>,
+      { nightNumber: number; toRole: string }
+    >();
+    for (const a of actions) {
+      if (a.actionType === 'doppelganger_conversion' && a.actorPlayerId) {
+        if (doppelgangerConversionByPlayer.has(a.actorPlayerId)) continue;
+        const result = (a.result ?? {}) as {
+          toRole?: string;
+          firedAtNight?: number;
+        };
+        const toRole = result.toRole ?? 'Villager';
+        // Subtitle reflects when conversion actually fired (target's death
+        // night), which may differ from the row's stamped nightNumber (0,
+        // bucketed with the pre-game pick).
+        const fireNight = result.firedAtNight ?? a.nightNumber;
+        doppelgangerConversionByPlayer.set(a.actorPlayerId, {
+          nightNumber: fireNight,
+          toRole,
+        });
+      }
+    }
     // Leprechaun redirect: precompute the effective target for each night's
     // FIRST wolf_kill row (sorted by resolvedAt). Only the first kill is
     // redirectable per house rules; subsequent kills (cub vengeance) resolve
@@ -949,6 +1064,9 @@ export const endGameView = query({
       // row would just clutter the per-night history list.
       if (a.actionType === 'cursed_conversion') continue;
       if (a.actionType === 'cursed_conversion_ack') continue;
+      // Legacy `doppelganger_conversion_ack` rows from before the OK button
+      // was removed — purely noise in the history list, drop them.
+      if (a.actionType === 'doppelganger_conversion_ack') continue;
       // A witch_done row alongside a same-night witch_save / witch_poison is
       // just the turn-closer — collapse it so the night shows only the action
       // taken, not action + Passed.
@@ -964,6 +1082,7 @@ export const endGameView = query({
         firstId?: Id<'players'>;
         secondId?: Id<'players'>;
         sameTeam?: string;
+        toRole?: string;
       };
       const baseEntry: HistoryEntry = {
         nightNumber: a.nightNumber,
@@ -972,7 +1091,12 @@ export const endGameView = query({
         secondTargetName: nameFor(result.secondId),
         team: result.team ?? null,
         sameTeam: result.sameTeam ?? null,
-        outcome: null,
+        // Doppelganger conversion rides on `outcome` to carry the inherited
+        // role name through to the client renderer (kept off `team` because
+        // that's reserved for the wolf/villager dichotomy).
+        outcome: a.actionType === 'doppelganger_conversion'
+          ? (result.toRole ?? null)
+          : null,
         victimNames: null,
       };
 
@@ -1178,6 +1302,10 @@ export const endGameView = query({
           originalRole: p.originalRole ?? null,
           cursedConvertedAtNight:
             cursedConversionByPlayer.get(p._id) ?? null,
+          doppelgangerConvertedAtNight:
+            doppelgangerConversionByPlayer.get(p._id)?.nightNumber ?? null,
+          doppelgangerConvertedToRole:
+            doppelgangerConversionByPlayer.get(p._id)?.toRole ?? null,
           alive: p.alive,
           seatPosition: p.seatPosition,
           isMe: p._id === me?._id,

@@ -113,6 +113,7 @@ export default function NightScreen() {
     revealerState,
     revilerState,
     cursedConversionState,
+    doppelgangerRevealState,
     targetables,
     stepActorStatus,
   } = view;
@@ -277,6 +278,17 @@ export default function NightScreen() {
           convertedNames={cursedConversionState.convertedNames}
         />
       )}
+
+      {(game.nightStep === 'doppelganger_dawn' ||
+        game.nightStep === 'doppelganger_dusk') &&
+        doppelgangerRevealState && (
+          <DoppelgangerRevealView
+            isMine={doppelgangerRevealState.isMine}
+            fromRole={doppelgangerRevealState.fromRole}
+            toRole={doppelgangerRevealState.toRole}
+            conversions={doppelgangerRevealState.conversions}
+          />
+        )}
     </>
   );
 
@@ -295,7 +307,10 @@ export default function NightScreen() {
     (game.nightStep === 'huntress' && huntressState) ||
     (game.nightStep === 'revealer' && revealerState) ||
     (game.nightStep === 'reviler' && revilerState) ||
-    (game.nightStep === 'cursed_conversion' && cursedConversionState)
+    (game.nightStep === 'cursed_conversion' && cursedConversionState) ||
+    ((game.nightStep === 'doppelganger_dawn' ||
+      game.nightStep === 'doppelganger_dusk') &&
+      doppelgangerRevealState)
   );
 
   return (
@@ -317,7 +332,7 @@ export default function NightScreen() {
       {me.alive ? (
         <>
           {pickerTree}
-          {!isMyStep && !cursedConversionState && (
+          {!isMyStep && !cursedConversionState && !doppelgangerRevealState && (
             <WaitingView role={me.role} />
           )}
         </>
@@ -628,6 +643,78 @@ function CursedRevealView({
             </Text>
           )}
         </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+// ───── Doppelganger reveal ─────────────────────────────────────────────────
+//
+// Shown during the dawn / dusk steps to the converted Doppelganger (alive
+// caller) and to dead spectators (ghost mirror). The alive Doppelganger
+// must tap OK to advance the step; ghosts see the same modal passively.
+// Other living players see the generic WaitingView — only the converted
+// player learns what role they've inherited.
+
+function DoppelgangerRevealView({
+  isMine,
+  fromRole,
+  toRole,
+  conversions,
+}: {
+  isMine: boolean;
+  fromRole?: string;
+  toRole?: string;
+  conversions: Array<{ name: string; toRole: string }>;
+}) {
+  return (
+    <View className="flex-1 px-6 pt-2 pb-8 items-center justify-center">
+      <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
+        A NEW FACE
+      </Text>
+      {isMine && toRole ? (
+        <View
+          className="bg-wolf-card rounded-2xl px-6 py-6"
+          style={{ maxWidth: 360 }}
+        >
+          <Text className="text-wolf-text text-base leading-6 text-center">
+            {'Your target has been eliminated. You were the '}
+            <Text className="text-wolf-accent font-extrabold">
+              {(fromRole ?? 'Doppelganger').toUpperCase()}
+            </Text>
+            {'. You are now the '}
+            <Text className="text-wolf-accent font-extrabold">
+              {toRole.toUpperCase()}
+            </Text>
+            {'.'}
+          </Text>
+          <Text className="text-wolf-muted text-xs text-center mt-4">
+            Your old powers fade. You start fresh with this role.
+          </Text>
+        </View>
+      ) : (
+        conversions.length > 0 && (
+          <View
+            className="bg-wolf-card rounded-2xl px-6 py-6"
+            style={{ maxWidth: 360 }}
+          >
+            {conversions.map(c => (
+              <Text
+                key={c.name}
+                className="text-wolf-text text-base leading-6 text-center"
+              >
+                <Text className="text-wolf-accent font-extrabold">
+                  {c.name.toUpperCase()}
+                </Text>
+                {' is now the '}
+                <Text className="text-wolf-accent font-extrabold">
+                  {c.toRole.toUpperCase()}
+                </Text>
+                {'.'}
+              </Text>
+            ))}
+          </View>
+        )
       )}
     </View>
   );

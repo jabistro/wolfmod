@@ -185,9 +185,15 @@ export default defineSchema({
     /**
      * Set once at deal time and never mutated. Lets end-game show a
      * converted Cursed as "Cursed → Werewolf" alongside their current
-     * (post-conversion) role.
+     * (post-conversion) role. Used for the same purpose with Doppelganger.
      */
     originalRole: v.optional(v.string()),
+    /**
+     * Set by the Doppelganger at first-night seat selection — the player
+     * whose role they'll inherit on elimination. Cleared after the
+     * conversion fires (or stays set forever if Doppelganger dies first).
+     */
+    doppelgangerTarget: v.optional(v.id('players')),
     alive: v.boolean(),
     isHost: v.boolean(),
     deviceClientId: v.string(),

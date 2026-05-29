@@ -6,6 +6,10 @@
  * as more roles come online.
  */
 export const NIGHT_STEPS = [
+  // Reveals deferred Doppelganger conversions (target died in the prior
+  // day/morning phase). Runs first so a wolf-converted Doppelganger wakes
+  // with the pack this same night.
+  'doppelganger_dawn',
   'wolves',
   'seer',
   'pi',
@@ -17,6 +21,9 @@ export const NIGHT_STEPS = [
   'revealer',
   'reviler',
   'cursed_conversion',
+  // Reveals same-night Doppelganger conversions (target dies tonight).
+  // Runs last, mirroring Cursed's end-of-night reveal timing.
+  'doppelganger_dusk',
 ] as const;
 export type NightStep = (typeof NIGHT_STEPS)[number];
 
@@ -55,5 +62,8 @@ export function nightStepLabel(step: NightStep): string {
       return 'The reviler is awake';
     case 'cursed_conversion':
       return 'The cursed stirs in the night';
+    case 'doppelganger_dawn':
+    case 'doppelganger_dusk':
+      return 'The doppelganger wears a new face';
   }
 }

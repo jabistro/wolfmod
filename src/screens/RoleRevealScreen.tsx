@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Animated,
+  ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -40,6 +41,7 @@ export default function RoleRevealScreen() {
       : 'skip',
   );
   const confirmReveal = useMutation(api.games.confirmRoleReveal);
+  const confirmDoppelganger = useMutation(api.games.confirmDoppelgangerTarget);
   const beginDayFromReveal = useMutation(api.games.beginDayFromReveal);
   const [beginningDay, setBeginningDay] = useState(false);
 
@@ -47,6 +49,9 @@ export default function RoleRevealScreen() {
   const [revealed, setRevealed] = useState(false);
   const [hasSeenRole, setHasSeenRole] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [pickingDoppelganger, setPickingDoppelganger] = useState(false);
+  const [doppelgangerPick, setDoppelgangerPick] = useState<Id<'players'> | null>(null);
+  const [submittingPick, setSubmittingPick] = useState(false);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -117,7 +122,8 @@ export default function RoleRevealScreen() {
     );
   }
 
-  const { game, me, visibleTeammates, confirmedCount, totalPlayers, allConfirmed } = reveal;
+  const { game, me, visibleTeammates, confirmedCount, totalPlayers, allConfirmed, doppelgangerCandidates } = reveal;
+  const isDoppelganger = me.role === 'Doppelganger';
 
   if (game.phase !== 'reveal' && game.phase !== 'lobby') {
     return (
@@ -167,6 +173,12 @@ export default function RoleRevealScreen() {
 
   async function handleConfirm() {
     if (!deviceClientId) return;
+    // Doppelganger routes through the seat picker before being counted
+    // ready — the picker's submit handler is what calls the server.
+    if (isDoppelganger) {
+      setPickingDoppelganger(true);
+      return;
+    }
     setConfirming(true);
     try {
       await confirmReveal({
@@ -177,6 +189,22 @@ export default function RoleRevealScreen() {
       showAlert('Error', e instanceof Error ? e.message : String(e));
     } finally {
       setConfirming(false);
+    }
+  }
+
+  async function submitDoppelgangerPick() {
+    if (!deviceClientId || doppelgangerPick === null) return;
+    setSubmittingPick(true);
+    try {
+      await confirmDoppelganger({
+        gameId: game._id,
+        targetPlayerId: doppelgangerPick,
+        callerDeviceClientId: deviceClientId,
+      });
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmittingPick(false);
     }
   }
 
@@ -196,6 +224,98 @@ export default function RoleRevealScreen() {
     } finally {
       setBeginningDay(false);
     }
+  }
+
+  // Doppelganger seat-picker: shown after the role reveal is acked but
+  // before `confirmDoppelgangerTarget` lands. Until they pick, they aren't
+  // counted ready and the host can't start the game.
+  if (pickingDoppelganger && !isConfirmed) {
+    return (
+      <SafeAreaView className="flex-1 bg-wolf-bg">
+        <InGameLeaveButton onPress={confirmLeave} />
+        <View className="flex-row items-center px-4 pt-10 pb-3">
+          <View className="w-16" />
+          <Text className="flex-1 text-wolf-text text-xl font-bold text-center">
+            Pick Your Target
+          </Text>
+          <View className="w-16" />
+        </View>
+        <Text className="text-wolf-muted text-sm text-center px-8 mb-4">
+          When this player is eliminated, you become their role.
+        </Text>
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}
+          style={{ flex: 1 }}
+        >
+          {doppelgangerCandidates.map(c => {
+            const selected = doppelgangerPick === c._id;
+            return (
+              <TouchableOpacity
+                key={c._id}
+                onPress={() => setDoppelgangerPick(c._id)}
+                style={{
+                  backgroundColor: selected ? '#D4A017' : '#22222F',
+                  borderRadius: 12,
+                  paddingVertical: 16,
+                  paddingHorizontal: 16,
+                  marginBottom: 8,
+                  borderWidth: 1,
+                  borderColor: selected ? '#D4A017' : '#2A2A38',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                }}
+              >
+                <Text
+                  style={{
+                    color: selected ? '#0F0F14' : '#8A8590',
+                    fontSize: 12,
+                    fontWeight: '700',
+                    width: 56,
+                  }}
+                >
+                  {typeof c.seatPosition === 'number'
+                    ? `SEAT ${c.seatPosition + 1}`
+                    : ''}
+                </Text>
+                <Text
+                  style={{
+                    color: selected ? '#0F0F14' : '#F0EDE8',
+                    fontSize: 16,
+                    fontWeight: selected ? '700' : '500',
+                    flex: 1,
+                  }}
+                >
+                  {c.name}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+        <View
+          style={{
+            paddingHorizontal: 24,
+            paddingBottom: Math.max(insets.bottom, 16) + 16,
+          }}
+        >
+          <TouchableOpacity
+            onPress={submitDoppelgangerPick}
+            disabled={doppelgangerPick === null || submittingPick}
+            style={{
+              opacity: doppelgangerPick !== null && !submittingPick ? 1 : 0.4,
+            }}
+            className="bg-wolf-accent rounded-xl py-5 items-center"
+          >
+            {submittingPick ? (
+              <ActivityIndicator color="#0F0F14" />
+            ) : (
+              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                LOCK IN
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
   }
 
   if (isConfirmed) {

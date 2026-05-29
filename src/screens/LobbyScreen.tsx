@@ -17,7 +17,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
-import { V1_ROLES } from '../data/v1Roles';
+import { V1_ROLES, isSingletonRole } from '../data/v1Roles';
 import { ROLES, CATEGORIES, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
 import TimersConfigModal from '../components/TimersConfigModal';
@@ -369,6 +369,7 @@ export default function LobbyScreen() {
 
   function increment(role: string) {
     if (draftTotal >= game.playerCount) return;
+    if (isSingletonRole(role) && (draftCounts[role] ?? 0) >= 1) return;
     setDraftCounts(c => ({ ...c, [role]: (c[role] ?? 0) + 1 }));
   }
   function decrement(role: string) {
@@ -1024,7 +1025,9 @@ export default function LobbyScreen() {
                       ) : (
                         filtered.map(role => {
                           const count = draftCounts[role] ?? 0;
-                          const canIncrement = draftTotal < game.playerCount;
+                          const atSingletonCap = isSingletonRole(role) && count >= 1;
+                          const canIncrement =
+                            draftTotal < game.playerCount && !atSingletonCap;
                           const val = getRoleValue(role);
                           const bg =
                             val > 0 ? '#1a4a1a' : val < 0 ? '#4a1a1a' : '#2a2a2a';

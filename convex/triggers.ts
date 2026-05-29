@@ -16,7 +16,7 @@ import {
   flagCubDeathIfApplicable,
   type TriggerRole,
 } from './helpers';
-import { enterStep } from './night';
+import { enterStep, fireDoppelgangerConversionsForDeaths } from './night';
 import { NIGHT_STEPS } from '../src/data/nightOrder';
 
 type Player = Doc<'players'>;
@@ -218,6 +218,16 @@ export async function applyTriggerDeath(
   // Wolf Cub vengeance: if the cub died from a Hunter/HW shot or an MB
   // cascade, remaining wolves get 2 kills on the next wolves step.
   await flagCubDeathIfApplicable(ctx, gameId, [targetId]);
+  // Trigger-phase deaths always defer the Doppelganger reveal to the next
+  // dawn step (per house rule, morning/day eliminations hide their tell
+  // until everyone is asleep again).
+  await fireDoppelgangerConversionsForDeaths(
+    ctx,
+    gameId,
+    nightNumber,
+    [targetId],
+    'day',
+  );
   return true;
 }
 

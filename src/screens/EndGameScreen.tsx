@@ -310,6 +310,24 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
         </Text>
       );
     }
+    case 'doppelganger_conversion': {
+      // outcome carries the inherited role name (set in endGameView).
+      const newRole = entry.outcome ?? '—';
+      return (
+        <Text className="text-wolf-text text-sm">
+          Doppelganged {t} —{' '}
+          <Text className="font-bold" style={{ color: '#D4A017' }}>
+            {newRole.toUpperCase()}
+          </Text>
+        </Text>
+      );
+    }
+    case 'doppelganger_conversion_reveal':
+      return (
+        <Text className="font-bold text-sm" style={{ color: '#D4A017' }}>
+          CONVERSION
+        </Text>
+      );
     default:
       return <Text className="text-wolf-muted text-sm">{entry.kind}</Text>;
   }
@@ -434,6 +452,11 @@ export default function EndGameScreen() {
               p.originalRole === 'Cursed' &&
               p.role !== 'Cursed' &&
               p.cursedConvertedAtNight != null;
+            // Doppelganger subtitle is just "DOPPELGANGER" — the role pill
+            // on the right shows what they became, and the per-night logs
+            // (Doppelganged X — ROLE on N0, CONVERSION on the reveal night)
+            // tell the full story.
+            const startedAsDoppelganger = p.originalRole === 'Doppelganger';
             return (
               <View
                 key={p._id}
@@ -461,6 +484,11 @@ export default function EndGameScreen() {
                     {wasConverted && (
                       <Text className="text-wolf-muted text-xs italic uppercase">
                         Cursed → Werewolf (n{p.cursedConvertedAtNight})
+                      </Text>
+                    )}
+                    {startedAsDoppelganger && (
+                      <Text className="text-wolf-muted text-xs italic uppercase">
+                        Doppelganger
                       </Text>
                     )}
                     {!p.alive && (

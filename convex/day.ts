@@ -18,7 +18,7 @@ import {
   DAY_CONFIG_DEFAULTS,
   flagCubDeathIfApplicable,
 } from './helpers';
-import { enterStep } from './night';
+import { enterStep, fireDoppelgangerConversionsForDeaths } from './night';
 import {
   enqueueTriggersForDeaths,
   processTriggerQueue,
@@ -685,6 +685,14 @@ export const tallyVote = internalMutation({
     });
     // Wolf Cub vengeance: lynching the cub triggers 2 wolf kills next night.
     await flagCubDeathIfApplicable(ctx, args.gameId, [targetId]);
+    // Doppelganger conversion: deferred reveal at next dawn step.
+    await fireDoppelgangerConversionsForDeaths(
+      ctx,
+      args.gameId,
+      game.nightNumber,
+      [targetId],
+      'day',
+    );
 
     // Mad Bomber detonations resolve INLINE — both alive neighbors die
     // at the moment of the bomber's lynch. Their deaths appear in the

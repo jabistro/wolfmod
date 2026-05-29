@@ -109,6 +109,10 @@ const V1_OVERRIDES: Record<string, Partial<Record<Theme, Art>>> = {
     chibi: { image: require('../../roles_chibi_medium/cursed.jpg'), thumb: require('../../roles_chibi_thumbs/cursed.jpg') },
     '16bit': { image: require('../../roles_16bit_medium/cursed.jpg'), thumb: require('../../roles_16bit_thumbs/cursed.jpg') },
   },
+  Doppelganger: {
+    chibi: { image: require('../../roles_chibi_medium/doppelganger.jpg'), thumb: require('../../roles_chibi_thumbs/doppelganger.jpg') },
+    '16bit': { image: require('../../roles_16bit_medium/doppelganger.jpg'), thumb: require('../../roles_16bit_thumbs/doppelganger.jpg') },
+  },
 };
 
 export function getDisplayArt(roleName: string, theme: Theme): Art {
