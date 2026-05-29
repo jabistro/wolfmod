@@ -66,6 +66,10 @@ export default function HomeScreen() {
           })}
         </View>
 
+        <Text className="text-wolf-muted text-[10px] tracking-[0.3em] uppercase mt-6 opacity-60">
+          Built by Bistro
+        </Text>
+
       </View>
     </SafeAreaView>
   );
