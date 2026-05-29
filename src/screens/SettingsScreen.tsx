@@ -25,14 +25,14 @@ export default function SettingsScreen() {
       <View className="flex-1 px-6 pt-6 pb-12">
         <View className="flex-row items-center mb-8">
           <TouchableOpacity onPress={() => navigation.goBack()} className="py-2 pr-4">
-            <Text className="text-wolf-accent text-lg">‹ BACK</Text>
+            <Text className="text-wolf-text text-base">‹ Back</Text>
           </TouchableOpacity>
           <Text className="text-wolf-text text-2xl font-bold tracking-widest flex-1 text-center mr-16">
             SETTINGS
           </Text>
         </View>
 
-        <ScrollView className="flex-1">
+        <ScrollView className="flex-1" contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', paddingBottom: '25%' }}>
           {rows.map(row => (
             <TouchableOpacity
               key={row.label}
