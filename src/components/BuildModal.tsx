@@ -11,7 +11,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ROLES, CATEGORIES, type Role, type RoleCategory } from '../data/roles';
+import { ROLES, CATEGORIES, roleSortKey, type Role, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
 import RoleCard from './RoleCard';
 import { getDisplayArt } from '../data/themeArt';
@@ -69,7 +69,7 @@ export default function BuildModal({ visible, onClose, selectedRoles }: Props) {
     list.sort((a, b) => {
       const ra = CATEGORY_RANK[a.role.category];
       const rb = CATEGORY_RANK[b.role.category];
-      return ra !== rb ? ra - rb : a.role.name.localeCompare(b.role.name);
+      return ra !== rb ? ra - rb : roleSortKey(a.role.name).localeCompare(roleSortKey(b.role.name));
     });
     return { entries: list, balance: bal };
   }, [selectedRoles]);

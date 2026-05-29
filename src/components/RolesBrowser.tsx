@@ -13,7 +13,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import { ROLES, CATEGORIES, type Role } from '../data/roles';
+import { ROLES, CATEGORIES, roleSortKey, type Role } from '../data/roles';
 import { getDisplayArt } from '../data/themeArt';
 import { useTheme } from '../contexts/ThemeContext';
 import { getRoleValue } from '../data/roleValues';
@@ -52,14 +52,14 @@ export default function RolesBrowser({ sortMode }: Props) {
       CATEGORIES.map(cat => {
         const roles = ROLES.filter(r => r.category === cat.key);
         if (sortMode === 'alpha') {
-          return roles.sort((a, b) => a.name.localeCompare(b.name));
+          return roles.sort((a, b) => roleSortKey(a.name).localeCompare(roleSortKey(b.name)));
         }
         const isWolfTab = cat.key === 'wolves' || cat.key === 'teamwolf';
         return roles.sort((a, b) => {
           const valA = getRoleValue(a.name);
           const valB = getRoleValue(b.name);
           const diff = isWolfTab ? valA - valB : valB - valA;
-          return diff !== 0 ? diff : a.name.localeCompare(b.name);
+          return diff !== 0 ? diff : roleSortKey(a.name).localeCompare(roleSortKey(b.name));
         });
       }),
     [sortMode],

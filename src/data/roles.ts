@@ -16,6 +16,10 @@ export const CATEGORIES = [
   { key: 'solo' as RoleCategory, label: 'Solo', color: '#8B6436' },
 ];
 
+export function roleSortKey(name: string): string {
+  return name.replace(/^the\s+/i, '');
+}
+
 export const ROLES: Role[] = [
   // ── Villagers ──────────────────────────────────────────────────────────────
   { name: 'Seer',                    category: 'villagers', image: require('../../roles_ghibli_medium/seer.jpg'),                    thumb: require('../../roles_ghibli_thumbs/seer.jpg') },
@@ -158,7 +162,6 @@ export const ROLES: Role[] = [
   { name: 'Lone Wolf',               category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),         thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Master Tanner',           category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),     thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Matchmaker',              category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),         thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
-  { name: 'Moderator',               category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),          thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Nostradamus',             category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),        thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),  barColors: ['#4A90D9', '#C05050'] },
   { name: 'Nosferatu',               category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),          thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Red Wolf',                category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),           thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },

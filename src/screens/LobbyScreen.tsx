@@ -18,7 +18,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { V1_ROLES, isSingletonRole } from '../data/v1Roles';
-import { ROLES, CATEGORIES, type RoleCategory } from '../data/roles';
+import { ROLES, CATEGORIES, roleSortKey, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
 import TimersConfigModal from '../components/TimersConfigModal';
 import RolesBrowserModal from '../components/RolesBrowserModal';
@@ -1005,7 +1005,7 @@ export default function LobbyScreen() {
                 {CATEGORIES.map(cat => {
                   const filtered = V1_ROLES.filter(
                     role => V1_ROLE_CATEGORY_MAP.get(role) === cat.key,
-                  ).sort((a, b) => a.localeCompare(b));
+                  ).sort((a, b) => roleSortKey(a).localeCompare(roleSortKey(b)));
                   return (
                     <ScrollView
                       key={cat.key}
