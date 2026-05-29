@@ -31,6 +31,7 @@ export const V1_ROLES = [
   // Solo / convertible
   'Cursed',
   'Doppelganger',
+  'Sasquatch',
 ] as const;
 
 export type V1Role = (typeof V1_ROLES)[number];

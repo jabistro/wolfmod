@@ -99,8 +99,7 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
   'Doppelganger': 'On night one, picks a player. When they\'re eliminated, becomes that player\'s role.',
   'Tanner': 'Wins solo only if voted out by the village during the day.',
   'Cult Leader': 'Each night, recruits a player into the cult. Wins when the cult outnumbers the village.',
-  // TODO: verify Bezier variant
-  'Sasquatch': 'Village team — but hunts alone each night, killing one player just like the wolves.',
+  'Sasquatch': 'Starts on the village team — but only if the village votes out a player every day. The first day with no lynch, joins the wolves out of spite.',
   // TODO: verify Bezier variant
   'Drunk': 'Holds a hidden role unknown even to themselves until the game brings it out.',
 };

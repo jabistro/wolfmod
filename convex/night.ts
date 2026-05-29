@@ -13,6 +13,7 @@ import {
   requireHost,
   isBotName,
   recordWinIfReached,
+  applyWinIfReached,
   initializeDayClock,
   flagCubDeathIfApplicable,
 } from './helpers';
@@ -1228,6 +1229,119 @@ async function resolveCursedConversionsForNight(
   }
 }
 
+// ───── Sasquatch conversion ────────────────────────────────────────────────
+//
+// Sasquatch starts on the village team. The village's bargain: lynch one
+// player every day. The first day with no lynch, the Sasquatch flips to the
+// wolf team out of spite — wakes with the pack from that very night, votes
+// with consensus on a kill, reads as a wolf to Seer/PI/Mentalist.
+//
+// Conversion fires at `beginNight` (day → night transition) BEFORE the phase
+// patch, so any post-flip parity win is recognized immediately and the seer
+// step on the new night reads the patched role. Role-patch over flag — same
+// pattern as Cursed — so isWolfTeam / seerSees / teamForRole / checkWinCondition
+// just work without additional branching.
+//
+// The flipped Sasquatch's `roleState.pendingSasquatchReveal` is set; the
+// wolves-step view renders an overlay on their phone announcing the team
+// change and listing the pack. The flag is cleared when the wolves step
+// advances (see advanceFromCurrentStep).
+
+/**
+ * Returns true if the just-ended day produced a lynch (any `death` row tagged
+ * with cause = 'lynch' and the given dayNumber). Lynch rows are stamped under
+ * the previous night's nightNumber index by `tallyVote`, so we use the
+ * pre-beginNight nightNumber to look them up.
+ */
+async function dayHadLynch(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  prevNightNumber: number,
+  dayNumber: number,
+): Promise<boolean> {
+  const rows = await ctx.db
+    .query('nightActions')
+    .withIndex('by_game_night', q =>
+      q.eq('gameId', gameId).eq('nightNumber', prevNightNumber),
+    )
+    .collect();
+  return rows.some(
+    r =>
+      r.actionType === 'death' &&
+      (r.result as { cause?: string; dayNumber?: number } | undefined)?.cause ===
+        'lynch' &&
+      (r.result as { cause?: string; dayNumber?: number } | undefined)
+        ?.dayNumber === dayNumber,
+  );
+}
+
+/**
+ * Called inside `beginNight` while the game is still in 'day' phase. If the
+ * day that just ended had no lynch and any alive Sasquatch(es) are still
+ * unflipped, role-patches each to 'Werewolf', stamps a `sasquatch_conversion`
+ * row at the upcoming nightNumber, and sets `pendingSasquatchReveal` so the
+ * wolves step renders the conversion overlay on their phone.
+ *
+ * Day 1 with no lynch flips on N1 — same rule, no special case. Multiple
+ * Sasquatches each flip independently.
+ */
+async function fireSasquatchConversionsIfDayHadNoLynch(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  prevNightNumber: number,
+  dayNumber: number,
+  upcomingNightNumber: number,
+): Promise<void> {
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  const aliveSasquatch = players.filter(
+    p => p.alive && p.role === 'Sasquatch',
+  );
+  if (aliveSasquatch.length === 0) return;
+  if (await dayHadLynch(ctx, gameId, prevNightNumber, dayNumber)) return;
+
+  const now = Date.now();
+  for (const s of aliveSasquatch) {
+    await ctx.db.insert('nightActions', {
+      gameId,
+      nightNumber: upcomingNightNumber,
+      actorPlayerId: s._id,
+      actionType: 'sasquatch_conversion',
+      targetPlayerId: s._id,
+      result: { fromRole: 'Sasquatch', toRole: 'Werewolf' },
+      resolvedAt: now,
+    });
+    await ctx.db.patch(s._id, {
+      role: 'Werewolf',
+      roleState: { ...(s.roleState ?? {}), pendingSasquatchReveal: true },
+    });
+  }
+}
+
+/**
+ * Strips `pendingSasquatchReveal` from any player carrying it. Called from
+ * `advanceFromCurrentStep` when leaving the wolves step — by then the overlay
+ * has rendered for at least the wolves dwell window, and subsequent nights
+ * shouldn't replay the modal.
+ */
+async function clearSasquatchReveals(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<void> {
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  for (const p of players) {
+    if (!p.roleState?.pendingSasquatchReveal) continue;
+    const { pendingSasquatchReveal, ...rest } = p.roleState;
+    void pendingSasquatchReveal;
+    await ctx.db.patch(p._id, { roleState: rest });
+  }
+}
+
 // ───── Doppelganger conversion ─────────────────────────────────────────────
 //
 // Doppelganger picks a target on the first night. When that target dies
@@ -1770,6 +1884,12 @@ async function advanceFromCurrentStep(
   // these as a fresh batch and replay the modal.
   if (step === 'doppelganger_dawn' || step === 'doppelganger_dusk') {
     await clearDoppelgangerRevealsForStep(ctx, gameId, step);
+  }
+  // Sasquatch conversion reveal is rendered as an overlay during the wolves
+  // step. Once that step advances, clear the flag so subsequent nights don't
+  // replay it.
+  if (step === 'wolves') {
+    await clearSasquatchReveals(ctx, gameId);
   }
   const next = nextNightStep(step);
   if (next) {
@@ -3267,9 +3387,23 @@ export const beginNight = mutation({
 
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
 
+    // Sasquatch flip: if the day that just ended had no lynch, alive
+    // Sasquatch(es) join the wolf team starting this very night. Fired
+    // BEFORE the phase patch so the parity check below sees the new role
+    // alignment, and so the seer step on the new night reads post-flip.
+    const upcomingNightNumber = game.nightNumber + 1;
+    await fireSasquatchConversionsIfDayHadNoLynch(
+      ctx,
+      args.gameId,
+      game.nightNumber,
+      game.dayNumber,
+      upcomingNightNumber,
+    );
+    if (await applyWinIfReached(ctx, args.gameId)) return;
+
     await ctx.db.patch(args.gameId, {
       phase: 'night',
-      nightNumber: game.nightNumber + 1,
+      nightNumber: upcomingNightNumber,
     });
     await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
   },
@@ -3379,6 +3513,14 @@ export const nightView = query({
           killsSoFar: Array<{ targetId: Id<'players'>; targetName: string }>;
         }
       | null = null;
+    // Set on the caller's view when they're a freshly-flipped Sasquatch — the
+    // wolves-step overlay reads this to show "YOU NOW JOIN THE WOLVES" once.
+    // Cleared server-side when the wolves step advances.
+    const sasquatchReveal =
+      step === 'wolves' &&
+      me.alive &&
+      me.role === 'Werewolf' &&
+      !!me.roleState?.pendingSasquatchReveal;
     const wolfPerspective =
       step === 'wolves' &&
       ((me.alive && me.role && isWolfTeam(me.role)) || !me.alive);
@@ -4193,6 +4335,7 @@ export const nightView = query({
       isMyStep,
       stepLabel: step ? nightStepLabel(step) : null,
       wolfState,
+      sasquatchReveal,
       seerHistory,
       piState,
       mentalistState,

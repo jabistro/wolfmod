@@ -935,6 +935,17 @@ export const endGameView = query({
         }
       }
     }
+    // Sasquatch conversions: parallel to cursedConversionByPlayer. The row's
+    // nightNumber is the night the Sasquatch joined the pack (set at
+    // beginNight, before the phase patch increments the counter).
+    const sasquatchConversionByPlayer = new Map<Id<'players'>, number>();
+    for (const a of actions) {
+      if (a.actionType === 'sasquatch_conversion' && a.actorPlayerId) {
+        if (!sasquatchConversionByPlayer.has(a.actorPlayerId)) {
+          sasquatchConversionByPlayer.set(a.actorPlayerId, a.nightNumber);
+        }
+      }
+    }
     // Doppelganger conversions: parallel structure to cursedConversionByPlayer
     // but also retains the toRole so end-game can show "Doppelganger →
     // Werewolf (n3)" etc.
@@ -1064,6 +1075,10 @@ export const endGameView = query({
       // row would just clutter the per-night history list.
       if (a.actionType === 'cursed_conversion') continue;
       if (a.actionType === 'cursed_conversion_ack') continue;
+      // Sasquatch conversion is communicated via the
+      // "Sasquatch → Werewolf (nN)" subtitle under the player's name; the
+      // bare action row would just be noise in per-night history.
+      if (a.actionType === 'sasquatch_conversion') continue;
       // Legacy `doppelganger_conversion_ack` rows from before the OK button
       // was removed — purely noise in the history list, drop them.
       if (a.actionType === 'doppelganger_conversion_ack') continue;
@@ -1138,11 +1153,18 @@ export const endGameView = query({
         // pick. A wolf who died on day N has death.nightNumber = N-1, so
         // night N+ is correctly excluded. Ex-Cursed wolves are excluded
         // from nights before AND including their conversion night — they
-        // weren't with the pack when the choice was made.
+        // weren't with the pack when the choice was made. Ex-Sasquatch
+        // wolves flip at the START of the night they convert (before the
+        // wolves step), so they ARE with the pack on that night — exclusion
+        // is for nights STRICTLY before.
         for (const p of players) {
           if (!p.role || !isWolfTeam(p.role)) continue;
           const conversionNight = cursedConversionByPlayer.get(p._id);
           if (conversionNight != null && a.nightNumber <= conversionNight) {
+            continue;
+          }
+          const sasquatchNight = sasquatchConversionByPlayer.get(p._id);
+          if (sasquatchNight != null && a.nightNumber < sasquatchNight) {
             continue;
           }
           const death = deathByPlayer.get(p._id);
@@ -1302,6 +1324,8 @@ export const endGameView = query({
           originalRole: p.originalRole ?? null,
           cursedConvertedAtNight:
             cursedConversionByPlayer.get(p._id) ?? null,
+          sasquatchConvertedAtNight:
+            sasquatchConversionByPlayer.get(p._id) ?? null,
           doppelgangerConvertedAtNight:
             doppelgangerConversionByPlayer.get(p._id)?.nightNumber ?? null,
           doppelgangerConvertedToRole:

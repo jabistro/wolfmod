@@ -457,6 +457,14 @@ export default function EndGameScreen() {
             // (Doppelganged X — ROLE on N0, CONVERSION on the reveal night)
             // tell the full story.
             const startedAsDoppelganger = p.originalRole === 'Doppelganger';
+            // Sasquatch flips out of spite on the first day with no lynch —
+            // role-patched to Werewolf at the start of that night, same shape
+            // as the Cursed flip but driven by table inaction, not a wolf
+            // attack.
+            const sasquatchFlipped =
+              p.originalRole === 'Sasquatch' &&
+              p.role !== 'Sasquatch' &&
+              p.sasquatchConvertedAtNight != null;
             return (
               <View
                 key={p._id}
@@ -484,6 +492,11 @@ export default function EndGameScreen() {
                     {wasConverted && (
                       <Text className="text-wolf-muted text-xs italic uppercase">
                         Cursed → Werewolf (n{p.cursedConvertedAtNight})
+                      </Text>
+                    )}
+                    {sasquatchFlipped && (
+                      <Text className="text-wolf-muted text-xs italic uppercase">
+                        Sasquatch → Werewolf (n{p.sasquatchConvertedAtNight})
                       </Text>
                     )}
                     {startedAsDoppelganger && (

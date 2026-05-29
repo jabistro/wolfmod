@@ -59,6 +59,20 @@ export default function NightScreen() {
     return () => clearInterval(interval);
   }, []);
 
+  // Sasquatch conversion overlay: when the server signals a fresh flip via
+  // `sasquatchReveal`, render the modal for 5 s (matches the engine's
+  // REVEAL_WINDOW_MS) and then let the wolves picker take focus. The server
+  // clears the pending flag when the wolves step advances, so the modal won't
+  // replay on subsequent nights.
+  const sasquatchRevealNow = view?.sasquatchReveal === true;
+  const [sasquatchOverlayOpen, setSasquatchOverlayOpen] = useState(false);
+  useEffect(() => {
+    if (!sasquatchRevealNow) return;
+    setSasquatchOverlayOpen(true);
+    const timer = setTimeout(() => setSasquatchOverlayOpen(false), 5000);
+    return () => clearTimeout(timer);
+  }, [sasquatchRevealNow]);
+
   // Phase-driven nav: when night ends → morning, route everyone forward.
   useEffect(() => {
     if (!view) return;
@@ -103,6 +117,7 @@ export default function NightScreen() {
     isMyStep,
     stepLabel,
     wolfState,
+    sasquatchReveal,
     seerHistory,
     piState,
     mentalistState,
@@ -358,6 +373,11 @@ export default function NightScreen() {
           )}
         </View>
       )}
+
+      <SasquatchRevealOverlay
+        visible={sasquatchOverlayOpen && sasquatchReveal === true}
+        wolves={wolfState?.wolves ?? []}
+      />
 
       {me.alive &&
         me.isHost &&
@@ -717,6 +737,69 @@ function DoppelgangerRevealView({
         )
       )}
     </View>
+  );
+}
+
+// ───── Sasquatch conversion overlay ────────────────────────────────────────
+//
+// Rendered on the flipped Sasquatch's phone at the start of the wolves step,
+// the night after a day with no lynch. Blocks the picker briefly so the player
+// reads the role change before they're asked to vote with the pack. Server
+// clears `pendingSasquatchReveal` when the wolves step advances; client also
+// dismisses after the 5 s reading window so the picker is reachable even if
+// the dwell drags on.
+
+function SasquatchRevealOverlay({
+  visible,
+  wolves,
+}: {
+  visible: boolean;
+  wolves: Array<{
+    _id: Id<'players'>;
+    name: string;
+    role: string;
+    isMe: boolean;
+  }>;
+}) {
+  const otherWolves = wolves.filter(w => !w.isMe);
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View className="flex-1 bg-wolf-bg items-center justify-center px-6">
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
+          A NEW PACK
+        </Text>
+        <View
+          className="bg-wolf-card rounded-2xl px-6 py-6"
+          style={{ maxWidth: 360 }}
+        >
+          <Text className="text-wolf-text text-base leading-6 text-center">
+            {'The village let a day end without a lynch. You '}
+            <Text className="text-wolf-red font-extrabold">JOIN</Text>
+            {' the '}
+            <Text className="text-wolf-red font-extrabold">WOLVES</Text>
+            {' out of spite.'}
+          </Text>
+          {otherWolves.length > 0 && (
+            <View className="mt-5">
+              <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-2">
+                YOUR PACK
+              </Text>
+              {otherWolves.map(w => (
+                <Text
+                  key={w._id}
+                  className="text-wolf-accent text-base font-extrabold text-center"
+                >
+                  {w.name.toUpperCase()}
+                </Text>
+              ))}
+            </View>
+          )}
+          <Text className="text-wolf-muted text-xs text-center mt-5">
+            You wake with the wolves now. Choose a victim together.
+          </Text>
+        </View>
+      </View>
+    </Modal>
   );
 }
 

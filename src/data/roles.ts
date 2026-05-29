@@ -134,7 +134,7 @@ export const ROLES: Role[] = [
   { name: 'Doppelganger',            category: 'solo', image: require('../../roles_ghibli_medium/doppelganger.jpg'),  thumb: require('../../roles_ghibli_thumbs/doppelganger.jpg'),  barColors: ['#4A90D9', '#8B1818'] },
   { name: 'Drunk',                   category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),         thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),         barColors: ['#4A90D9', '#8B1818'] },
   { name: 'Grave Robber',            category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),  thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),  barColors: ['#4A90D9', '#8B1818'] },
-  { name: 'Sasquatch',               category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),     thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),     barColors: ['#4A90D9', '#8B1818'] },
+  { name: 'Sasquatch',               category: 'solo', image: require('../../roles_ghibli_medium/sasquatch.jpg'),     thumb: require('../../roles_ghibli_thumbs/sasquatch.jpg'),     barColors: ['#4A90D9', '#8B1818'] },
   // blue+lightred
   { name: 'Black Cat',               category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),     thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),     barColors: ['#4A90D9', '#C05050'] },
   { name: 'Blind Mary',              category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),    thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),    barColors: ['#4A90D9', '#C05050'] },
