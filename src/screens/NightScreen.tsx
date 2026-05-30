@@ -610,6 +610,7 @@ function CursedRevealView({
 }) {
   const submitAck = useMutation(api.night.submitCursedAck);
   const [submitting, setSubmitting] = useState(false);
+  const insets = useSafeAreaInsets();
 
   async function handleAck() {
     if (submitting) return;
@@ -645,21 +646,16 @@ function CursedRevealView({
         <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
           A CURSE TAKES HOLD
         </Text>
-        <View
-          className="bg-wolf-card rounded-2xl px-6 py-6"
-          style={{ maxWidth: 360 }}
-        >
-          <Text className="text-wolf-text text-base leading-6 text-center">
-            <Text className="text-wolf-red font-extrabold">YOU</Text>
-            {' were targeted tonight, but '}
-            <Text className="text-wolf-red font-extrabold">ARE</Text>
-            {' still alive. '}
-            <Text className="text-wolf-red font-extrabold">A</Text>
-            {' curse converts you into a '}
-            <Text className="text-wolf-red font-extrabold">WOLF</Text>
-            {' now.'}
-          </Text>
-        </View>
+        <Text className="text-wolf-text text-2xl font-extrabold text-center leading-8 px-2">
+          <Text className="text-wolf-red">YOU</Text>
+          {' WERE TARGETED TONIGHT, BUT '}
+          <Text className="text-wolf-red">ARE</Text>
+          {' STILL ALIVE. '}
+          <Text className="text-wolf-red">A</Text>
+          {' CURSE CONVERTS YOU INTO A '}
+          <Text className="text-wolf-red">WOLF</Text>
+          {' NOW.'}
+        </Text>
         {!isMine && convertedNames.length > 0 && (
           <Text className="text-wolf-muted text-xs tracking-widest mt-6 text-center px-4">
             {convertedNames.join(', ').toUpperCase()} HAS BEEN CURSED
@@ -668,21 +664,23 @@ function CursedRevealView({
       </View>
 
       {isMine && (
-        <TouchableOpacity
-          onPress={handleAck}
-          disabled={submitting}
-          activeOpacity={0.75}
-          className="bg-wolf-accent rounded-xl py-4 items-center"
-          style={{ opacity: submitting ? 0.4 : 1 }}
-        >
-          {submitting ? (
-            <ActivityIndicator color="#0F0F14" />
-          ) : (
-            <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-              OK
-            </Text>
-          )}
-        </TouchableOpacity>
+        <View style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}>
+          <TouchableOpacity
+            onPress={handleAck}
+            disabled={submitting}
+            activeOpacity={0.75}
+            className="bg-wolf-accent rounded-xl py-4 items-center"
+            style={{ opacity: submitting ? 0.4 : 1 }}
+          >
+            {submitting ? (
+              <ActivityIndicator color="#0F0F14" />
+            ) : (
+              <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                OK
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
       )}
     </View>
   );
