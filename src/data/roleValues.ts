@@ -81,6 +81,7 @@ const ROLE_VALUES: Record<string, number> = {
   mystic_seer: 9,
   mystic_wolf: -12,
   necromancer: 6,
+  nightmare_wolf: -9,
   nosferatu: -7,
   nostradamus: 1,
   old_man: 0,

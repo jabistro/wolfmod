@@ -91,6 +91,7 @@ export const ROLES: Role[] = [
   { name: 'Hunter Wolf',             category: 'wolves', image: require('../../roles_ghibli_medium/hunter_wolf.jpg'),             thumb: require('../../roles_ghibli_thumbs/hunter_wolf.jpg') },
   { name: 'Werewolf',                category: 'wolves', image: require('../../roles_ghibli_medium/werewolf.jpg'),                thumb: require('../../roles_ghibli_thumbs/werewolf.jpg') },
   { name: 'Wolf Cub',                category: 'wolves', image: require('../../roles_ghibli_medium/wolf_cub.jpg'),                thumb: require('../../roles_ghibli_thumbs/wolf_cub.jpg') },
+  { name: 'Nightmare Wolf',          category: 'wolves', image: require('../../roles_ghibli_medium/nightmare_wolf.jpg'),         thumb: require('../../roles_ghibli_thumbs/nightmare_wolf.jpg') },
   { name: 'Exploding Wolf',          category: 'wolves', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),          thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Kamikaze Wolf',           category: 'wolves', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),           thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Alpha Wolf',              category: 'wolves', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),              thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },

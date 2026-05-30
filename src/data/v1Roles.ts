@@ -25,6 +25,7 @@ export const V1_ROLES = [
   'Wolf Man',
   'Hunter Wolf',
   'Wolf Cub',
+  'Nightmare Wolf',
   // Solo / wolf-aligned
   'Minion',
   'Reviler',
@@ -50,6 +51,7 @@ export const WOLF_TEAM_ROLES = [
   'Wolf Man',
   'Hunter Wolf',
   'Wolf Cub',
+  'Nightmare Wolf',
 ] as const;
 
 export function isWolfTeam(role: string): boolean {

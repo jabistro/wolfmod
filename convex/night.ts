@@ -78,36 +78,94 @@ function randomDwellMs(): number {
 
 // ───── Step membership ──────────────────────────────────────────────────────
 
-function activePlayersForStep(step: NightStep, alive: Player[]): Player[] {
+/**
+ * Steps where a nightmared player (roleState.nightmaredOn === nightNumber)
+ * is filtered out of the actor list — their picker is replaced with a
+ * "you've been put to sleep" overlay client-side, the step dwells normally,
+ * and isStepComplete sees a vacuously-empty actor list. Wolves /
+ * nightmare_wolf / passive resolution steps are NOT in this set: NW puts
+ * to sleep *active villager pickers*, not the pack's wake-up or the
+ * passive-conversion machinery.
+ */
+const NIGHTMARE_BLOCKABLE_STEPS = new Set<NightStep>([
+  'seer',
+  'pi',
+  'mentalist',
+  'witch',
+  'leprechaun',
+  'bodyguard',
+  'huntress',
+  'revealer',
+  'reviler',
+]);
+
+function isNightmared(p: Player, nightNumber: number): boolean {
+  return p.roleState?.nightmaredOn === nightNumber;
+}
+
+function activePlayersForStep(
+  step: NightStep,
+  alive: Player[],
+  nightNumber: number,
+): Player[] {
+  const dropNightmared = (xs: Player[]): Player[] =>
+    NIGHTMARE_BLOCKABLE_STEPS.has(step)
+      ? xs.filter(p => !isNightmared(p, nightNumber))
+      : xs;
   switch (step) {
     case 'wolves':
       return alive.filter(p => p.role && isWolfTeam(p.role));
+    case 'nightmare_wolf':
+      // Two-charge night-action denier. Once both charges are spent the
+      // step still dwells for cloak symmetry but auto-completes since
+      // actors=[]. Skipping a night doesn't consume a charge.
+      return alive.filter(
+        p =>
+          p.role === 'Nightmare Wolf' &&
+          ((p.roleState?.nightmaresUsed as Id<'players'>[] | undefined) ?? [])
+            .length < 2,
+      );
     case 'seer':
-      return alive.filter(p => p.role === 'Seer');
+      return dropNightmared(alive.filter(p => p.role === 'Seer'));
     case 'pi':
       // PI is one-time: once used, they're not an active actor anymore. The
       // step still dwells (cloaking) but auto-completes since actors=[].
-      return alive.filter(
-        p => p.role === 'Paranormal Investigator' && !p.roleState?.piUsed,
+      return dropNightmared(
+        alive.filter(
+          p => p.role === 'Paranormal Investigator' && !p.roleState?.piUsed,
+        ),
       );
     case 'mentalist':
-      return alive.filter(p => p.role === 'Mentalist');
+      return dropNightmared(alive.filter(p => p.role === 'Mentalist'));
     case 'witch':
-      return alive.filter(p => p.role === 'Witch');
+      // Once both potions are spent the Witch has nothing left to decide.
+      // Filter her out so she sleeps cleanly on subsequent nights — same
+      // shape as spent PI / Huntress / Nightmare Wolf. The step still
+      // dwells for cloak symmetry; isStepComplete sees actors=[] and
+      // auto-completes when the dwell elapses.
+      return dropNightmared(
+        alive.filter(
+          p =>
+            p.role === 'Witch' &&
+            !(p.roleState?.witchSaveUsed && p.roleState?.witchPoisonUsed),
+        ),
+      );
     case 'leprechaun':
-      return alive.filter(p => p.role === 'Leprechaun');
+      return dropNightmared(alive.filter(p => p.role === 'Leprechaun'));
     case 'bodyguard':
-      return alive.filter(p => p.role === 'Bodyguard');
+      return dropNightmared(alive.filter(p => p.role === 'Bodyguard'));
     case 'huntress':
       // One-time: once she's used her shot, she's no longer an active actor.
       // The step still dwells for cloaking but auto-completes since actors=[].
-      return alive.filter(
-        p => p.role === 'Huntress' && !p.roleState?.huntressUsed,
+      return dropNightmared(
+        alive.filter(
+          p => p.role === 'Huntress' && !p.roleState?.huntressUsed,
+        ),
       );
     case 'revealer':
-      return alive.filter(p => p.role === 'Revealer');
+      return dropNightmared(alive.filter(p => p.role === 'Revealer'));
     case 'reviler':
-      return alive.filter(p => p.role === 'Reviler');
+      return dropNightmared(alive.filter(p => p.role === 'Reviler'));
     case 'cursed_conversion':
       // No actor input. The step computes & writes conversion rows on
       // entry and just dwells so the converted Cursed can read the reveal.
@@ -132,6 +190,8 @@ function stepIsInGame(step: NightStep, selectedRoles: string[]): boolean {
   switch (step) {
     case 'wolves':
       return [...WOLF_TEAM_ROLES].some(r => set.has(r));
+    case 'nightmare_wolf':
+      return set.has('Nightmare Wolf');
     case 'seer':
       return set.has('Seer');
     case 'pi':
@@ -229,6 +289,23 @@ async function isStepComplete(
         allPlayers.filter(p => p.alive),
       );
       return kills.length >= required;
+    }
+    case 'nightmare_wolf': {
+      // Each NW either puts a player to sleep OR skips tonight. Step is
+      // complete when every NW with a charge remaining has decided.
+      const puts = await getNightActions(
+        ctx,
+        gameId,
+        nightNumber,
+        'nightmare_put_to_sleep',
+      );
+      const skips = await getNightActions(
+        ctx,
+        gameId,
+        nightNumber,
+        'nightmare_skip',
+      );
+      return puts.length + skips.length >= actors.length;
     }
     case 'seer': {
       const checks = await getNightActions(ctx, gameId, nightNumber, 'seer_check');
@@ -432,6 +509,19 @@ async function autoResolveStep(
           actorPlayerId: actors[0]._id,
           actionType: 'wolf_kill',
           targetPlayerId: victim._id,
+          resolvedAt: now,
+        });
+      }
+      return;
+    }
+    case 'nightmare_wolf': {
+      // Bot NW saves the charges — same conservative path as Huntress.
+      for (const nw of actors) {
+        await ctx.db.insert('nightActions', {
+          gameId,
+          nightNumber,
+          actorPlayerId: nw._id,
+          actionType: 'nightmare_skip',
           resolvedAt: now,
         });
       }
@@ -922,6 +1012,31 @@ async function resolveMorning(
     if (!huntress) continue;
     await ctx.db.patch(hs.actorPlayerId, {
       roleState: { ...(huntress.roleState ?? {}), huntressUsed: true },
+    });
+  }
+
+  // Persist Nightmare Wolf charges across nights — append tonight's target
+  // to nightmaresUsed at morning so the NW stays in stepActors during
+  // the current night's locked "PUT TO SLEEP: X" confirmation view, but
+  // gets cleanly filtered out next night once the charge is spent.
+  const nightmareRows = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'nightmare_put_to_sleep',
+  );
+  for (const nm of nightmareRows) {
+    if (!nm.actorPlayerId || !nm.targetPlayerId) continue;
+    const nw = await ctx.db.get(nm.actorPlayerId);
+    if (!nw) continue;
+    const used =
+      (nw.roleState?.nightmaresUsed as Id<'players'>[] | undefined) ?? [];
+    if (used.some(id => id === nm.targetPlayerId)) continue; // defensive idempotency
+    await ctx.db.patch(nm.actorPlayerId, {
+      roleState: {
+        ...(nw.roleState ?? {}),
+        nightmaresUsed: [...used, nm.targetPlayerId],
+      },
     });
   }
 
@@ -1775,7 +1890,7 @@ export async function enterStep(
     .withIndex('by_game', q => q.eq('gameId', gameId))
     .collect();
   const alive = players.filter(p => p.alive);
-  const actors = activePlayersForStep(step, alive);
+  const actors = activePlayersForStep(step, alive, game.nightNumber);
 
   // A witch whose save AND poison are both spent has nothing left to decide,
   // so we pre-record their "done" — same path as a bot — and let the dwell
@@ -1857,7 +1972,7 @@ export async function maybeAdvance(
     .withIndex('by_game', q => q.eq('gameId', gameId))
     .collect();
   const alive = players.filter(p => p.alive);
-  const actors = activePlayersForStep(step, alive);
+  const actors = activePlayersForStep(step, alive, game.nightNumber);
 
   if (!(await isStepComplete(ctx, gameId, step, actors, game.nightNumber))) {
     return;
@@ -2763,6 +2878,150 @@ export const submitRevilerSkip = mutation({
   },
 });
 
+// ───── Nightmare Wolf ───────────────────────────────────────────────────────
+//
+// Wakes with the pack to vote on the kill, then stays awake alone for their
+// own step right after `wolves`. Twice per game total, puts a single non-wolf
+// player to sleep: target's `roleState.nightmaredOn` is stamped with the
+// current nightNumber, and every later picker step's `activePlayersForStep`
+// filters that actor out, so their picker is replaced with a "put to sleep"
+// overlay on their phone and the step auto-completes after dwell.
+//
+// Charges are per-NW (no global cap across multiple NWs); the same NW can't
+// target the same player twice. Skipping a night preserves both charges.
+
+export const submitNightmarePut = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    targetPlayerId: v.id('players'),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || game.nightStep !== 'nightmare_wolf') {
+      throw new Error('The nightmare wolf is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Nightmare Wolf') {
+      throw new Error('Only the nightmare wolf can act here.');
+    }
+
+    const used =
+      (me.roleState?.nightmaresUsed as Id<'players'>[] | undefined) ?? [];
+    if (used.length >= 2) {
+      throw new Error('You have already used both nightmares.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'nightmare_put_to_sleep',
+      )
+    ) {
+      throw new Error('You have already chosen tonight.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'nightmare_skip',
+      )
+    ) {
+      throw new Error('You have already passed tonight.');
+    }
+
+    const target = await ctx.db.get(args.targetPlayerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new Error('Invalid target.');
+    }
+    if (!target.alive) throw new Error('Target is already eliminated.');
+    if (target._id === me._id) throw new Error('Cannot nightmare yourself.');
+    if (target.role && isWolfTeam(target.role)) {
+      throw new Error('Cannot nightmare another wolf.');
+    }
+    if (used.some(id => id === target._id)) {
+      throw new Error('You have already nightmared that player.');
+    }
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'nightmare_put_to_sleep',
+      targetPlayerId: args.targetPlayerId,
+      resolvedAt: Date.now(),
+    });
+
+    // Sleep flag on the target needs to take effect *this same night* so
+    // subsequent picker steps filter them out. NW's own `nightmaresUsed`
+    // update is deferred to morning resolution (mirrors Huntress/PI/Witch
+    // — flipping the spent flag mid-step would yank the NW out of
+    // `activePlayersForStep`, blanking their post-action confirmation
+    // view and surfacing the WaitingView alongside it.
+    await ctx.db.patch(args.targetPlayerId, {
+      roleState: {
+        ...(target.roleState ?? {}),
+        nightmaredOn: game.nightNumber,
+      },
+    });
+
+    await ensureReadingWindow(ctx, args.gameId, 'nightmare_wolf');
+  },
+});
+
+export const submitNightmareSkip = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || game.nightStep !== 'nightmare_wolf') {
+      throw new Error('The nightmare wolf is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Nightmare Wolf') {
+      throw new Error('Only the nightmare wolf can pass tonight.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'nightmare_put_to_sleep',
+      ) ||
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'nightmare_skip',
+      )
+    ) {
+      return; // already decided
+    }
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'nightmare_skip',
+      resolvedAt: Date.now(),
+    });
+
+    await ensureReadingWindow(ctx, args.gameId, 'nightmare_wolf');
+  },
+});
+
 // ───── Cursed conversion ack ────────────────────────────────────────────────
 //
 // Tapping OK on the reveal screen records a `cursed_conversion_ack` row.
@@ -3220,6 +3479,7 @@ export const forceAdvanceStep = mutation({
  */
 const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
   wolves: ['wolf_kill', 'wolf_blocked'],
+  nightmare_wolf: ['nightmare_put_to_sleep', 'nightmare_skip'],
   seer: ['seer_check'],
   pi: ['pi_check', 'pi_skip'],
   mentalist: ['mentalist_check'],
@@ -3290,6 +3550,17 @@ export const refreshStep = mutation({
         }
       }
     }
+    // Nightmare Wolf: collect tonight's sleep targets BEFORE deleting the
+    // action rows, so we can clear their `nightmaredOn` flags below. The
+    // NW's `nightmaresUsed` doesn't need a revert — it's only updated at
+    // morning resolution, so deleting the action row alone is enough.
+    const nwSleepTargets = new Set<Id<'players'>>();
+    if (step === 'nightmare_wolf') {
+      for (const a of actions) {
+        if (a.actionType !== 'nightmare_put_to_sleep') continue;
+        if (a.targetPlayerId) nwSleepTargets.add(a.targetPlayerId);
+      }
+    }
     for (const a of actions) {
       if (types.has(a.actionType)) {
         await ctx.db.delete(a._id);
@@ -3306,6 +3577,19 @@ export const refreshStep = mutation({
         id => !lepRevertIds.has(id as unknown as string),
       );
       await ctx.db.patch(args.gameId, { leprechaunMovedOff: next });
+    }
+
+    // Nightmare Wolf: clear `nightmaredOn` on every player who was put to
+    // sleep this night, so their night ability un-blocks on the do-over.
+    if (step === 'nightmare_wolf') {
+      for (const targetId of nwSleepTargets) {
+        const t = await ctx.db.get(targetId);
+        if (t && t.roleState?.nightmaredOn === game.nightNumber) {
+          const { nightmaredOn, ...rest } = t.roleState;
+          void nightmaredOn;
+          await ctx.db.patch(targetId, { roleState: rest });
+        }
+      }
     }
 
     // Clear step-scoped ephemeral roleState. Today this only matters for the
@@ -3337,7 +3621,7 @@ export const refreshStep = mutation({
       .withIndex('by_game', q => q.eq('gameId', args.gameId))
       .collect();
     const alive = players.filter(p => p.alive);
-    const actors = activePlayersForStep(step, alive);
+    const actors = activePlayersForStep(step, alive, game.nightNumber);
     const witchHasNothingLeft =
       step === 'witch' &&
       actors.length > 0 &&
@@ -3472,7 +3756,7 @@ export const nightView = query({
 
     let isMyStep = false;
     if (step && me.alive && me.role) {
-      const actors = activePlayersForStep(step, alive);
+      const actors = activePlayersForStep(step, alive, game.nightNumber);
       isMyStep = actors.some(a => a._id === me._id);
     }
 
@@ -3481,12 +3765,27 @@ export const nightView = query({
     // alive actor for a role, or the alive actor when I'm dead and the step
     // matches. Returning undefined means this role's data is not visible to
     // this viewer.
-    const stepActors: Player[] = step ? activePlayersForStep(step, alive) : [];
+    const stepActors: Player[] = step
+      ? activePlayersForStep(step, alive, game.nightNumber)
+      : [];
     const actorForRole = (
       roleName: string,
       stepName: NightStep,
     ): Player | undefined => {
-      if (me.alive && me.role === roleName) return me;
+      if (me.alive && me.role === roleName) {
+        // On the role's own step, only return me if I'm still in the active
+        // list — otherwise spent one-time roles (PI, Huntress, fully-used
+        // Nightmare Wolf) and nightmared pickers would have their XState
+        // populated and their picker would flash on-screen during the
+        // step's natural cloaking dwell before it auto-advances. On any
+        // other step, return me eagerly — the picker tree only renders
+        // when nightStep matches the role, so populating XState elsewhere
+        // is harmless and keeps spectator views consistent.
+        if (step === stepName) {
+          return stepActors.some(a => a._id === me._id) ? me : undefined;
+        }
+        return me;
+      }
       if (!me.alive && step === stepName) {
         return stepActors.find(a => a.role === roleName);
       }
@@ -3914,6 +4213,75 @@ export const nightView = query({
       };
     }
 
+    // Nightmare Wolf state. Visible to the alive NW always, and to dead
+    // spectators during the nightmare_wolf step (ghost mirror). `charges`
+    // counts down from 2; `prevTargetIds` tracks the same-target restriction;
+    // `hasActedThisNight` drives the locked waiting view after the pick.
+    let nightmareWolfState: {
+      charges: number;
+      prevTargets: Array<{ _id: Id<'players'>; name: string }>;
+      hasActedThisNight: boolean;
+      tonightTarget: { _id: Id<'players'>; name: string } | null;
+      tonightSkipped: boolean;
+    } | null = null;
+    const nwActor = actorForRole('Nightmare Wolf', 'nightmare_wolf');
+    if (nwActor) {
+      const playerById = new Map(players.map(p => [p._id, p]));
+      const usedIds =
+        (nwActor.roleState?.nightmaresUsed as Id<'players'>[] | undefined) ?? [];
+      const prevTargets = usedIds
+        .map(id => playerById.get(id))
+        .filter((p): p is Player => !!p)
+        .map(p => ({ _id: p._id, name: p.name }));
+      const myActions = await ctx.db
+        .query('nightActions')
+        .withIndex('by_game_night', q =>
+          q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
+        )
+        .collect();
+      const putAction = myActions.find(
+        a =>
+          a.actorPlayerId === nwActor._id &&
+          a.actionType === 'nightmare_put_to_sleep',
+      );
+      const skipAction = myActions.find(
+        a =>
+          a.actorPlayerId === nwActor._id && a.actionType === 'nightmare_skip',
+      );
+      let tonightTarget: { _id: Id<'players'>; name: string } | null = null;
+      if (putAction?.targetPlayerId) {
+        const t = playerById.get(putAction.targetPlayerId);
+        if (t) tonightTarget = { _id: t._id, name: t.name };
+      }
+      nightmareWolfState = {
+        charges: Math.max(0, 2 - usedIds.length),
+        prevTargets,
+        hasActedThisNight: !!(putAction || skipAction),
+        tonightTarget,
+        tonightSkipped: !!skipAction,
+      };
+    }
+
+    // True only when the *living* caller would be the actor for the current
+    // step but was filtered out because they were nightmared this night. The
+    // NightScreen replaces their normal picker with a "you've been put to
+    // sleep" overlay during the step's dwell. Wolves / nightmare_wolf /
+    // resolution steps are never blocked.
+    const nightmaredBlocking =
+      me.alive &&
+      step !== undefined &&
+      NIGHTMARE_BLOCKABLE_STEPS.has(step) &&
+      isNightmared(me, game.nightNumber) &&
+      ((step === 'seer' && me.role === 'Seer') ||
+        (step === 'pi' && me.role === 'Paranormal Investigator') ||
+        (step === 'mentalist' && me.role === 'Mentalist') ||
+        (step === 'witch' && me.role === 'Witch') ||
+        (step === 'leprechaun' && me.role === 'Leprechaun') ||
+        (step === 'bodyguard' && me.role === 'Bodyguard') ||
+        (step === 'huntress' && me.role === 'Huntress') ||
+        (step === 'revealer' && me.role === 'Revealer') ||
+        (step === 'reviler' && me.role === 'Reviler'));
+
     // Reviler-only state. Solo antagonist; same shape as revealerState.
     let revilerState: {
       hasActedThisNight: boolean;
@@ -4176,6 +4544,18 @@ export const nightView = query({
         // Wolves may target each other (and themselves) — see submitWolfVote
         // for the Leprechaun-signaling rationale.
         pool = alive;
+      } else if (step === 'nightmare_wolf') {
+        // Non-wolves only; no self. Previously-targeted players are excluded
+        // here so the picker never offers an illegal pick.
+        const used =
+          (v.roleState?.nightmaresUsed as Id<'players'>[] | undefined) ?? [];
+        const usedSet = new Set<string>(used.map(id => id as unknown as string));
+        pool = alive.filter(
+          p =>
+            p._id !== v._id &&
+            !(p.role && isWolfTeam(p.role)) &&
+            !usedSet.has(p._id as unknown as string),
+        );
       } else if (step === 'seer') {
         pool = alive.filter(p => p._id !== v._id);
       } else if (step === 'pi') {
@@ -4258,6 +4638,7 @@ export const nightView = query({
         >,
         string
       > = {
+        nightmare_wolf: 'Nightmare Wolf',
         seer: 'Seer',
         pi: 'Paranormal Investigator',
         mentalist: 'Mentalist',
@@ -4347,6 +4728,8 @@ export const nightView = query({
       revilerState,
       cursedConversionState,
       doppelgangerRevealState,
+      nightmareWolfState,
+      nightmaredBlocking,
       targetables,
       alivePlayers: aliveSummaries,
       stepActorStatus,

@@ -16,6 +16,25 @@ const ROOM_CODE_LENGTH = 4;
 const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 40;
 
+/**
+ * Roles whose nighttime ability is *blockable* by a Nightmare Wolf — kept in
+ * sync with NIGHTMARE_BLOCKABLE_STEPS in convex/night.ts. Used by the
+ * end-game history builder to decide whether a nightmared target's row
+ * should display the "NIGHTMARED" badge: passive roles (Tough Guy, Diseased,
+ * Villager, etc.) had nothing to block, so the badge would be misleading.
+ */
+const NIGHTMARE_BLOCKABLE_ROLES = new Set<string>([
+  'Seer',
+  'Paranormal Investigator',
+  'Mentalist',
+  'Witch',
+  'Leprechaun',
+  'Bodyguard',
+  'Huntress',
+  'Revealer',
+  'Reviler',
+]);
+
 function shuffle<T>(items: readonly T[]): T[] {
   const result = items.slice();
   for (let i = result.length - 1; i > 0; i--) {
@@ -1082,6 +1101,36 @@ export const endGameView = query({
       // Legacy `doppelganger_conversion_ack` rows from before the OK button
       // was removed — purely noise in the history list, drop them.
       if (a.actionType === 'doppelganger_conversion_ack') continue;
+      // A nightmare_skip is the NW saving their charges — nothing happened
+      // on the table, so drop it. The NW's actually-used nightmares still
+      // show as `nightmare_put_to_sleep` rows, and skipped nights leave
+      // the NW with no entry for that night (their wolf_kill targeted-X
+      // row already represents what they did with the pack).
+      if (a.actionType === 'nightmare_skip') continue;
+      // Nightmare put-to-sleep: NW gets the actor row (rendered as
+      // "Targeted X — NIGHTMARED" on the client). We ALSO push a
+      // synthetic `nightmare_blocked` entry into the *target's* history
+      // for that night, but only if the target's role is one that could
+      // actually have used a night ability — Villagers, Hunters, Tough
+      // Guys, etc. don't get the marker because nothing was actually
+      // blocked from their perspective.
+      if (a.actionType === 'nightmare_put_to_sleep' && a.targetPlayerId) {
+        const target = players.find(p => p._id === a.targetPlayerId);
+        if (target?.role && NIGHTMARE_BLOCKABLE_ROLES.has(target.role)) {
+          pushEntry(a.targetPlayerId, {
+            nightNumber: a.nightNumber,
+            kind: 'nightmare_blocked',
+            targetName: null,
+            secondTargetName: null,
+            team: null,
+            sameTeam: null,
+            outcome: null,
+            victimNames: null,
+          });
+        }
+        // Fall through to the catch-all below, which pushes the row to
+        // the NW's own history.
+      }
       // A witch_done row alongside a same-night witch_save / witch_poison is
       // just the turn-closer — collapse it so the night shows only the action
       // taken, not action + Passed.

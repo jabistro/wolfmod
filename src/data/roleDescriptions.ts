@@ -77,6 +77,7 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
   'Wolf Man': 'Wakes with the wolves. Reads as a villager to the Seer.',
   'Hunter Wolf': 'Wakes with the wolves. On death, may shoot a player down with them.',
   'Wolf Cub': 'Wakes with the wolves. If killed, the surviving wolves get two kills next night.',
+  'Nightmare Wolf': 'Wakes with the pack, then stays awake alone. Twice per game, puts a villager to sleep — their night power doesn\'t fire that night.',
   'Exploding Wolf': 'Wakes with the pack. When this wolf dies, both adjacent players go down in the blast.',
   'Kamikaze Wolf': 'Wakes with the pack. Booby-trapped — if the Seer checks them while other wolves still live, both die.',
   'Alpha Wolf': 'Wakes with the pack. The night after a wolf is lynched, may convert that night\'s target into a new wolf instead of killing.',

@@ -11,6 +11,7 @@ export const NIGHT_STEPS = [
   // with the pack this same night.
   'doppelganger_dawn',
   'wolves',
+  'nightmare_wolf',
   'seer',
   'pi',
   'mentalist',
@@ -42,6 +43,8 @@ export function nightStepLabel(step: NightStep): string {
   switch (step) {
     case 'wolves':
       return 'The wolves are awake';
+    case 'nightmare_wolf':
+      return 'The nightmare wolf stalks alone';
     case 'seer':
       return 'The seer is awake';
     case 'pi':

@@ -328,6 +328,21 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
           CONVERSION
         </Text>
       );
+    case 'nightmare_put_to_sleep':
+      return (
+        <Text className="text-wolf-text text-sm">
+          Targeted {t} —{' '}
+          <Text className="font-bold" style={{ color: '#B68AD9' }}>
+            NIGHTMARED
+          </Text>
+        </Text>
+      );
+    case 'nightmare_blocked':
+      return (
+        <Text className="font-bold text-sm" style={{ color: '#B68AD9' }}>
+          NIGHTMARED
+        </Text>
+      );
     default:
       return <Text className="text-wolf-muted text-sm">{entry.kind}</Text>;
   }

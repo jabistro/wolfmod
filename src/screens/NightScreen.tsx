@@ -129,6 +129,8 @@ export default function NightScreen() {
     revilerState,
     cursedConversionState,
     doppelgangerRevealState,
+    nightmareWolfState,
+    nightmaredBlocking,
     targetables,
     stepActorStatus,
   } = view;
@@ -304,6 +306,19 @@ export default function NightScreen() {
             conversions={doppelgangerRevealState.conversions}
           />
         )}
+
+      {game.nightStep === 'nightmare_wolf' && nightmareWolfState && (
+        <NightmareWolfPicker
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alivePlayers={view.alivePlayers}
+          targetables={targetables}
+          totalSeats={game.playerCount}
+          nightmareState={nightmareWolfState}
+          meId={me._id}
+          isGhost={isGhost}
+        />
+      )}
     </>
   );
 
@@ -325,7 +340,8 @@ export default function NightScreen() {
     (game.nightStep === 'cursed_conversion' && cursedConversionState) ||
     ((game.nightStep === 'doppelganger_dawn' ||
       game.nightStep === 'doppelganger_dusk') &&
-      doppelgangerRevealState)
+      doppelgangerRevealState) ||
+    (game.nightStep === 'nightmare_wolf' && nightmareWolfState)
   );
 
   return (
@@ -345,12 +361,16 @@ export default function NightScreen() {
       )}
 
       {me.alive ? (
-        <>
-          {pickerTree}
-          {!isMyStep && !cursedConversionState && !doppelgangerRevealState && (
-            <WaitingView role={me.role} />
-          )}
-        </>
+        nightmaredBlocking ? (
+          <NightmareBlockedView />
+        ) : (
+          <>
+            {pickerTree}
+            {!isMyStep && !cursedConversionState && !doppelgangerRevealState && (
+              <WaitingView role={me.role} />
+            )}
+          </>
+        )
       ) : (
         <View
           className="flex-1"
@@ -3403,6 +3423,258 @@ function RevilerPicker({
           </View>
         </View>
       )}
+    </View>
+  );
+}
+
+// ───── Nightmare Wolf picker ───────────────────────────────────────────────
+//
+// Wakes alone after the pack chooses a kill. Two charges per game total —
+// each puts a non-wolf player to sleep, blocking their night ability for the
+// current night. Same-target restriction is enforced both server-side and by
+// excluding prior targets from `targetables`. Skip preserves both charges.
+
+function NightmareWolfPicker({
+  gameId,
+  deviceClientId,
+  alivePlayers,
+  targetables,
+  totalSeats,
+  nightmareState,
+  meId,
+  isGhost,
+}: {
+  gameId: Id<'games'>;
+  deviceClientId: string;
+  alivePlayers: SeatingPlayer[];
+  targetables: Targetable[];
+  totalSeats: number;
+  nightmareState: {
+    charges: number;
+    prevTargets: Array<{ _id: Id<'players'>; name: string }>;
+    hasActedThisNight: boolean;
+    tonightTarget: { _id: Id<'players'>; name: string } | null;
+    tonightSkipped: boolean;
+  };
+  meId: Id<'players'>;
+  isGhost?: boolean;
+}) {
+  const insets = useSafeAreaInsets();
+  const submitPut = useMutation(api.night.submitNightmarePut);
+  const submitSkip = useMutation(api.night.submitNightmareSkip);
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingTarget, setPendingTarget] = useState<{
+    id: Id<'players'>;
+    name: string;
+  } | null>(null);
+
+  function handlePickTarget(targetId: Id<'players'>, name: string) {
+    if (submitting || pendingTarget) return;
+    setPendingTarget({ id: targetId, name });
+  }
+
+  async function handleConfirm() {
+    if (!pendingTarget || submitting) return;
+    setSubmitting(true);
+    try {
+      await submitPut({
+        gameId,
+        callerDeviceClientId: deviceClientId,
+        targetPlayerId: pendingTarget.id,
+      });
+      setPendingTarget(null);
+    } catch (e) {
+      showAlert('Could not act', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleCancel() {
+    if (submitting) return;
+    setPendingTarget(null);
+  }
+
+  async function handleSkip() {
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      await submitSkip({ gameId, callerDeviceClientId: deviceClientId });
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (nightmareState.hasActedThisNight) {
+    return (
+      <View className="flex-1 px-6 pt-2 pb-8">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator color="#D4A017" />
+          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+            Waiting for the night to settle…
+          </Text>
+          {nightmareState.tonightTarget ? (
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4">
+              <Text style={{ color: '#7B52A8' }} className="font-bold">
+                PUT TO SLEEP:
+              </Text>{' '}
+              {nightmareState.tonightTarget.name}
+            </Text>
+          ) : nightmareState.tonightSkipped ? (
+            <Text
+              style={{ color: '#B68AD9' }}
+              className="text-sm text-center mt-4 px-4 italic"
+            >
+              Nightmares saved.
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    );
+  }
+
+  const chargesLabel =
+    nightmareState.charges === 2
+      ? '2 NIGHTMARES LEFT'
+      : nightmareState.charges === 1
+        ? '1 NIGHTMARE LEFT'
+        : 'NIGHTMARES SPENT';
+
+  return (
+    <View className="flex-1">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
+        <Text
+          style={{ color: '#B68AD9' }}
+          className="text-base text-center mt-2 mb-1"
+        >
+          {isGhost
+            ? 'The Nightmare Wolf is choosing whom to put to sleep.'
+            : "Pick a villager to put to sleep. They won't be able to use their night power if they have one."}
+        </Text>
+        <Text className="text-wolf-muted text-xs tracking-widest text-center mb-2">
+          {chargesLabel}
+        </Text>
+        {nightmareState.prevTargets.length > 0 && (
+          <Text className="text-wolf-muted text-xs text-center mb-2 italic">
+            Already nightmared:{' '}
+            {nightmareState.prevTargets.map(t => t.name).join(', ')}
+          </Text>
+        )}
+        <View style={{ alignItems: 'center' }}>
+          <SeatingCircle
+            totalSeats={totalSeats}
+            players={alivePlayers}
+            meId={meId}
+            selectableIds={
+              new Set(targetables.map(t => t._id as unknown as string))
+            }
+            onPress={
+              submitting || pendingTarget
+                ? undefined
+                : p => handlePickTarget(p._id, p.name)
+            }
+          />
+        </View>
+      </ScrollView>
+
+      {!isGhost && (
+        <View
+          className="px-6"
+          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
+        >
+          <TouchableOpacity
+            onPress={handleSkip}
+            disabled={submitting || !!pendingTarget}
+            style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+            className="bg-wolf-card rounded-xl py-4 items-center"
+          >
+            <Text className="text-wolf-muted text-base font-bold tracking-widest">
+              SAVE FOR LATER
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {pendingTarget && (
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.92)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 32,
+          }}
+        >
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
+            PUT TO SLEEP
+          </Text>
+          <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
+            {pendingTarget.name.toUpperCase()}
+          </Text>
+          <Text className="text-wolf-muted text-sm text-center mb-10 px-4">
+            They cannot use their night power tonight. You only have two of
+            these, ever.
+          </Text>
+          <View className="flex-row" style={{ gap: 14 }}>
+            <TouchableOpacity
+              onPress={handleCancel}
+              disabled={submitting}
+              className="bg-wolf-card rounded-xl py-4 px-10"
+              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
+            >
+              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
+                NO
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleConfirm}
+              disabled={submitting}
+              style={{ opacity: submitting ? 0.4 : 1 }}
+              className="bg-wolf-accent rounded-xl py-4 px-10"
+            >
+              {submitting ? (
+                <ActivityIndicator color="#0F0F14" />
+              ) : (
+                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                  YES
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ───── Nightmare-blocked overlay ───────────────────────────────────────────
+//
+// Replaces the WaitingView for a living picker-role actor when they've been
+// nightmared this night. Renders only while the would-be active step is
+// running (server-side `nightmaredBlocking` flag), so it doesn't surface for
+// other steps in the same night.
+
+function NightmareBlockedView() {
+  return (
+    <View className="flex-1 items-center justify-center px-8">
+      <Text
+        style={{ color: '#7B52A8' }}
+        className="text-base font-bold tracking-widest mb-4"
+      >
+        NIGHTMARE
+      </Text>
+      <Text className="text-wolf-text text-3xl font-extrabold text-center mb-4">
+        YOU'VE BEEN PUT{'\n'}TO SLEEP
+      </Text>
+      <Text className="text-wolf-muted text-sm text-center px-4">
+        You're unable to wake in time to use your power.
+      </Text>
     </View>
   );
 }
