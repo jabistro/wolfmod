@@ -17,7 +17,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
-import { V1_ROLES, isSingletonRole } from '../data/v1Roles';
+import { V1_ROLES, isSingletonRole, isWolfTeam } from '../data/v1Roles';
 import { ROLES, CATEGORIES, roleSortKey, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
 import TimersConfigModal from '../components/TimersConfigModal';
@@ -246,7 +246,12 @@ export default function LobbyScreen() {
   const tooManyRoles = game.selectedRoles.length > game.playerCount;
   const tooFewRoles =
     game.selectedRoles.length > 0 && game.selectedRoles.length < game.playerCount;
-  const canStart = isHost && allSeated && rolesValid;
+  // Pre-game parity guard: if starting wolves already reach half the table, the
+  // wolves win on N1 before the first kill resolves. Counts the literal wolf
+  // roles only (isWolfTeam) — Cursed/Sasquatch/Doppelganger start village-team.
+  const wolfCount = game.selectedRoles.filter(isWolfTeam).length;
+  const wolfParity = wolfCount * 2 >= game.playerCount;
+  const canStart = isHost && allSeated && rolesValid && !wolfParity;
 
   function handleSeatTap(seatIndex: number) {
     if (!isHost) return;
@@ -653,6 +658,11 @@ export default function LobbyScreen() {
                   NEED MORE
                 </Text>
               )}
+              {!tooManyRoles && !tooFewRoles && wolfParity && (
+                <Text className="text-wolf-red text-xs font-bold tracking-widest">
+                  WOLF PARITY
+                </Text>
+              )}
             </View>
             <TouchableOpacity
               onPress={() => setBrowseRolesOpen(true)}
@@ -760,7 +770,9 @@ export default function LobbyScreen() {
                       ? `Need ${game.playerCount - game.selectedRoles.length} more role${game.playerCount - game.selectedRoles.length === 1 ? '' : 's'}.`
                       : !rolesValid
                         ? `Pick ${game.playerCount} roles.`
-                        : ''}
+                        : wolfParity
+                          ? `Too many wolves — wolves must be less than half the table (max ${Math.ceil(game.playerCount / 2) - 1} for ${game.playerCount} players).`
+                          : ''}
               </Text>
             )}
           </View>

@@ -454,6 +454,15 @@ export const startGame = mutation({
         `Need ${game.playerCount} roles selected, have ${game.selectedRoles.length}.`,
       );
     }
+    // Pre-game parity guard. Starting wolves at or above half the table means
+    // the wolves win on N1 before the first kill — block instead of letting
+    // the host start a game that's already over.
+    const wolfCount = game.selectedRoles.filter(isWolfTeam).length;
+    if (wolfCount * 2 >= game.playerCount) {
+      throw new Error(
+        `Too many wolves (${wolfCount} of ${game.playerCount}) — wolves must be less than half the table.`,
+      );
+    }
 
     // Shuffle roles and assign one per seat. Bot players are pre-confirmed
     // for the reveal step so testing with one real phone + bots can proceed
