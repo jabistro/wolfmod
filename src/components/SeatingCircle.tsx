@@ -34,6 +34,12 @@ interface SeatingCircleProps {
    */
   selectedIds?: ReadonlySet<string>;
   /**
+   * Color tone for the selected ring. Defaults to 'neutral' (white) so the
+   * gold self-ring stays the only gold marker on the circle. The wolves'
+   * kill picker passes 'danger' (red) for the chosen victim.
+   */
+  selectedVariant?: 'neutral' | 'danger';
+  /**
    * If provided, only seats in this set are tappable. Other seats render
    * dimmed and ignore taps. Useful for role-specific picker rules
    * (wolves can't kill wolves, BG can't repeat last protected, etc.).
@@ -92,7 +98,10 @@ export function SeatingCircle({
   onPress,
   size = DEFAULT_CIRCLE_SIZE,
   centerOverlay,
+  selectedVariant = 'neutral',
 }: SeatingCircleProps) {
+  const selectedBorder = selectedVariant === 'danger' ? '#B03A2E' : '#F0EDE8';
+  const selectedBackground = selectedVariant === 'danger' ? '#3A1614' : '#33333F';
   const playerBySeat = new Map<number, SeatingPlayer>();
   for (const p of players) {
     if (typeof p.seatPosition === 'number') {
@@ -127,13 +136,13 @@ export function SeatingCircle({
         const borderColor = isDead
           ? '#2A2A38'
           : isSelected
-            ? '#D4A017'
+            ? selectedBorder
             : isMe
               ? '#D4A017'
               : isSelectable
                 ? '#3A3A48'
                 : '#2A2A38';
-        const backgroundColor = isSelected ? '#3A2A14' : '#22222F';
+        const backgroundColor = isSelected ? selectedBackground : '#22222F';
         const textColor = isDead
           ? '#5A5560'
           : isSelectable

@@ -956,7 +956,7 @@ function WolvesPicker({
             {killsSoFar.length > 0 && (
               <Text className="text-wolf-muted text-xs text-center mt-2">
                 {allKillsLocked ? 'Victims: ' : 'Already taken: '}
-                <Text className="text-wolf-accent">
+                <Text className="text-wolf-red">
                   {killsSoFar.map(k => k.targetName).join(', ')}
                 </Text>
               </Text>
@@ -994,7 +994,7 @@ function WolvesPicker({
                 </Text>
                 <Text
                   className={
-                    targetName ? 'text-wolf-accent text-sm' : 'text-wolf-muted text-sm'
+                    targetName ? 'text-wolf-red text-sm' : 'text-wolf-muted text-sm'
                   }
                 >
                   {targetName ?? 'no vote'}
@@ -1013,6 +1013,7 @@ function WolvesPicker({
             players={alivePlayers}
             meId={meId}
             selectedId={myVote}
+            selectedVariant="danger"
             selectableIds={selectableForThisKill}
             onPress={
               !submitting && !consensus && !allKillsLocked
@@ -2740,16 +2741,26 @@ function BodyguardPicker({
 }) {
   const submitProtect = useMutation(api.night.submitBGProtect);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingTarget, setPendingTarget] = useState<{
+    id: Id<'players'>;
+    name: string;
+  } | null>(null);
 
-  async function handleProtect(targetId: Id<'players'>) {
-    if (submitting || bgState.hasActedThisNight) return;
+  function handlePickTarget(targetId: Id<'players'>, name: string) {
+    if (submitting || pendingTarget || bgState.hasActedThisNight) return;
+    setPendingTarget({ id: targetId, name });
+  }
+
+  async function handleConfirm() {
+    if (!pendingTarget || submitting) return;
     setSubmitting(true);
     try {
       await submitProtect({
         gameId,
         callerDeviceClientId: deviceClientId,
-        targetPlayerId: targetId,
+        targetPlayerId: pendingTarget.id,
       });
+      setPendingTarget(null);
     } catch (e) {
       showAlert(
         'Could not protect',
@@ -2758,6 +2769,11 @@ function BodyguardPicker({
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleCancel() {
+    if (submitting) return;
+    setPendingTarget(null);
   }
 
   // After acting, hold the screen until the dwell ends — same cloaking
@@ -2818,10 +2834,66 @@ function BodyguardPicker({
             selectableIds={
               new Set(targetables.map(t => t._id as unknown as string))
             }
-            onPress={submitting ? undefined : p => handleProtect(p._id)}
+            onPress={
+              submitting || pendingTarget
+                ? undefined
+                : p => handlePickTarget(p._id, p.name)
+            }
           />
         </View>
       </ScrollView>
+
+      {pendingTarget && (
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.92)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 32,
+          }}
+        >
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
+            PROTECT
+          </Text>
+          <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
+            {pendingTarget.name.toUpperCase()}
+          </Text>
+          <Text className="text-wolf-muted text-sm text-center mb-10">
+            Are you sure?
+          </Text>
+          <View className="flex-row" style={{ gap: 14 }}>
+            <TouchableOpacity
+              onPress={handleCancel}
+              disabled={submitting}
+              className="bg-wolf-card rounded-xl py-4 px-10"
+              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
+            >
+              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
+                NO
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleConfirm}
+              disabled={submitting}
+              style={{ opacity: submitting ? 0.4 : 1 }}
+              className="bg-wolf-accent rounded-xl py-4 px-10"
+            >
+              {submitting ? (
+                <ActivityIndicator color="#0F0F14" />
+              ) : (
+                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                  YES
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
