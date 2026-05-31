@@ -528,20 +528,21 @@ async function autoResolveStep(
       return;
     }
     case 'seer': {
-      const seer = actors[0];
-      const candidates = alivePlayers.filter(p => p._id !== seer._id);
-      const target = pickRandom(candidates);
-      if (!target) return;
-      const team = seerSees(target.role || '');
-      await ctx.db.insert('nightActions', {
-        gameId,
-        nightNumber,
-        actorPlayerId: seer._id,
-        actionType: 'seer_check',
-        targetPlayerId: target._id,
-        result: { team },
-        resolvedAt: now,
-      });
+      for (const seer of actors) {
+        const candidates = alivePlayers.filter(p => p._id !== seer._id);
+        const target = pickRandom(candidates);
+        if (!target) continue;
+        const team = seerSees(target.role || '');
+        await ctx.db.insert('nightActions', {
+          gameId,
+          nightNumber,
+          actorPlayerId: seer._id,
+          actionType: 'seer_check',
+          targetPlayerId: target._id,
+          result: { team },
+          resolvedAt: now,
+        });
+      }
       return;
     }
     case 'pi': {
@@ -635,26 +636,27 @@ async function autoResolveStep(
       return;
     }
     case 'bodyguard': {
-      const bg = actors[0];
-      const lastProtected = bg.roleState?.bgLastProtected as
-        | Id<'players'>
-        | undefined;
-      const selfUsed = !!bg.roleState?.bgSelfProtectUsed;
-      const candidates = alivePlayers.filter(p => {
-        if (lastProtected && p._id === lastProtected) return false;
-        if (p._id === bg._id && selfUsed) return false;
-        return true;
-      });
-      const target = pickRandom(candidates);
-      if (!target) return;
-      await ctx.db.insert('nightActions', {
-        gameId,
-        nightNumber,
-        actorPlayerId: bg._id,
-        actionType: 'bg_protect',
-        targetPlayerId: target._id,
-        resolvedAt: now,
-      });
+      for (const bg of actors) {
+        const lastProtected = bg.roleState?.bgLastProtected as
+          | Id<'players'>
+          | undefined;
+        const selfUsed = !!bg.roleState?.bgSelfProtectUsed;
+        const candidates = alivePlayers.filter(p => {
+          if (lastProtected && p._id === lastProtected) return false;
+          if (p._id === bg._id && selfUsed) return false;
+          return true;
+        });
+        const target = pickRandom(candidates);
+        if (!target) continue;
+        await ctx.db.insert('nightActions', {
+          gameId,
+          nightNumber,
+          actorPlayerId: bg._id,
+          actionType: 'bg_protect',
+          targetPlayerId: target._id,
+          resolvedAt: now,
+        });
+      }
       return;
     }
     case 'huntress': {
@@ -1940,12 +1942,24 @@ export async function enterStep(
     // Pending reveals were written earlier during the day/morning death
     // sites; this step just dwells so the converted player can read them.
     await stampDoppelgangerRevealMarkers(ctx, gameId, game.nightNumber, step);
-  } else if (
-    (actors.length > 0 && actors.every(a => isBotName(a.name))) ||
-    witchHasNothingLeft ||
-    mentalistShorthanded
-  ) {
+  } else if (witchHasNothingLeft || mentalistShorthanded) {
+    // Whole-step no-op: every actor (human or bot) gets a sleep-through row so
+    // the step can advance with no UI interaction.
     await autoResolveStep(ctx, gameId, step, actors, alive, game.nightNumber);
+  } else if (step === 'wolves') {
+    // Wolves share a single kill row, so a single bot can't act on behalf of a
+    // mixed pack — only auto-resolve when the whole pack is bots.
+    if (actors.length > 0 && actors.every(a => isBotName(a.name))) {
+      await autoResolveStep(ctx, gameId, step, actors, alive, game.nightNumber);
+    }
+  } else {
+    // Independent-actor steps (bodyguard, huntress, witch, …): each bot
+    // submits its own no-op so mixed games (e.g. 1 human BG + 1 bot BG)
+    // don't hang waiting on the bot. Humans still submit via the picker UI.
+    const botActors = actors.filter(a => isBotName(a.name));
+    if (botActors.length > 0) {
+      await autoResolveStep(ctx, gameId, step, botActors, alive, game.nightNumber);
+    }
   }
 
   // Schedule the dwell-end tick. If a real player acts before then, their
@@ -3644,12 +3658,21 @@ export const refreshStep = mutation({
         actionType: 'wolf_blocked',
         resolvedAt: Date.now(),
       });
-    } else if (
-      (actors.length > 0 && actors.every(a => isBotName(a.name))) ||
-      witchHasNothingLeft ||
-      mentalistShorthanded
-    ) {
+    } else if (witchHasNothingLeft || mentalistShorthanded) {
+      // Whole-step no-op: every actor (human or bot) gets a sleep-through row.
       await autoResolveStep(ctx, args.gameId, step, actors, alive, game.nightNumber);
+    } else if (step === 'wolves') {
+      // Wolves share a single kill row — auto-resolve only when the whole pack is bots.
+      if (actors.length > 0 && actors.every(a => isBotName(a.name))) {
+        await autoResolveStep(ctx, args.gameId, step, actors, alive, game.nightNumber);
+      }
+    } else {
+      // Per-actor auto-resolve so mixed games (humans + bots in the same role)
+      // don't hang on the bot's missing submission.
+      const botActors = actors.filter(a => isBotName(a.name));
+      if (botActors.length > 0) {
+        await autoResolveStep(ctx, args.gameId, step, botActors, alive, game.nightNumber);
+      }
     }
 
     await ctx.scheduler.runAfter(dwellMs, internal.night.dwellTick, {
