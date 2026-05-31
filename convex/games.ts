@@ -1254,11 +1254,13 @@ export const endGameView = query({
         // weren't with the pack when the choice was made. Ex-Sasquatch
         // wolves flip at the START of the night they convert (before the
         // wolves step), so they ARE with the pack on that night — exclusion
-        // is for nights STRICTLY before. Ex-Doppelgangers split on
-        // triggerPhase: 'day' fires before the next night begins (with the
-        // pack on conversion night, exclude STRICTLY BEFORE), 'night' fires
-        // at the dopp_dusk step AFTER the wolves act (not with the pack on
-        // conversion night, exclude AT OR BEFORE).
+        // is for nights STRICTLY before. Ex-Doppelgangers join the pack the
+        // night AFTER their conversion fires regardless of triggerPhase:
+        //   - 'day' fires during day D, where game.nightNumber there is
+        //     D-1, so firedAtNight=D-1 and they first wolves on N=D.
+        //   - 'night' fires at dopp_dusk after the wolves step has already
+        //     resolved, so firedAtNight=N and they first wolves on N+1.
+        // Both reduce to "exclude any night ≤ dopp.nightNumber".
         for (const p of players) {
           if (!p.role || !isWolfTeam(p.role)) continue;
           const conversionNight = cursedConversionByPlayer.get(p._id);
@@ -1270,12 +1272,8 @@ export const endGameView = query({
             continue;
           }
           const dopp = doppelgangerConversionByPlayer.get(p._id);
-          if (dopp != null) {
-            const cutoff =
-              dopp.triggerPhase === 'day'
-                ? dopp.nightNumber
-                : dopp.nightNumber + 1;
-            if (a.nightNumber < cutoff) continue;
+          if (dopp != null && a.nightNumber <= dopp.nightNumber) {
+            continue;
           }
           const death = deathByPlayer.get(p._id);
           if (death && a.nightNumber > death.nightNumber) continue;
@@ -1298,12 +1296,8 @@ export const endGameView = query({
             continue;
           }
           const dopp = doppelgangerConversionByPlayer.get(p._id);
-          if (dopp != null) {
-            const cutoff =
-              dopp.triggerPhase === 'day'
-                ? dopp.nightNumber
-                : dopp.nightNumber + 1;
-            if (a.nightNumber < cutoff) continue;
+          if (dopp != null && a.nightNumber <= dopp.nightNumber) {
+            continue;
           }
           const death = deathByPlayer.get(p._id);
           if (death && a.nightNumber > death.nightNumber) continue;

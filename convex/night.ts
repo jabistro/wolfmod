@@ -1805,6 +1805,11 @@ async function stampDoppelgangerRevealMarkers(
       nightNumber,
       actorPlayerId: p._id,
       actionType: 'doppelganger_conversion_reveal',
+      // Tag the originating step so buildNightLog can emit the row once
+      // under its own iteration. Without this, both the dawn and dusk
+      // iterations pick the same row up by actionType and React renders
+      // two children with the same key.
+      result: { step },
       resolvedAt: now,
     });
   }
@@ -4224,7 +4229,9 @@ async function buildNightLog(
 
     if (step === 'doppelganger_dawn' || step === 'doppelganger_dusk') {
       const rows = allActions.filter(
-        a => a.actionType === 'doppelganger_conversion_reveal',
+        a =>
+          a.actionType === 'doppelganger_conversion_reveal' &&
+          (a.result?.step ?? 'doppelganger_dusk') === step,
       );
       for (const action of rows) {
         const actor = action.actorPlayerId
