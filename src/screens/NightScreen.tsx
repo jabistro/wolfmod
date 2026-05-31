@@ -132,7 +132,7 @@ export default function NightScreen() {
     nightmareWolfState,
     nightmaredBlocking,
     targetables,
-    stepActorStatus,
+    nightLog,
   } = view;
 
   // Defensive: if phase has already moved on, the effect above will navigate.
@@ -319,29 +319,8 @@ export default function NightScreen() {
           isGhost={isGhost}
         />
       )}
-    </>
-  );
 
-  // True when one of the picker conditionals will actually render something
-  // for a ghost spectator. Used to fall back to a "waiting on X" view during
-  // brief windows when a step is active but no actor state is populated
-  // (e.g. role's actor is dead and the engine is dwelling for cloak).
-  const hasPickerForGhost = !!(
-    (game.nightStep === 'wolves' && wolfState) ||
-    (game.nightStep === 'seer' && seerHistory != null) ||
-    (game.nightStep === 'pi' && piState) ||
-    (game.nightStep === 'mentalist' && mentalistState) ||
-    (game.nightStep === 'witch' && witchState) ||
-    (game.nightStep === 'leprechaun' && leprechaunState) ||
-    (game.nightStep === 'bodyguard' && bgState) ||
-    (game.nightStep === 'huntress' && huntressState) ||
-    (game.nightStep === 'revealer' && revealerState) ||
-    (game.nightStep === 'reviler' && revilerState) ||
-    (game.nightStep === 'cursed_conversion' && cursedConversionState) ||
-    ((game.nightStep === 'doppelganger_dawn' ||
-      game.nightStep === 'doppelganger_dusk') &&
-      doppelgangerRevealState) ||
-    (game.nightStep === 'nightmare_wolf' && nightmareWolfState)
+    </>
   );
 
   return (
@@ -371,27 +350,32 @@ export default function NightScreen() {
             )}
           </>
         )
-      ) : (
-        <View
-          className="flex-1"
-          pointerEvents="none"
-          style={{ opacity: 0.85 }}
-        >
-          {!game.nightStep ? (
-            <View className="flex-1 items-center justify-center px-8">
-              <Text className="text-wolf-muted text-sm text-center">
-                You are out of the game. The night unfolds without you.
-              </Text>
-            </View>
-          ) : hasPickerForGhost ? (
-            pickerTree
-          ) : (
-            <GhostStepFallback
-              stepActorStatus={stepActorStatus}
-              stepLabel={stepLabel}
-            />
-          )}
+      ) : !game.nightStep ? (
+        <View className="flex-1 items-center justify-center px-8">
+          <Text className="text-wolf-muted text-sm text-center">
+            You are out of the game. The night unfolds without you.
+          </Text>
         </View>
+      ) : game.nightStep === 'cursed_conversion' &&
+        cursedConversionState?.isMine ? (
+        <CursedRevealView
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          isMine={cursedConversionState.isMine}
+          acknowledged={cursedConversionState.acknowledged}
+          convertedNames={cursedConversionState.convertedNames}
+        />
+      ) : (game.nightStep === 'doppelganger_dawn' ||
+          game.nightStep === 'doppelganger_dusk') &&
+        doppelgangerRevealState?.isMine ? (
+        <DoppelgangerRevealView
+          isMine={doppelgangerRevealState.isMine}
+          fromRole={doppelgangerRevealState.fromRole}
+          toRole={doppelgangerRevealState.toRole}
+          conversions={doppelgangerRevealState.conversions}
+        />
+      ) : (
+        <NightLogView entries={nightLog ?? []} />
       )}
 
       <SasquatchRevealOverlay
@@ -495,63 +479,87 @@ function HostStallOverride({
   );
 }
 
-// ───── Ghost fallback view ─────────────────────────────────────────────────
+// ───── Ghost night log ─────────────────────────────────────────────────────
 //
-// Shown to a dead spectator when the current step has no picker to render for
-// them — either because the role's actor is dead (no XState populated for any
-// alive actor on this step) or because the actor is alive but used their
-// one-time power (PI / Huntress get filtered out of activePlayersForStep
-// once their used-flag flips). Replaces the misleading "X IS AWAKE" spinner
-// with the actual reason the step is quiet.
+// The full ghost-spectator view during a live night. Renders one card per
+// recorded nightAction in wake-order — wolves → nightmare wolf → seer → …
+// → reviler — plus muted "no one to act tonight" system entries for
+// in-game steps with no eligible actor (all role-players dead / spent /
+// nightmared). Updates reactively as the engine writes rows; auto-scrolls
+// to the newest entry so the latest action stays in view without manual
+// scrolling. Replaces the per-role picker mirroring that the ghost UX
+// used to do — since we can't see mid-tap decisions anyway, the resolved
+// info is what matters. See [[wolfmod-ghost-spectator]] for the design
+// rationale.
 
-function GhostStepFallback({
-  stepActorStatus,
-  stepLabel,
+function NightLogView({
+  entries,
 }: {
-  stepActorStatus:
-    | {
-        roleName: string;
-        status: 'present' | 'eliminated' | 'powerUsed';
-        actorName: string | null;
-      }
-    | null;
-  stepLabel: string | null;
+  entries: ReadonlyArray<{
+    id: string;
+    roleLabel: string;
+    actorName: string | null;
+    statusLabel: string;
+    statusColor: string;
+    kind: 'action' | 'system';
+  }>;
 }) {
-  if (stepActorStatus?.status === 'eliminated') {
+  const scrollRef = useRef<ScrollView>(null);
+  useEffect(() => {
+    // Land on the newest entry whenever the log grows. Latest action is the
+    // one a returning spectator cares about most.
+    const t = setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 50);
+    return () => clearTimeout(t);
+  }, [entries.length]);
+
+  if (entries.length === 0) {
     return (
       <View className="flex-1 items-center justify-center px-8">
-        {stepActorStatus.actorName ? (
-          <Text className="text-wolf-text text-xl font-extrabold tracking-wide text-center">
-            {stepActorStatus.actorName.toUpperCase()}
-          </Text>
-        ) : null}
-        <Text className="text-wolf-muted text-sm text-center mt-2">
-          The {stepActorStatus.roleName} has been eliminated.
+        <ActivityIndicator color="#D4A017" />
+        <Text
+          className="text-wolf-muted text-sm italic text-center mt-6"
+          style={{ alignSelf: 'stretch' }}
+        >
+          The night is just beginning…
         </Text>
       </View>
     );
   }
-  if (stepActorStatus?.status === 'powerUsed') {
-    return (
-      <View className="flex-1 items-center justify-center px-8">
-        {stepActorStatus.actorName ? (
-          <Text className="text-wolf-text text-xl font-extrabold tracking-wide text-center">
-            {stepActorStatus.actorName.toUpperCase()}
-          </Text>
-        ) : null}
-        <Text className="text-wolf-muted text-sm text-center mt-2">
-          The {stepActorStatus.roleName}'s power has already been used.
-        </Text>
-      </View>
-    );
-  }
+
   return (
-    <View className="flex-1 items-center justify-center px-8">
-      <ActivityIndicator color="#D4A017" />
-      <Text className="text-wolf-muted text-sm text-center mt-6">
-        {stepLabel ? `${stepLabel}…` : 'The night unfolds…'}
-      </Text>
-    </View>
+    <ScrollView
+      ref={scrollRef}
+      className="flex-1"
+      contentContainerStyle={{
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        paddingBottom: 24,
+      }}
+    >
+      {entries.map(e => (
+        <View
+          key={e.id}
+          className="bg-wolf-card rounded-xl px-4 py-3 mb-2"
+        >
+          <Text className="text-wolf-muted text-[10px] font-bold tracking-widest">
+            {e.roleLabel.toUpperCase()}
+          </Text>
+          {e.actorName ? (
+            <Text className="text-wolf-text text-sm font-extrabold tracking-wide mt-0.5">
+              {e.actorName.toUpperCase()}
+            </Text>
+          ) : null}
+          <Text
+            className={`text-sm mt-0.5 ${e.kind === 'system' ? 'italic' : 'font-semibold'}`}
+            style={{ color: e.statusColor }}
+          >
+            {e.statusLabel}
+          </Text>
+        </View>
+      ))}
+    </ScrollView>
   );
 }
 
@@ -652,9 +660,9 @@ function CursedRevealView({
           <Text className="text-wolf-red">ARE</Text>
           {' STILL ALIVE. '}
           <Text className="text-wolf-red">A</Text>
-          {' CURSE CONVERTS YOU INTO A '}
+          {' CURSE CONVERTED YOU INTO A '}
           <Text className="text-wolf-red">WOLF</Text>
-          {' NOW.'}
+          {'.'}
         </Text>
         {!isMine && convertedNames.length > 0 && (
           <Text className="text-wolf-muted text-xs tracking-widest mt-6 text-center px-4">

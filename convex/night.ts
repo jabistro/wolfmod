@@ -3757,6 +3757,534 @@ export const beginDay = mutation({
 
 // ───── Queries ──────────────────────────────────────────────────────────────
 
+// Color tokens for the ghost night log. Gold for action verbs, red for
+// wolf-flavor results, blue for village-flavor results, muted grey for
+// passes / system entries.
+const LOG_COLOR_ACTION = '#D4A017';
+const LOG_COLOR_WOLF = '#B03A2E';
+const LOG_COLOR_VILLAGE = '#5BA0E5';
+const LOG_COLOR_NEUTRAL = '#8A8590';
+// Lavender used by NightmareWolfPicker (src/screens/NightScreen.tsx) — reused
+// here so the "Has been nightmared." log line picks up the same theming.
+const LOG_COLOR_NIGHTMARE = '#B68AD9';
+
+type NightLogEntry = {
+  id: string;
+  roleLabel: string;
+  actorName: string | null;
+  statusLabel: string;
+  statusColor: string;
+  kind: 'action' | 'system';
+};
+
+const STEP_ROLE_LABEL: Record<NightStep, string> = {
+  wolves: 'Wolves',
+  nightmare_wolf: 'Nightmare Wolf',
+  seer: 'Seer',
+  pi: 'P.I.',
+  mentalist: 'Mentalist',
+  witch: 'Witch',
+  leprechaun: 'Leprechaun',
+  bodyguard: 'Bodyguard',
+  huntress: 'Huntress',
+  revealer: 'Revealer',
+  reviler: 'Reviler',
+  cursed_conversion: 'Cursed',
+  doppelganger_dawn: 'Doppelganger',
+  doppelganger_dusk: 'Doppelganger',
+};
+
+// Maps each actor-driven night step to the role name a player must hold to
+// be an actor for it. Used to build the per-actor card list — for every
+// player currently holding the role, we emit one card per night (acted /
+// eliminated / nightmared / spent / waiting).
+const STEP_TO_ROLE: Partial<Record<NightStep, string>> = {
+  nightmare_wolf: 'Nightmare Wolf',
+  seer: 'Seer',
+  pi: 'Paranormal Investigator',
+  mentalist: 'Mentalist',
+  witch: 'Witch',
+  leprechaun: 'Leprechaun',
+  bodyguard: 'Bodyguard',
+  huntress: 'Huntress',
+  revealer: 'Revealer',
+  reviler: 'Reviler',
+};
+
+/**
+ * Build the single ghost-log card for one role-holder on one step. Returns
+ * null if they're alive, eligible, and haven't acted yet (waiting state —
+ * the wake-order header alone tells the ghost which role is up). Otherwise
+ * folds the actor's state into one card: their action if they took it,
+ * "Chooses not to use power" for active skips, or a system entry naming why
+ * they can't act (eliminated / nightmared / power already used).
+ */
+function buildActorCardForStep(
+  step: NightStep,
+  actor: Player,
+  allActions: Doc<'nightActions'>[],
+  nightNumber: number,
+  nameOf: (id?: Id<'players'>) => string,
+  roleOf: (id?: Id<'players'>) => string,
+): NightLogEntry | null {
+  // Tag converted Doppelgangers in the role label so ghosts can distinguish
+  // the original role-holder from the convert — e.g. two "P.I." cards become
+  // "P.I." and "P.I. (Doppelganger)".
+  const isConvertedDoppelganger =
+    actor.originalRole === 'Doppelganger' && actor.role !== 'Doppelganger';
+  const roleLabel = isConvertedDoppelganger
+    ? `${STEP_ROLE_LABEL[step]} (Doppelganger)`
+    : STEP_ROLE_LABEL[step];
+  const findRow = (type: string) =>
+    allActions.find(
+      a => a.actorPlayerId === actor._id && a.actionType === type,
+    );
+  const eliminated = !actor.alive;
+  const nightmared = !eliminated && isNightmared(actor, nightNumber);
+
+  const entry = (
+    statusLabel: string,
+    statusColor: string,
+    kind: 'action' | 'system' = 'action',
+    overrideId?: string,
+  ): NightLogEntry => ({
+    id:
+      overrideId ?? `${step}-${actor._id as unknown as string}-${nightNumber}`,
+    roleLabel,
+    actorName: actor.name,
+    statusLabel,
+    statusColor,
+    kind,
+  });
+
+  const eliminatedEntry = () =>
+    entry('This player has been eliminated.', LOG_COLOR_NEUTRAL, 'system');
+  const nightmaredEntry = () =>
+    entry('Has been nightmared.', LOG_COLOR_NIGHTMARE, 'system');
+  const passEntry = (row: Doc<'nightActions'>) =>
+    entry(
+      'Chooses not to use power',
+      LOG_COLOR_NEUTRAL,
+      'action',
+      row._id as unknown as string,
+    );
+  const spentEntry = (text: string) =>
+    entry(text, LOG_COLOR_NEUTRAL, 'system');
+
+  switch (step) {
+    case 'nightmare_wolf': {
+      const put = findRow('nightmare_put_to_sleep');
+      if (put?.targetPlayerId) {
+        return entry(
+          `Put ${nameOf(put.targetPlayerId as Id<'players'>)} to sleep`,
+          LOG_COLOR_ACTION,
+          'action',
+          put._id as unknown as string,
+        );
+      }
+      const skip = findRow('nightmare_skip');
+      if (skip) return passEntry(skip);
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      const usedCount = ((actor.roleState?.nightmaresUsed as unknown[]) ?? [])
+        .length;
+      if (usedCount >= 2) return spentEntry('All charges used.');
+      return null;
+    }
+    case 'seer': {
+      const check = findRow('seer_check');
+      if (check?.targetPlayerId) {
+        const team = check.result?.team;
+        const teamLabel = team === 'wolf' ? 'WOLF' : 'VILLAGE';
+        return entry(
+          `Investigated ${nameOf(check.targetPlayerId as Id<'players'>)} — ${teamLabel}`,
+          team === 'wolf' ? LOG_COLOR_WOLF : LOG_COLOR_VILLAGE,
+          'action',
+          check._id as unknown as string,
+        );
+      }
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      return null;
+    }
+    case 'pi': {
+      const check = findRow('pi_check');
+      if (check?.targetPlayerId) {
+        const team = check.result?.team;
+        const teamLabel = team === 'wolf' ? 'WOLF NEARBY' : 'NO WOLVES';
+        return entry(
+          `Trio-checked ${nameOf(check.targetPlayerId as Id<'players'>)} — ${teamLabel}`,
+          team === 'wolf' ? LOG_COLOR_WOLF : LOG_COLOR_VILLAGE,
+          'action',
+          check._id as unknown as string,
+        );
+      }
+      const skip = findRow('pi_skip');
+      if (skip) return passEntry(skip);
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      if (actor.roleState?.piUsed) return spentEntry('Power has been used.');
+      return null;
+    }
+    case 'mentalist': {
+      const check = findRow('mentalist_check');
+      if (check?.result) {
+        const firstId = check.result.firstId as Id<'players'>;
+        const secondId = check.result.secondId as Id<'players'>;
+        const same = check.result.sameTeam;
+        const teamLabel = same === 'same' ? 'SAME TEAM' : 'DIFFERENT TEAMS';
+        return entry(
+          `Compared ${nameOf(firstId)} & ${nameOf(secondId)} — ${teamLabel}`,
+          same === 'same' ? LOG_COLOR_VILLAGE : LOG_COLOR_WOLF,
+          'action',
+          check._id as unknown as string,
+        );
+      }
+      const skip = findRow('mentalist_skip');
+      if (skip) {
+        // Mentalist skip = "no valid pair tonight" (forced by house rules,
+        // not an active choice), keep its descriptive label.
+        return entry(
+          'No valid pair tonight',
+          LOG_COLOR_NEUTRAL,
+          'action',
+          skip._id as unknown as string,
+        );
+      }
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      return null;
+    }
+    case 'witch': {
+      const save = findRow('witch_save');
+      const poison = findRow('witch_poison');
+      const done = findRow('witch_done');
+      if (done) {
+        const parts: string[] = [];
+        if (save) parts.push('Used the save potion');
+        if (poison?.targetPlayerId) {
+          parts.push(
+            `Poisoned ${nameOf(poison.targetPlayerId as Id<'players'>)}`,
+          );
+        }
+        if (parts.length === 0) {
+          // Done with neither save nor poison this night. Distinguish "chose
+          // not to" from "had nothing left" using carryover flags.
+          const saveSpentBefore = !!actor.roleState?.witchSaveUsed && !save;
+          const poisonSpentBefore =
+            !!actor.roleState?.witchPoisonUsed && !poison;
+          if (saveSpentBefore && poisonSpentBefore) {
+            return spentEntry('All potions used.');
+          }
+          return passEntry(done);
+        }
+        return entry(
+          parts.join('  ·  '),
+          poison ? LOG_COLOR_WOLF : LOG_COLOR_VILLAGE,
+          'action',
+          done._id as unknown as string,
+        );
+      }
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      if (actor.roleState?.witchSaveUsed && actor.roleState?.witchPoisonUsed) {
+        return spentEntry('All potions used.');
+      }
+      return null;
+    }
+    case 'leprechaun': {
+      const redirect = findRow('leprechaun_redirect');
+      if (redirect) {
+        const dir = redirect.result?.direction;
+        if (dir === 'L' || dir === 'R') {
+          const arrow = dir === 'L' ? 'left' : 'right';
+          const t = nameOf(redirect.result?.newTargetId as Id<'players'>);
+          return entry(
+            `Redirected the kill ${arrow} to ${t}`,
+            LOG_COLOR_ACTION,
+            'action',
+            redirect._id as unknown as string,
+          );
+        }
+        return passEntry(redirect);
+      }
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      return null;
+    }
+    case 'bodyguard': {
+      const protect = findRow('bg_protect');
+      if (protect?.targetPlayerId) {
+        return entry(
+          `Protected ${nameOf(protect.targetPlayerId as Id<'players'>)}`,
+          LOG_COLOR_VILLAGE,
+          'action',
+          protect._id as unknown as string,
+        );
+      }
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      return null;
+    }
+    case 'huntress': {
+      const shot = findRow('huntress_shot');
+      if (shot?.targetPlayerId) {
+        return entry(
+          `Shot ${nameOf(shot.targetPlayerId as Id<'players'>)}`,
+          LOG_COLOR_WOLF,
+          'action',
+          shot._id as unknown as string,
+        );
+      }
+      const skip = findRow('huntress_skip');
+      if (skip) return passEntry(skip);
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      if (actor.roleState?.huntressUsed)
+        return spentEntry('Power has been used.');
+      return null;
+    }
+    case 'revealer': {
+      const shot = findRow('revealer_shot');
+      if (shot?.targetPlayerId) {
+        const tId = shot.targetPlayerId as Id<'players'>;
+        const t = nameOf(tId);
+        const r = roleOf(tId);
+        return entry(
+          r ? `Revealed ${t} — ${r}` : `Revealed ${t}`,
+          LOG_COLOR_ACTION,
+          'action',
+          shot._id as unknown as string,
+        );
+      }
+      const skip = findRow('revealer_skip');
+      if (skip) return passEntry(skip);
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      return null;
+    }
+    case 'reviler': {
+      const shot = findRow('reviler_shot');
+      if (shot?.targetPlayerId) {
+        return entry(
+          `Cursed ${nameOf(shot.targetPlayerId as Id<'players'>)}`,
+          LOG_COLOR_WOLF,
+          'action',
+          shot._id as unknown as string,
+        );
+      }
+      const skip = findRow('reviler_skip');
+      if (skip) return passEntry(skip);
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Builds the per-actor / per-event ghost log. Walks NIGHT_STEPS up to and
+ * including the current step:
+ *
+ * - For each *actor-driven* step in the game, emits one card per player
+ *   currently holding the role (sorted by seat). The card either renders
+ *   their action, "Chooses not to use power" for an active skip, or a
+ *   system entry naming why they can't act ("This player has been
+ *   eliminated.", "Has been nightmared.", "Power has been used.", etc.).
+ *   Alive eligible actors who haven't acted yet emit no card — the
+ *   wake-order header alone tells the ghost which role is up.
+ *
+ * - For the *wolves* step, emits "The pack" cards keyed off wolf_kill /
+ *   wolf_blocked rows, plus standalone Sasquatch flip cards.
+ *
+ * - For *cursed_conversion* / *doppelganger_dawn* / *doppelganger_dusk*,
+ *   emits cards only when an actual conversion event row exists. The step
+ *   header is deliberately neutral (THE VILLAGE AWAITS DAWN) so the ghost
+ *   isn't tipped off that a conversion might be in progress.
+ */
+async function buildNightLog(
+  ctx: QueryCtx,
+  gameId: Id<'games'>,
+  nightNumber: number,
+  currentStep: NightStep,
+  selectedRoles: string[],
+  players: Player[],
+): Promise<NightLogEntry[]> {
+  const allActions = await ctx.db
+    .query('nightActions')
+    .withIndex('by_game_night', q =>
+      q.eq('gameId', gameId).eq('nightNumber', nightNumber),
+    )
+    .collect();
+  const playerById = new Map(players.map(p => [p._id, p]));
+  const nameOf = (id?: Id<'players'>) => {
+    if (!id) return '';
+    return playerById.get(id as Id<'players'>)?.name ?? 'unknown';
+  };
+  const roleOf = (id?: Id<'players'>) => {
+    if (!id) return '';
+    return playerById.get(id as Id<'players'>)?.role ?? '';
+  };
+
+  const currentIdx = NIGHT_STEPS.indexOf(currentStep);
+  if (currentIdx < 0) return [];
+
+  const log: NightLogEntry[] = [];
+  let wolfKillSeen = 0;
+
+  for (let i = 0; i <= currentIdx; i++) {
+    const step = NIGHT_STEPS[i];
+    if (!stepIsInGame(step, selectedRoles)) continue;
+
+    if (step === 'wolves') {
+      // Collective pack actions: kill rows + diseased-block + sasquatch flip.
+      // Surface the wolves by name on the card so ghosts know exactly who
+      // the pack is. Sasquatch / Cursed conversions that haven't fired yet
+      // this night aren't yet in the wolf-team — they'll show on their
+      // first night as wolves.
+      const wolfNames =
+        players
+          .filter(p => p.alive && p.role && isWolfTeam(p.role))
+          .sort((a, b) => (a.seatPosition ?? 0) - (b.seatPosition ?? 0))
+          .map(p => p.name)
+          .join(', ') || 'The pack';
+      const wolfRows = allActions
+        .filter(
+          a =>
+            a.actionType === 'wolf_kill' ||
+            a.actionType === 'wolf_blocked' ||
+            a.actionType === 'sasquatch_conversion',
+        )
+        .sort((a, b) => a.resolvedAt - b.resolvedAt);
+      for (const action of wolfRows) {
+        const id = action._id as unknown as string;
+        if (action.actionType === 'wolf_kill') {
+          wolfKillSeen++;
+          const t = nameOf(action.targetPlayerId as Id<'players'>);
+          log.push({
+            id,
+            roleLabel: 'Wolves',
+            actorName: wolfNames,
+            statusLabel:
+              wolfKillSeen > 1 ? `Also targeted ${t}` : `Targeted ${t}`,
+            statusColor: LOG_COLOR_WOLF,
+            kind: 'action',
+          });
+        } else if (action.actionType === 'wolf_blocked') {
+          log.push({
+            id,
+            roleLabel: 'Wolves',
+            actorName: wolfNames,
+            statusLabel: 'Blocked by a diseased meal — no kill tonight.',
+            statusColor: LOG_COLOR_NEUTRAL,
+            kind: 'action',
+          });
+        } else if (action.actionType === 'sasquatch_conversion') {
+          const actor = action.actorPlayerId
+            ? playerById.get(action.actorPlayerId)
+            : undefined;
+          const wasDopp =
+            actor?.originalRole === 'Doppelganger' &&
+            actor?.role !== 'Doppelganger';
+          log.push({
+            id,
+            roleLabel: wasDopp ? 'Sasquatch (Doppelganger)' : 'Sasquatch',
+            actorName: actor?.name ?? '',
+            statusLabel: 'Joined the wolf pack',
+            statusColor: LOG_COLOR_WOLF,
+            kind: 'action',
+          });
+        }
+      }
+      continue;
+    }
+
+    if (step === 'cursed_conversion') {
+      const rows = allActions.filter(a => a.actionType === 'cursed_conversion');
+      for (const action of rows) {
+        const actor = action.actorPlayerId
+          ? playerById.get(action.actorPlayerId)
+          : undefined;
+        const wasDopp =
+          actor?.originalRole === 'Doppelganger' &&
+          actor?.role !== 'Doppelganger';
+        log.push({
+          id: action._id as unknown as string,
+          roleLabel: wasDopp ? 'Cursed (Doppelganger)' : 'Cursed',
+          actorName: actor?.name ?? '',
+          statusLabel: 'Was bitten and is now a Werewolf',
+          statusColor: LOG_COLOR_WOLF,
+          kind: 'action',
+        });
+      }
+      continue;
+    }
+
+    if (step === 'doppelganger_dawn' || step === 'doppelganger_dusk') {
+      const rows = allActions.filter(
+        a => a.actionType === 'doppelganger_conversion_reveal',
+      );
+      for (const action of rows) {
+        const actor = action.actorPlayerId
+          ? playerById.get(action.actorPlayerId)
+          : undefined;
+        // The conversion row stamped at nightNumber=0 carries toRole +
+        // victim attribution — look it up.
+        const conversionRows = await ctx.db
+          .query('nightActions')
+          .withIndex('by_game_night', q =>
+            q.eq('gameId', gameId).eq('nightNumber', 0),
+          )
+          .filter(q =>
+            q.and(
+              q.eq(q.field('actionType'), 'doppelganger_conversion'),
+              q.eq(q.field('actorPlayerId'), action.actorPlayerId),
+            ),
+          )
+          .collect();
+        const conversion = conversionRows[0];
+        const toRole = conversion?.result?.toRole as string | undefined;
+        const victimName = nameOf(
+          conversion?.targetPlayerId as Id<'players'> | undefined,
+        );
+        log.push({
+          id: action._id as unknown as string,
+          roleLabel: 'Doppelganger',
+          actorName: actor?.name ?? '',
+          statusLabel: toRole
+            ? `Took on ${victimName}'s role (${toRole})`
+            : 'Took on a new role',
+          statusColor: LOG_COLOR_ACTION,
+          kind: 'action',
+        });
+      }
+      continue;
+    }
+
+    // Actor-driven step: one card per role-holder, sorted by seat.
+    const role = STEP_TO_ROLE[step];
+    if (!role) continue;
+    const rolePlayers = players
+      .filter(p => p.role === role)
+      .sort((a, b) => (a.seatPosition ?? 0) - (b.seatPosition ?? 0));
+    for (const actor of rolePlayers) {
+      const card = buildActorCardForStep(
+        step,
+        actor,
+        allActions,
+        nightNumber,
+        nameOf,
+        roleOf,
+      );
+      if (card) log.push(card);
+    }
+  }
+
+  return log;
+}
+
 export const nightView = query({
   args: {
     gameId: v.id('games'),
@@ -4631,85 +5159,20 @@ export const nightView = query({
         seatPosition: p.seatPosition,
       }));
 
-    // Ghost-only: describe the current step's actor so the spectator fallback
-    // can replace the generic "X is awake" spinner with the truth — actor
-    // eliminated, or alive but their one-time power is spent. Skipped for
-    // wolves (all-dead would already have ended the game) and for living
-    // viewers (they don't see the fallback).
-    let stepActorStatus:
-      | {
-          roleName: string;
-          status: 'present' | 'eliminated' | 'powerUsed';
-          actorName: string | null;
-        }
-      | null = null;
-    if (
-      !me.alive &&
-      step &&
-      step !== 'wolves' &&
-      step !== 'cursed_conversion' &&
-      step !== 'doppelganger_dawn' &&
-      step !== 'doppelganger_dusk'
-    ) {
-      const ROLE_BY_STEP: Record<
-        Exclude<
-          NightStep,
-          'wolves'
-          | 'cursed_conversion'
-          | 'doppelganger_dawn'
-          | 'doppelganger_dusk'
-        >,
-        string
-      > = {
-        nightmare_wolf: 'Nightmare Wolf',
-        seer: 'Seer',
-        pi: 'Paranormal Investigator',
-        mentalist: 'Mentalist',
-        witch: 'Witch',
-        leprechaun: 'Leprechaun',
-        bodyguard: 'Bodyguard',
-        huntress: 'Huntress',
-        revealer: 'Revealer',
-        reviler: 'Reviler',
-      };
-      const roleName =
-        ROLE_BY_STEP[
-          step as Exclude<
-            NightStep,
-            'wolves'
-            | 'cursed_conversion'
-            | 'doppelganger_dawn'
-            | 'doppelganger_dusk'
-          >
-        ];
-      if (roleName) {
-        const active = stepActors.find(a => a.role === roleName);
-        if (active) {
-          stepActorStatus = {
-            roleName,
-            status: 'present',
-            actorName: active.name,
-          };
-        } else {
-          const aliveOfRole = alive.find(p => p.role === roleName);
-          if (aliveOfRole) {
-            stepActorStatus = {
-              roleName,
-              status: 'powerUsed',
-              actorName: aliveOfRole.name,
-            };
-          } else {
-            const anyOfRole = players.find(p => p.role === roleName);
-            if (anyOfRole) {
-              stepActorStatus = {
-                roleName,
-                status: 'eliminated',
-                actorName: anyOfRole.name,
-              };
-            }
-          }
-        }
-      }
+    // Chronological + per-actor ghost log. Walks NIGHT_STEPS up to the
+    // current step and emits one card per role-holder (actor-driven steps)
+    // or per event row (wolves, conversions). Alive viewers get null —
+    // they see the live picker UX instead.
+    let nightLog: NightLogEntry[] | null = null;
+    if (!me.alive && step) {
+      nightLog = await buildNightLog(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        step,
+        game.selectedRoles,
+        players,
+      );
     }
 
     return {
@@ -4755,7 +5218,7 @@ export const nightView = query({
       nightmaredBlocking,
       targetables,
       alivePlayers: aliveSummaries,
-      stepActorStatus,
+      nightLog,
       hostMissing: !players.some(p => p.isHost),
     };
   },

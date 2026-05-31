@@ -64,9 +64,11 @@ export function nightStepLabel(step: NightStep): string {
     case 'reviler':
       return 'The reviler is awake';
     case 'cursed_conversion':
-      return 'The cursed stirs in the night';
     case 'doppelganger_dawn':
     case 'doppelganger_dusk':
-      return 'The doppelganger wears a new face';
+      // Deliberately neutral so the wake-order header doesn't telegraph that
+      // a conversion might be in progress. Actual conversion events appear
+      // in the ghost log when they fire.
+      return 'The village awaits dawn';
   }
 }

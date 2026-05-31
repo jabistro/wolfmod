@@ -48,6 +48,8 @@ type HistoryEntry = {
   sameTeam: string | null;
   outcome: string | null;
   victimNames: string[] | null;
+  fromRole: string | null;
+  toRole: string | null;
 };
 
 function renderEntryBody(entry: HistoryEntry): React.ReactNode {
@@ -323,11 +325,17 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
       );
     }
     case 'doppelganger_conversion_reveal':
+    case 'cursed_conversion':
+    case 'sasquatch_conversion': {
+      const from = entry.fromRole?.toUpperCase() ?? '';
+      const to = entry.toRole?.toUpperCase() ?? '';
+      const arc = from && to ? ` — ${from} → ${to}` : '';
       return (
         <Text className="font-bold text-sm" style={{ color: '#D4A017' }}>
-          CONVERSION
+          CONVERSION{arc}
         </Text>
       );
+    }
     case 'nightmare_put_to_sleep':
       return (
         <Text className="text-wolf-text text-sm">

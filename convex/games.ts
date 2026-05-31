@@ -918,6 +918,10 @@ export const endGameView = query({
       sameTeam: string | null;
       outcome: string | null;
       victimNames: string[] | null;
+      // Populated for conversion entries — drives the
+      // "CONVERSION — FROM → TO" label on the client.
+      fromRole: string | null;
+      toRole: string | null;
     };
 
     // Build a set of (night, targetId) pairs that actually died, used to
@@ -975,11 +979,13 @@ export const endGameView = query({
       }
     }
     // Doppelganger conversions: parallel structure to cursedConversionByPlayer
-    // but also retains the toRole so end-game can show "Doppelganger →
-    // Werewolf (n3)" etc.
+    // but also retains the toRole + triggerPhase so end-game can show
+    // "Doppelganger → Werewolf (n3)" and the wolf-kill attribution loop can
+    // figure out whether the doppelganger was actually with the pack on the
+    // conversion night.
     const doppelgangerConversionByPlayer = new Map<
       Id<'players'>,
-      { nightNumber: number; toRole: string }
+      { nightNumber: number; toRole: string; triggerPhase: 'day' | 'night' }
     >();
     for (const a of actions) {
       if (a.actionType === 'doppelganger_conversion' && a.actorPlayerId) {
@@ -987,6 +993,7 @@ export const endGameView = query({
         const result = (a.result ?? {}) as {
           toRole?: string;
           firedAtNight?: number;
+          triggerPhase?: 'day' | 'night';
         };
         const toRole = result.toRole ?? 'Villager';
         // Subtitle reflects when conversion actually fired (target's death
@@ -996,6 +1003,7 @@ export const endGameView = query({
         doppelgangerConversionByPlayer.set(a.actorPlayerId, {
           nightNumber: fireNight,
           toRole,
+          triggerPhase: result.triggerPhase ?? 'night',
         });
       }
     }
@@ -1098,15 +1106,11 @@ export const endGameView = query({
 
     for (const a of actions) {
       if (a.actionType === 'death') continue; // resolution row, not a choice
-      // The conversion reveal is already communicated via the "Cursed →
-      // Werewolf (nN)" subtitle under the player's name. The bare action
-      // row would just clutter the per-night history list.
-      if (a.actionType === 'cursed_conversion') continue;
+      // cursed_conversion / sasquatch_conversion DO render as per-night
+      // entries now ("CONVERSION — CURSED → WEREWOLF" etc.) so the per-night
+      // log matches the player-card subtitle. The ack rows below are just
+      // markers and stay suppressed.
       if (a.actionType === 'cursed_conversion_ack') continue;
-      // Sasquatch conversion is communicated via the
-      // "Sasquatch → Werewolf (nN)" subtitle under the player's name; the
-      // bare action row would just be noise in per-night history.
-      if (a.actionType === 'sasquatch_conversion') continue;
       // Legacy `doppelganger_conversion_ack` rows from before the OK button
       // was removed — purely noise in the history list, drop them.
       if (a.actionType === 'doppelganger_conversion_ack') continue;
@@ -1135,6 +1139,8 @@ export const endGameView = query({
             sameTeam: null,
             outcome: null,
             victimNames: null,
+            fromRole: null,
+            toRole: null,
           });
         }
         // Fall through to the catch-all below, which pushes the row to
@@ -1157,6 +1163,40 @@ export const endGameView = query({
         sameTeam?: string;
         toRole?: string;
       };
+      // Conversion attribution: cursed/sasquatch are hardcoded since the
+      // arc is fixed; doppelganger_conversion_reveal looks up the
+      // originating doppelganger_conversion row (stamped at nightNumber=0)
+      // for the inherited role.
+      let fromRole: string | null = null;
+      let toRole: string | null = null;
+      if (a.actionType === 'cursed_conversion') {
+        fromRole = 'Cursed';
+        toRole = 'Werewolf';
+      } else if (a.actionType === 'sasquatch_conversion') {
+        fromRole = 'Sasquatch';
+        toRole = 'Werewolf';
+      } else if (
+        a.actionType === 'doppelganger_conversion_reveal' &&
+        a.actorPlayerId
+      ) {
+        const conv = doppelgangerConversionByPlayer.get(a.actorPlayerId);
+        if (conv) {
+          fromRole = 'Doppelganger';
+          toRole = conv.toRole;
+        }
+      }
+
+      // For the N0 "Doppelganged X — ROLE" row, show the target's role at
+      // the moment of the pre-game pick (X's originalRole), not whatever
+      // they had morphed into by the time the conversion fired. The
+      // conversion itself is communicated via the per-night CONVERSION row
+      // at the actual fire night, which uses the current/inherited role.
+      let dopplegangerN0Outcome: string | null = null;
+      if (a.actionType === 'doppelganger_conversion' && a.targetPlayerId) {
+        const t = players.find(p => p._id === a.targetPlayerId);
+        dopplegangerN0Outcome = t?.originalRole ?? result.toRole ?? null;
+      }
+
       const baseEntry: HistoryEntry = {
         nightNumber: a.nightNumber,
         kind: a.actionType,
@@ -1164,13 +1204,13 @@ export const endGameView = query({
         secondTargetName: nameFor(result.secondId),
         team: result.team ?? null,
         sameTeam: result.sameTeam ?? null,
-        // Doppelganger conversion rides on `outcome` to carry the inherited
-        // role name through to the client renderer (kept off `team` because
-        // that's reserved for the wolf/villager dichotomy).
-        outcome: a.actionType === 'doppelganger_conversion'
-          ? (result.toRole ?? null)
-          : null,
+        // Doppelganger conversion rides on `outcome` to carry the role name
+        // through to the client renderer (kept off `team` because that's
+        // reserved for the wolf/villager dichotomy).
+        outcome: dopplegangerN0Outcome,
         victimNames: null,
+        fromRole,
+        toRole,
       };
 
       if (a.actionType === 'wolf_kill') {
@@ -1214,7 +1254,11 @@ export const endGameView = query({
         // weren't with the pack when the choice was made. Ex-Sasquatch
         // wolves flip at the START of the night they convert (before the
         // wolves step), so they ARE with the pack on that night — exclusion
-        // is for nights STRICTLY before.
+        // is for nights STRICTLY before. Ex-Doppelgangers split on
+        // triggerPhase: 'day' fires before the next night begins (with the
+        // pack on conversion night, exclude STRICTLY BEFORE), 'night' fires
+        // at the dopp_dusk step AFTER the wolves act (not with the pack on
+        // conversion night, exclude AT OR BEFORE).
         for (const p of players) {
           if (!p.role || !isWolfTeam(p.role)) continue;
           const conversionNight = cursedConversionByPlayer.get(p._id);
@@ -1224,6 +1268,14 @@ export const endGameView = query({
           const sasquatchNight = sasquatchConversionByPlayer.get(p._id);
           if (sasquatchNight != null && a.nightNumber < sasquatchNight) {
             continue;
+          }
+          const dopp = doppelgangerConversionByPlayer.get(p._id);
+          if (dopp != null) {
+            const cutoff =
+              dopp.triggerPhase === 'day'
+                ? dopp.nightNumber
+                : dopp.nightNumber + 1;
+            if (a.nightNumber < cutoff) continue;
           }
           const death = deathByPlayer.get(p._id);
           if (death && a.nightNumber > death.nightNumber) continue;
@@ -1240,6 +1292,18 @@ export const endGameView = query({
           const conversionNight = cursedConversionByPlayer.get(p._id);
           if (conversionNight != null && a.nightNumber <= conversionNight) {
             continue;
+          }
+          const sasquatchNight = sasquatchConversionByPlayer.get(p._id);
+          if (sasquatchNight != null && a.nightNumber < sasquatchNight) {
+            continue;
+          }
+          const dopp = doppelgangerConversionByPlayer.get(p._id);
+          if (dopp != null) {
+            const cutoff =
+              dopp.triggerPhase === 'day'
+                ? dopp.nightNumber
+                : dopp.nightNumber + 1;
+            if (a.nightNumber < cutoff) continue;
           }
           const death = deathByPlayer.get(p._id);
           if (death && a.nightNumber > death.nightNumber) continue;
