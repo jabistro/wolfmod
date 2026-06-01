@@ -338,16 +338,12 @@ function TrialStatusBar({
 function DayHeader({
   dayNumber,
   mode,
-  showCog,
-  onCogPress,
-  onBuildPress,
+  roomCode,
   onLeavePress,
 }: {
   dayNumber: number;
   mode: string;
-  showCog?: boolean;
-  onCogPress?: () => void;
-  onBuildPress?: () => void;
+  roomCode: string;
   onLeavePress?: () => void;
 }) {
   return (
@@ -364,23 +360,74 @@ function DayHeader({
       <View
         style={{
           position: 'absolute',
-          right: 16,
+          right: 12,
           top: 40,
-          flexDirection: 'row',
-          alignItems: 'center',
+          alignItems: 'flex-end',
+          zIndex: 10,
         }}
       >
-        {showCog && (
-          <TouchableOpacity onPress={onCogPress} style={{ padding: 8 }}>
-            <Text style={{ color: '#8A8590', fontSize: 22 }}>⚙</Text>
-          </TouchableOpacity>
-        )}
-        {onBuildPress && (
-          <TouchableOpacity onPress={onBuildPress} style={{ padding: 8 }}>
+        <Text
+          style={{
+            color: '#8A8590',
+            fontSize: 10,
+            fontWeight: '700',
+            letterSpacing: 2,
+          }}
+        >
+          ROOM
+        </Text>
+        <Text
+          style={{
+            color: '#D4A017',
+            fontSize: 16,
+            fontWeight: '800',
+            letterSpacing: 3,
+            marginTop: 1,
+          }}
+        >
+          {roomCode}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// ───── Day action row ──────────────────────────────────────────────────────
+//
+// Sits below the day timer on every day sub-screen. Three equal columns —
+// left (DiscussionView passes "N ALIVE"), center (NOMS LEFT), right (BUILD).
+// The host's settings cog lives on its own row beneath this one via
+// DayCogRow so the cog stays at the far left without crowding the stats.
+
+function DayActionRow({
+  left,
+  center,
+  showBuild,
+  onBuildPress,
+}: {
+  left?: React.ReactNode;
+  center?: React.ReactNode;
+  showBuild?: boolean;
+  onBuildPress?: () => void;
+}) {
+  return (
+    <View
+      className="flex-row items-center mb-2"
+      style={{ paddingHorizontal: 16, minHeight: 36 }}
+    >
+      <View style={{ flex: 1, alignItems: 'flex-start' }}>{left}</View>
+      <View style={{ flex: 1, alignItems: 'center' }}>{center}</View>
+      <View style={{ flex: 1, alignItems: 'flex-end' }}>
+        {showBuild && (
+          <TouchableOpacity
+            onPress={onBuildPress}
+            hitSlop={8}
+            style={{ padding: 4 }}
+          >
             <Text
               style={{
                 color: '#8A8590',
-                fontSize: 12,
+                fontSize: 15,
                 fontWeight: '700',
                 letterSpacing: 2,
               }}
@@ -390,6 +437,24 @@ function DayHeader({
           </TouchableOpacity>
         )}
       </View>
+    </View>
+  );
+}
+
+// ───── Day cog row ─────────────────────────────────────────────────────────
+//
+// Host-only settings cog, far-left, on its own row directly below
+// DayActionRow. Kept separate so the stats row can stay symmetrical.
+
+function DayCogRow({ onPress }: { onPress: () => void }) {
+  return (
+    <View
+      className="mb-2"
+      style={{ paddingHorizontal: 16, alignItems: 'flex-start' }}
+    >
+      <TouchableOpacity onPress={onPress} hitSlop={8} style={{ padding: 4 }}>
+        <Text style={{ color: '#8A8590', fontSize: 26 }}>⚙</Text>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -447,54 +512,70 @@ function DayClockBar({
     }
   }
 
+  const showHostButtons = isHost && !dayOver;
+
   return (
     <View
       className="mx-4 mb-3 bg-wolf-card rounded-xl flex-row items-center"
-      style={{ paddingVertical: 10, paddingHorizontal: 16 }}
+      style={{ paddingVertical: 12, paddingHorizontal: 16 }}
     >
-      <View className="flex-1">
+      <View style={{ width: 52, alignItems: 'flex-start' }}>
+        {showHostButtons && (
+          <TouchableOpacity
+            onPress={toggle}
+            disabled={busy !== null}
+            className="bg-wolf-surface rounded-full items-center justify-center"
+            style={{ width: 52, height: 52, opacity: busy === 'toggle' ? 0.4 : 1 }}
+          >
+            {paused ? (
+              <Text className="text-wolf-text" style={{ fontSize: 20 }}>▶</Text>
+            ) : (
+              <View className="flex-row" style={{ gap: 4 }}>
+                <View style={{ width: 5, height: 18, backgroundColor: '#F0EDE8', borderRadius: 1 }} />
+                <View style={{ width: 5, height: 18, backgroundColor: '#F0EDE8', borderRadius: 1 }} />
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+      <View className="flex-1 items-center">
         <Text className="text-wolf-muted text-xs tracking-widest">
           {dayOver ? 'DAY OVER' : paused ? 'DAY (PAUSED)' : 'DAY'}
         </Text>
         <Text
           className="font-extrabold"
-          style={{ color, fontSize: 28, fontVariant: ['tabular-nums'] }}
+          style={{
+            color,
+            fontSize: 40,
+            fontVariant: ['tabular-nums'],
+            marginTop: 2,
+          }}
         >
           {formatTime(remaining)}
         </Text>
       </View>
-      {isHost && !dayOver && (
-        <View className="flex-row" style={{ gap: 8 }}>
-          <TouchableOpacity
-            onPress={toggle}
-            disabled={busy !== null}
-            className="bg-wolf-surface rounded-full items-center justify-center"
-            style={{ width: 40, height: 40, opacity: busy === 'toggle' ? 0.4 : 1 }}
-          >
-            {paused ? (
-              <Text className="text-wolf-text text-base">▶</Text>
-            ) : (
-              <View className="flex-row" style={{ gap: 3 }}>
-                <View style={{ width: 4, height: 14, backgroundColor: '#F0EDE8', borderRadius: 1 }} />
-                <View style={{ width: 4, height: 14, backgroundColor: '#F0EDE8', borderRadius: 1 }} />
-              </View>
-            )}
-          </TouchableOpacity>
+      <View style={{ width: 52, alignItems: 'flex-end' }}>
+        {showHostButtons && (
           <TouchableOpacity
             onPress={reset}
             disabled={busy !== null}
             className="bg-wolf-surface rounded-full items-center justify-center"
-            style={{ width: 40, height: 40, opacity: busy === 'reset' ? 0.4 : 1 }}
+            style={{ width: 52, height: 52, opacity: busy === 'reset' ? 0.4 : 1 }}
           >
             <Text
-              className="text-wolf-text text-base"
-              style={{ lineHeight: 16, marginTop: -2, includeFontPadding: false }}
+              className="text-wolf-text"
+              style={{
+                fontSize: 22,
+                lineHeight: 22,
+                marginTop: -2,
+                includeFontPadding: false,
+              }}
             >
               ↺
             </Text>
           </TouchableOpacity>
-        </View>
-      )}
+        )}
+      </View>
     </View>
   );
 }
@@ -569,9 +650,7 @@ function DiscussionView({
       <DayHeader
         dayNumber={game.dayNumber}
         mode="DISCUSSION"
-        showCog={isHost}
-        onCogPress={() => setCogOpen(true)}
-        onBuildPress={() => setBuildOpen(true)}
+        roomCode={game.roomCode}
         onLeavePress={onLeavePress}
       />
 
@@ -589,14 +668,27 @@ function DiscussionView({
         dayOver={dayOver}
       />
 
-      <View className="flex-row justify-center" style={{ gap: 18, marginBottom: 4 }}>
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest">
-          {alive.length} ALIVE
-        </Text>
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest">
-          NOMS LEFT: {game.nominationsRemaining}/{game.maxNominationsPerDay}
-        </Text>
-      </View>
+      <DayActionRow
+        left={
+          <Text
+            className="text-wolf-muted font-bold tracking-widest"
+            style={{ fontSize: 14 }}
+          >
+            {alive.length} ALIVE
+          </Text>
+        }
+        center={
+          <Text
+            className="text-wolf-muted font-bold tracking-widest"
+            style={{ fontSize: 14 }}
+          >
+            NOMS LEFT: {game.nominationsRemaining}/{game.maxNominationsPerDay}
+          </Text>
+        }
+        showBuild
+        onBuildPress={() => setBuildOpen(true)}
+      />
+      {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24, alignItems: 'center' }}>
         <SeatingCircle
@@ -855,9 +947,7 @@ function TrialView({
       <DayHeader
         dayNumber={game.dayNumber}
         mode="ON TRIAL"
-        showCog={isHost}
-        onCogPress={() => setCogOpen(true)}
-        onBuildPress={() => setBuildOpen(true)}
+        roomCode={game.roomCode}
         onLeavePress={onLeavePress}
       />
 
@@ -879,6 +969,9 @@ function TrialView({
         nominationsRemaining={game.nominationsRemaining}
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
+
+      <DayActionRow showBuild onBuildPress={() => setBuildOpen(true)} />
+      {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
 
       <Pressable
         onPress={isHost ? toggleClock : undefined}
@@ -1128,9 +1221,7 @@ function VoteView({
       <DayHeader
         dayNumber={game.dayNumber}
         mode="TIME TO VOTE"
-        showCog={isHost}
-        onCogPress={() => setCogOpen(true)}
-        onBuildPress={() => setBuildOpen(true)}
+        roomCode={game.roomCode}
         onLeavePress={onLeavePress}
       />
 
@@ -1146,6 +1237,9 @@ function VoteView({
         nominationsRemaining={game.nominationsRemaining}
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
+
+      <DayActionRow showBuild onBuildPress={() => setBuildOpen(true)} />
+      {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
 
       <View className="flex-1 px-6 items-center justify-center">
         <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
@@ -1397,7 +1491,7 @@ function ResultsView({
       <DayHeader
         dayNumber={game.dayNumber}
         mode="VOTE RESULT"
-        onBuildPress={() => setBuildOpen(true)}
+        roomCode={game.roomCode}
         onLeavePress={onLeavePress}
       />
 
@@ -1413,6 +1507,8 @@ function ResultsView({
         nominationsRemaining={game.nominationsRemaining}
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
+
+      <DayActionRow showBuild onBuildPress={() => setBuildOpen(true)} />
 
       <ScrollView
         contentContainerStyle={{
@@ -1449,15 +1545,11 @@ function ResultsView({
             <Text className="text-xs font-bold tracking-widest mb-2" style={{ color: '#5BA0E5' }}>
               LIVES ({livesCount})
             </Text>
-            {nomination.livesVoters.length === 0 ? (
-              <Text className="text-wolf-muted text-xs italic">none</Text>
-            ) : (
-              nomination.livesVoters.map((n: string, i: number) => (
-                <Text key={i} className="text-wolf-text text-sm py-0.5">
-                  {n}
-                </Text>
-              ))
-            )}
+            {nomination.livesVoters.map((n: string, i: number) => (
+              <Text key={i} className="text-wolf-text text-sm py-0.5">
+                {n}
+              </Text>
+            ))}
           </View>
           <View
             className="flex-1 bg-wolf-card rounded-xl px-4 py-3"
@@ -1466,15 +1558,11 @@ function ResultsView({
             <Text className="text-xs font-bold tracking-widest mb-2" style={{ color: '#E07070' }}>
               DIES ({diesCount})
             </Text>
-            {nomination.diesVoters.length === 0 ? (
-              <Text className="text-wolf-muted text-xs italic">none</Text>
-            ) : (
-              nomination.diesVoters.map((n: string, i: number) => (
-                <Text key={i} className="text-wolf-text text-sm py-0.5">
-                  {n}
-                </Text>
-              ))
-            )}
+            {nomination.diesVoters.map((n: string, i: number) => (
+              <Text key={i} className="text-wolf-text text-sm py-0.5">
+                {n}
+              </Text>
+            ))}
           </View>
         </View>
 

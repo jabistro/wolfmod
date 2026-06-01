@@ -5189,6 +5189,7 @@ export const nightView = query({
         nightNumber: game.nightNumber,
         nightStep: step,
         playerCount: game.playerCount,
+        roomCode: game.roomCode,
         nightStepEndsAt: game.nightStepEndsAt ?? null,
         // Wall-clock time at which the host's "skip ahead" override unlocks.
         // The client computes "now > this" locally on a 1-second tick so

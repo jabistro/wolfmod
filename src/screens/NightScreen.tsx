@@ -326,6 +326,37 @@ export default function NightScreen() {
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
       <InGameLeaveButton onPress={confirmLeave} />
+      <View
+        style={{
+          position: 'absolute',
+          right: 12,
+          top: 40,
+          alignItems: 'flex-end',
+          zIndex: 10,
+        }}
+      >
+        <Text
+          style={{
+            color: '#8A8590',
+            fontSize: 10,
+            fontWeight: '700',
+            letterSpacing: 2,
+          }}
+        >
+          ROOM
+        </Text>
+        <Text
+          style={{
+            color: '#D4A017',
+            fontSize: 16,
+            fontWeight: '800',
+            letterSpacing: 3,
+            marginTop: 1,
+          }}
+        >
+          {game.roomCode}
+        </Text>
+      </View>
       <NightHeader
         nightNumber={game.nightNumber}
         stepLabel={me.alive ? null : stepLabel}

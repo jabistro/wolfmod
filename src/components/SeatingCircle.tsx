@@ -111,7 +111,9 @@ export function SeatingCircle({
   const seatSize = computeSeatSize(totalSeats, size);
 
   return (
-    <View style={{ width: size, height: size, position: 'relative' }}>
+    <View
+      style={{ width: size, height: size, position: 'relative', marginTop: 12 }}
+    >
       {Array.from({ length: totalSeats }).map((_, i) => {
         const occupant = playerBySeat.get(i);
         // Empty seat (eliminated mid-game with no faded-roster mode, or
