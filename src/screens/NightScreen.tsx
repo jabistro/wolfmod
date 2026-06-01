@@ -2486,9 +2486,11 @@ function LeprechaunPicker({
   };
   isGhost?: boolean;
 }) {
+  const insets = useSafeAreaInsets();
   const submitMove = useMutation(api.night.submitLeprechaunMove);
   const [submitting, setSubmitting] = useState(false);
-  const [confirmDir, setConfirmDir] = useState<'L' | 'R' | null>(null);
+  const [selection, setSelection] = useState<'target' | 'L' | 'R'>('target');
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   async function submit(direction: 'L' | 'R' | 'leave') {
     setSubmitting(true);
@@ -2498,7 +2500,7 @@ function LeprechaunPicker({
         callerDeviceClientId: deviceClientId,
         direction,
       });
-      setConfirmDir(null);
+      setConfirmOpen(false);
     } catch (e) {
       showAlert('Could not move', e instanceof Error ? e.message : String(e));
     } finally {
@@ -2595,106 +2597,101 @@ function LeprechaunPicker({
   const right = leprechaunState.rightNeighbor;
   const canMove = leprechaunState.canMoveOff;
 
+  const targetName = target?.name ?? '—';
+  const selectedName =
+    selection === 'L'
+      ? (left?.name ?? '—')
+      : selection === 'R'
+        ? (right?.name ?? '—')
+        : targetName;
+
+  const handleOK = () => {
+    if (isGhost) return;
+    if (!canMove) {
+      void submit('leave');
+      return;
+    }
+    setConfirmOpen(true);
+  };
+
+  const confirmedSubmit = () => {
+    if (selection === 'target') void submit('leave');
+    else void submit(selection);
+  };
+
   return (
     <View className="flex-1">
-      <ScrollView
-        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}
-      >
-        <View className="bg-wolf-card rounded-xl px-4 py-3 mt-2 mb-4">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1">
-            TONIGHT'S VICTIM
-          </Text>
-          {target ? (
-            <Text className="text-wolf-text text-2xl font-bold tracking-widest">
-              {target.name.toUpperCase()}
-            </Text>
+      <View className="flex-1 px-6 pt-2">
+        <Text className="text-wolf-text text-base text-center leading-6 mt-2">
+          {canMove ? (
+            <>
+              Tonight's kill is on{' '}
+              <Text className="font-bold">{targetName}</Text>. You may leave the
+              kill or move it to a neighbor.
+            </>
           ) : (
-            <Text className="text-wolf-muted text-sm italic">
-              No victim tonight.
-            </Text>
+            <>
+              Tonight's kill is on{' '}
+              <Text className="font-bold">{targetName}</Text>. You've already
+              moved a kill off <Text className="font-bold">{targetName}</Text>{' '}
+              before — you must leave the kill where it is.
+            </>
           )}
-          {!canMove && (
-            <Text className="text-wolf-muted text-xs mt-2 italic">
-              You've already moved a kill off this player. Only LEAVE is
-              available.
-            </Text>
-          )}
-        </View>
-
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-          MOVE THE KILL
         </Text>
-        <View style={{ gap: 10 }}>
-          <TouchableOpacity
-            onPress={() => left && canMove && setConfirmDir('L')}
-            disabled={!left || !canMove || submitting}
-            activeOpacity={0.75}
-            className="bg-wolf-card rounded-xl px-4 py-4"
-            style={{
-              borderWidth: 1,
-              borderColor: left && canMove ? '#5BA0E5' : '#2A2A38',
-              opacity: left && canMove ? 1 : 0.4,
-            }}
-          >
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
-              MOVE LEFT
-            </Text>
-            <Text
-              className="text-base font-bold tracking-widest mt-1"
-              style={{ color: left && canMove ? '#5BA0E5' : '#5A5560' }}
-            >
-              → {left ? left.name.toUpperCase() : '—'}
-            </Text>
-          </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={() => submit('leave')}
+        <View
+          className="flex-row items-center justify-center mt-10"
+          style={{ gap: 14 }}
+        >
+          <LeprechaunCircle
+            label="LEFT"
+            name={left?.name ?? null}
+            selected={selection === 'L'}
+            disabled={!canMove || !left || submitting}
+            onPress={() => left && canMove && setSelection('L')}
+          />
+          <LeprechaunCircle
+            label="TARGET"
+            name={target?.name ?? null}
+            selected={selection === 'target'}
             disabled={submitting}
-            activeOpacity={0.75}
-            className="bg-wolf-card rounded-xl px-4 py-4"
-            style={{
-              borderWidth: 1,
-              borderColor: '#D4A017',
-              opacity: submitting ? 0.4 : 1,
-            }}
-          >
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
-              LEAVE THE KILL
-            </Text>
-            <Text
-              className="text-base font-bold tracking-widest mt-1"
-              style={{ color: '#D4A017' }}
-            >
-              ON {target ? target.name.toUpperCase() : '—'}
-            </Text>
-          </TouchableOpacity>
+            onPress={() => setSelection('target')}
+          />
+          <LeprechaunCircle
+            label="RIGHT"
+            name={right?.name ?? null}
+            selected={selection === 'R'}
+            disabled={!canMove || !right || submitting}
+            onPress={() => right && canMove && setSelection('R')}
+          />
+        </View>
+      </View>
 
+      {!isGhost && (
+        <View
+          className="px-6"
+          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
+        >
           <TouchableOpacity
-            onPress={() => right && canMove && setConfirmDir('R')}
-            disabled={!right || !canMove || submitting}
-            activeOpacity={0.75}
-            className="bg-wolf-card rounded-xl px-4 py-4"
-            style={{
-              borderWidth: 1,
-              borderColor: right && canMove ? '#5BA0E5' : '#2A2A38',
-              opacity: right && canMove ? 1 : 0.4,
-            }}
+            onPress={handleOK}
+            disabled={submitting}
+            activeOpacity={0.8}
+            style={{ opacity: submitting ? 0.4 : 1 }}
+            className="bg-wolf-accent rounded-xl py-5 items-center"
           >
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
-              MOVE RIGHT
-            </Text>
-            <Text
-              className="text-base font-bold tracking-widest mt-1"
-              style={{ color: right && canMove ? '#5BA0E5' : '#5A5560' }}
-            >
-              → {right ? right.name.toUpperCase() : '—'}
-            </Text>
+            {submitting ? (
+              <ActivityIndicator color="#0F0F14" />
+            ) : (
+              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                OK
+              </Text>
+            )}
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      )}
 
-      {/* Move confirmation overlay — mirrors the other night-role confirms. */}
-      {confirmDir && (
+      {/* Confirmation overlay — only when the move is actually a choice. */}
+      {confirmOpen && (
         <View
           style={{
             position: 'absolute',
@@ -2709,17 +2706,22 @@ function LeprechaunPicker({
           }}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
-            MOVE KILL
+            {selection === 'target' ? 'LEAVE KILL' : 'MOVE KILL'}
           </Text>
-          <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
-            {(confirmDir === 'L' ? left?.name : right?.name)?.toUpperCase() ?? '—'}
+          <Text className="text-wolf-text text-2xl font-extrabold text-center mb-3">
+            {selection === 'target'
+              ? `Leave the kill on ${selectedName}?`
+              : `Move the kill to ${selectedName}?`}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10">
-            You won't be able to move a kill off {target?.name ?? '—'} again later.
-          </Text>
+          {selection !== 'target' && (
+            <Text className="text-wolf-muted text-sm text-center mb-10">
+              You won't be able to move a kill off {targetName} again later.
+            </Text>
+          )}
+          {selection === 'target' && <View style={{ height: 24 }} />}
           <View className="flex-row" style={{ gap: 14 }}>
             <TouchableOpacity
-              onPress={() => setConfirmDir(null)}
+              onPress={() => setConfirmOpen(false)}
               disabled={submitting}
               className="bg-wolf-card rounded-xl py-4 px-10"
               style={{ borderWidth: 1, borderColor: '#3A3A48' }}
@@ -2729,7 +2731,7 @@ function LeprechaunPicker({
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              onPress={() => submit(confirmDir)}
+              onPress={confirmedSubmit}
               disabled={submitting}
               style={{ opacity: submitting ? 0.4 : 1 }}
               className="bg-wolf-accent rounded-xl py-4 px-10"
@@ -2745,6 +2747,56 @@ function LeprechaunPicker({
           </View>
         </View>
       )}
+    </View>
+  );
+}
+
+function LeprechaunCircle({
+  label,
+  name,
+  selected,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  name: string | null;
+  selected: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const present = !!name;
+  const borderColor = selected ? '#F0EDE8' : '#3A3A48';
+  const backgroundColor = selected ? '#33333F' : '#22222F';
+  return (
+    <View style={{ alignItems: 'center', width: 96 }}>
+      <TouchableOpacity
+        onPress={onPress}
+        disabled={disabled || !present}
+        activeOpacity={0.7}
+        style={{
+          width: 88,
+          height: 88,
+          borderRadius: 44,
+          borderWidth: selected ? 2 : 1,
+          borderColor,
+          backgroundColor,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: 6,
+          opacity: disabled || !present ? 0.4 : 1,
+        }}
+      >
+        <Text
+          className="text-wolf-text font-bold text-center"
+          style={{ fontSize: 13 }}
+          numberOfLines={2}
+        >
+          {present ? name : '—'}
+        </Text>
+      </TouchableOpacity>
+      <Text className="text-wolf-muted text-[10px] font-bold tracking-widest mt-2">
+        {label}
+      </Text>
     </View>
   );
 }
