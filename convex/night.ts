@@ -3882,7 +3882,7 @@ function buildActorCardForStep(
       if (put?.targetPlayerId) {
         return entry(
           `Put ${nameOf(put.targetPlayerId as Id<'players'>)} to sleep`,
-          LOG_COLOR_ACTION,
+          LOG_COLOR_NIGHTMARE,
           'action',
           put._id as unknown as string,
         );

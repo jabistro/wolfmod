@@ -81,7 +81,7 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
             <>
               {' '}
               →{' '}
-              <Text className="font-bold" style={{ color: '#5BA0E5' }}>
+              <Text className="font-bold" style={{ color: '#5BC97A' }}>
                 {entry.secondTargetName}
               </Text>
             </>
@@ -189,7 +189,7 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
       return (
         <Text className="text-wolf-text text-sm">
           Moved kill from {t} →{' '}
-          <Text className="font-bold" style={{ color: '#5BA0E5' }}>
+          <Text className="font-bold" style={{ color: '#5BC97A' }}>
             {dest}
           </Text>
         </Text>
