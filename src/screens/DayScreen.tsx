@@ -1184,7 +1184,21 @@ function VoteView({
         vote,
       });
     } catch (e) {
-      showAlert('Could not vote', e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      // Vote arrived after the server's grace window — the tally already
+      // fired without this player's vote in it. Tell them plainly so they
+      // don't wonder why their tap isn't in the result tally.
+      if (
+        msg.includes('Voting has closed') ||
+        msg.includes('Voting has not opened yet')
+      ) {
+        showAlert(
+          'Vote not counted',
+          "The timer closed before your vote reached the server. The result for this round is final.",
+        );
+        return;
+      }
+      showAlert('Could not vote', msg);
     } finally {
       setSubmitting(null);
     }
@@ -1316,42 +1330,54 @@ function VoteView({
             </View>
           </View>
         ) : meAlive ? (
-          <View className="flex-row mt-6" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={() => handleVote('lives')}
-              disabled={!!submitting || paused}
-              className="rounded-2xl px-12 py-8 items-center"
-              style={{
-                backgroundColor:
-                  nomination.myVote === 'lives' ? '#1F4E80' : '#22222F',
-                borderWidth: 2,
-                borderColor:
-                  nomination.myVote === 'lives' ? '#5BA0E5' : '#2A2A38',
-                opacity: paused ? 0.4 : submitting === 'dies' ? 0.4 : 1,
-              }}
-            >
-              <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
-                LIVES
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => handleVote('dies')}
-              disabled={!!submitting || paused}
-              className="rounded-2xl px-12 py-8 items-center"
-              style={{
-                backgroundColor:
-                  nomination.myVote === 'dies' ? '#8B1818' : '#22222F',
-                borderWidth: 2,
-                borderColor:
-                  nomination.myVote === 'dies' ? '#B03A2E' : '#2A2A38',
-                opacity: paused ? 0.4 : submitting === 'lives' ? 0.4 : 1,
-              }}
-            >
-              <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
-                DIES
-              </Text>
-            </TouchableOpacity>
-          </View>
+          (() => {
+            // Lock the vote buttons the instant the local timer hits zero so
+            // taps that race the server's subPhase → 'results' transition
+            // never leave the device. Belt to the server-side check's
+            // suspenders.
+            const expired = remaining <= 0 && !paused;
+            const locked = !!submitting || paused || expired;
+            return (
+              <View className="flex-row mt-6" style={{ gap: 14 }}>
+                <TouchableOpacity
+                  onPress={() => handleVote('lives')}
+                  disabled={locked}
+                  className="rounded-2xl px-12 py-8 items-center"
+                  style={{
+                    backgroundColor:
+                      nomination.myVote === 'lives' ? '#1F4E80' : '#22222F',
+                    borderWidth: 2,
+                    borderColor:
+                      nomination.myVote === 'lives' ? '#5BA0E5' : '#2A2A38',
+                    opacity:
+                      paused || expired || submitting === 'dies' ? 0.4 : 1,
+                  }}
+                >
+                  <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
+                    LIVES
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => handleVote('dies')}
+                  disabled={locked}
+                  className="rounded-2xl px-12 py-8 items-center"
+                  style={{
+                    backgroundColor:
+                      nomination.myVote === 'dies' ? '#8B1818' : '#22222F',
+                    borderWidth: 2,
+                    borderColor:
+                      nomination.myVote === 'dies' ? '#B03A2E' : '#2A2A38',
+                    opacity:
+                      paused || expired || submitting === 'lives' ? 0.4 : 1,
+                  }}
+                >
+                  <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
+                    DIES
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })()
         ) : (
           <Text className="text-wolf-muted text-sm text-center mt-6 italic">
             You are out of the game — spectating.

@@ -2682,7 +2682,10 @@ function LeprechaunPicker({
             {submitting ? (
               <ActivityIndicator color="#0F0F14" />
             ) : (
-              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+              <Text
+                className="text-wolf-bg text-lg font-extrabold tracking-widest"
+                style={{ paddingHorizontal: 2 }}
+              >
                 OK
               </Text>
             )}

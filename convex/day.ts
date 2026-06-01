@@ -27,6 +27,15 @@ import {
 } from './triggers';
 import { NIGHT_STEPS } from '../src/data/nightOrder';
 
+// Grace window between the displayed vote countdown hitting zero and the
+// server actually tallying. The UI timer drives off subPhaseEndsAt and the
+// Lives/Dies buttons disable when it ticks past 0, but the tally fires
+// VOTE_GRACE_MS later — so any in-flight tap that left a phone before the
+// visible deadline still lands in the 'vote' subphase and counts. Network
+// RTTs >1500ms (poor cellular) can still race past this and fall through
+// to the "vote didn't count" alert on the client. Tunable.
+const VOTE_GRACE_MS = 1500;
+
 // ───── Config mutation ─────────────────────────────────────────────────────
 //
 // Sets any subset of the day-phase config. Callable in lobby (initial
@@ -124,7 +133,7 @@ export const setDayConfig = mutation({
 
     if (voteRescheduleEndsAt !== null && nom) {
       await ctx.scheduler.runAfter(
-        voteRescheduleEndsAt - now,
+        voteRescheduleEndsAt - now + VOTE_GRACE_MS,
         internal.day.tallyVote,
         {
           gameId: args.gameId,
@@ -363,13 +372,19 @@ export const startTrialClock = mutation({
     // For the vote sub-phase, schedule (or re-schedule) the auto-tally. The
     // scheduled tallyVote self-checks the current endsAt and no-ops on stale
     // schedules, so it's safe to schedule multiples across pause/resume.
+    // The grace tail (VOTE_GRACE_MS past newEndsAt) keeps subPhase === 'vote'
+    // long enough to absorb in-flight taps from before the visible 0.
     if (nom.subPhase === 'vote') {
-      await ctx.scheduler.runAfter(remaining, internal.day.tallyVote, {
-        gameId: args.gameId,
-        dayNumber: game.dayNumber,
-        nominationIndex: nom.nominationIndex,
-        expectedEndsAt: newEndsAt,
-      });
+      await ctx.scheduler.runAfter(
+        remaining + VOTE_GRACE_MS,
+        internal.day.tallyVote,
+        {
+          gameId: args.gameId,
+          dayNumber: game.dayNumber,
+          nominationIndex: nom.nominationIndex,
+          expectedEndsAt: newEndsAt,
+        },
+      );
     }
   },
 });
@@ -533,10 +548,12 @@ export const castVote = mutation({
     if (game.phase !== 'day') throw new Error('Not currently in day.');
     const nom = game.currentNomination;
     if (!nom) throw new Error('No active nomination.');
+    if (nom.subPhase === 'results' || nom.resultsRevealed) {
+      throw new Error('Voting has closed.');
+    }
     if (nom.subPhase !== 'vote') {
       throw new Error('Voting has not opened yet.');
     }
-    if (nom.resultsRevealed) throw new Error('Voting has closed.');
 
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me) throw new Error('You are not in this game.');
@@ -595,7 +612,9 @@ export const tallyVote = internalMutation({
     // booked for. Host pause/reset cancels by changing subPhaseEndsAt.
     if (nom.subPhaseEndsAt !== args.expectedEndsAt) return;
     if (nom.subPhasePausedRemainingMs !== undefined) return;
-    if (Date.now() < nom.subPhaseEndsAt - 100) return;
+    // The tally is intentionally scheduled VOTE_GRACE_MS past subPhaseEndsAt
+    // — see the constant comment. Date-gate matches that schedule.
+    if (Date.now() < nom.subPhaseEndsAt + VOTE_GRACE_MS - 100) return;
 
     const players = await ctx.db
       .query('players')
