@@ -922,6 +922,10 @@ export const endGameView = query({
       // "CONVERSION — FROM → TO" label on the client.
       fromRole: string | null;
       toRole: string | null;
+      // Set on wolf_kill rows whose effective target differs from the
+      // wolves' pick — names the role responsible so the client can color
+      // the redirect arrow per redirector (Lep green, Warlock blue).
+      redirectedBy: 'Leprechaun' | 'Warlock' | null;
     };
 
     // Build a set of (night, targetId) pairs that actually died, used to
@@ -1007,14 +1011,19 @@ export const endGameView = query({
         });
       }
     }
-    // Leprechaun redirect: precompute the effective target for each night's
-    // FIRST wolf_kill row (sorted by resolvedAt). Only the first kill is
-    // redirectable per house rules; subsequent kills (cub vengeance) resolve
-    // un-redirected. Empty when no leprechaun ever moved a kill.
+    // Warlock cancel / Leprechaun redirect: precompute the effective target
+    // for each night's FIRST wolf_kill row (sorted by resolvedAt). Only the
+    // first kill is overridable per house rules; subsequent kills (cub
+    // vengeance) resolve untouched. Priority: Warlock > Lep > original.
     const wolfKillEffectiveTarget = new Map<Id<'nightActions'>, Id<'players'>>();
+    const wolfKillRedirectedBy = new Map<
+      Id<'nightActions'>,
+      'Leprechaun' | 'Warlock'
+    >();
     {
       const killsByNight = new Map<number, typeof actions>();
-      const redirectByNight = new Map<number, typeof actions[number]>();
+      const lepRedirectByNight = new Map<number, typeof actions[number]>();
+      const warlockRedirectByNight = new Map<number, typeof actions[number]>();
       for (const a of actions) {
         if (a.actionType === 'wolf_kill') {
           const list = killsByNight.get(a.nightNumber) ?? [];
@@ -1024,8 +1033,11 @@ export const endGameView = query({
         if (a.actionType === 'leprechaun_redirect') {
           const dir = a.result?.direction;
           if (dir === 'L' || dir === 'R') {
-            redirectByNight.set(a.nightNumber, a);
+            lepRedirectByNight.set(a.nightNumber, a);
           }
+        }
+        if (a.actionType === 'warlock_redirect') {
+          warlockRedirectByNight.set(a.nightNumber, a);
         }
       }
       for (const [night, kills] of killsByNight) {
@@ -1033,11 +1045,19 @@ export const endGameView = query({
           .slice()
           .sort((x, y) => x.resolvedAt - y.resolvedAt)[0];
         if (!first) continue;
-        const redirect = redirectByNight.get(night);
-        const newId = redirect?.result?.newTargetId as
-          | Id<'players'>
-          | undefined;
-        if (newId) wolfKillEffectiveTarget.set(first._id, newId);
+        const warlock = warlockRedirectByNight.get(night);
+        const warlockId = warlock?.targetPlayerId as Id<'players'> | undefined;
+        if (warlockId) {
+          wolfKillEffectiveTarget.set(first._id, warlockId);
+          wolfKillRedirectedBy.set(first._id, 'Warlock');
+          continue;
+        }
+        const lep = lepRedirectByNight.get(night);
+        const newId = lep?.result?.newTargetId as Id<'players'> | undefined;
+        if (newId) {
+          wolfKillEffectiveTarget.set(first._id, newId);
+          wolfKillRedirectedBy.set(first._id, 'Leprechaun');
+        }
       }
     }
 
@@ -1141,6 +1161,7 @@ export const endGameView = query({
             victimNames: null,
             fromRole: null,
             toRole: null,
+            redirectedBy: null,
           });
         }
         // Fall through to the catch-all below, which pushes the row to
@@ -1211,6 +1232,7 @@ export const endGameView = query({
         victimNames: null,
         fromRole,
         toRole,
+        redirectedBy: null,
       };
 
       if (a.actionType === 'wolf_kill') {
@@ -1228,6 +1250,7 @@ export const endGameView = query({
           effectiveId !== a.targetPlayerId
         ) {
           baseEntry.secondTargetName = nameFor(effectiveId);
+          baseEntry.redirectedBy = wolfKillRedirectedBy.get(a._id) ?? null;
         }
         const converted =
           effectiveId &&
@@ -1393,6 +1416,16 @@ export const endGameView = query({
         baseEntry.outcome = result.blocked
           ? 'blocked'
           : result.direction ?? null;
+      }
+
+      // Warlock cancel + retarget. Outcome reflects whether the chosen target
+      // actually died this night — KILLED if a same-night death row hit them,
+      // SAVED otherwise (BG / witch save / TG resist on a Tough Guy target).
+      if (a.actionType === 'warlock_redirect') {
+        const killed =
+          !!a.targetPlayerId &&
+          deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+        baseEntry.outcome = killed ? 'killed' : 'saved';
       }
 
       // Mad Bomber's blast — populate victim names from the result blob

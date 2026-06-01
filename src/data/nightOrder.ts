@@ -27,6 +27,11 @@ export const NIGHT_STEPS = [
   'doppelganger_dawn',
   'wolves',
   'nightmare_wolf',
+  // Warlock decides independently of the wolves' pick — listed near the
+  // wolves so ghost-log readers see the cancel-and-replace alongside the
+  // kill it overrides. Resolution at dawn applies warlock cancel first,
+  // then leprechaun, then everything else keys off the effective target.
+  'warlock',
   'seer',
   'pi',
   'mentalist',
@@ -63,6 +68,8 @@ export function nightStepLabel(step: NightStep): string {
       return 'The witch is awake';
     case 'leprechaun':
       return 'The leprechaun is awake';
+    case 'warlock':
+      return 'The warlock is awake';
     case 'bodyguard':
       return 'The bodyguard is awake';
     case 'huntress':
@@ -115,6 +122,7 @@ export function gateFor(step: NightStep, hasNightmareWolf: boolean): GateKind {
     case 'witch':
     case 'leprechaun':
       return hasNightmareWolf ? 'nightmare_wolf' : 'wolves';
+    case 'warlock':
     case 'seer':
     case 'pi':
     case 'mentalist':

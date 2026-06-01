@@ -50,6 +50,7 @@ type HistoryEntry = {
   victimNames: string[] | null;
   fromRole: string | null;
   toRole: string | null;
+  redirectedBy: 'Leprechaun' | 'Warlock' | null;
 };
 
 function renderEntryBody(entry: HistoryEntry): React.ReactNode {
@@ -74,6 +75,10 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
               : '#5BA0E5';
       const redirected =
         entry.secondTargetName != null && entry.secondTargetName !== t;
+      // Color the redirect arrow by who bent the kill — Leprechaun's mint
+      // green vs the Warlock's deeper sorcerer blue.
+      const redirectColor =
+        entry.redirectedBy === 'Warlock' ? '#5072C8' : '#5BC97A';
       return (
         <Text className="text-wolf-text text-sm">
           Targeted {t}
@@ -81,7 +86,7 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
             <>
               {' '}
               →{' '}
-              <Text className="font-bold" style={{ color: '#5BC97A' }}>
+              <Text className="font-bold" style={{ color: redirectColor }}>
                 {entry.secondTargetName}
               </Text>
             </>
@@ -208,6 +213,20 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
         </Text>
       );
     case 'huntress_skip':
+      return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
+    case 'warlock_redirect':
+      return (
+        <Text className="text-wolf-text text-sm">
+          Targeted {t} —{' '}
+          <Text
+            className="font-bold"
+            style={{ color: entry.outcome === 'killed' ? '#B03A2E' : '#5BA0E5' }}
+          >
+            {entry.outcome === 'killed' ? 'KILLED' : 'SAVED'}
+          </Text>
+        </Text>
+      );
+    case 'warlock_skip':
       return <Text className="text-wolf-muted text-sm italic">Passed</Text>;
     case 'revealer_shot': {
       const label =

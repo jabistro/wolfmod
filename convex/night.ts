@@ -93,6 +93,7 @@ const NIGHTMARE_BLOCKABLE_STEPS = new Set<NightStep>([
   'mentalist',
   'witch',
   'leprechaun',
+  'warlock',
   'bodyguard',
   'huntress',
   'revealer',
@@ -152,6 +153,15 @@ function activePlayersForStep(
       );
     case 'leprechaun':
       return dropNightmared(alive.filter(p => p.role === 'Leprechaun'));
+    case 'warlock':
+      // One-time: once they've used their power, they're no longer an active
+      // actor. The step still dwells for cloak symmetry; isStepComplete sees
+      // actors=[] and auto-completes when the dwell elapses.
+      return dropNightmared(
+        alive.filter(
+          p => p.role === 'Warlock' && !p.roleState?.warlockSpent,
+        ),
+      );
     case 'bodyguard':
       return dropNightmared(alive.filter(p => p.role === 'Bodyguard'));
     case 'huntress':
@@ -202,6 +212,8 @@ function stepIsInGame(step: NightStep, selectedRoles: string[]): boolean {
       return set.has('Witch');
     case 'leprechaun':
       return set.has('Leprechaun');
+    case 'warlock':
+      return set.has('Warlock');
     case 'bodyguard':
       return set.has('Bodyguard');
     case 'huntress':
@@ -354,6 +366,21 @@ async function isStepComplete(
         'leprechaun_redirect',
       );
       return acts.length >= actors.length;
+    }
+    case 'warlock': {
+      const kills = await getNightActions(
+        ctx,
+        gameId,
+        nightNumber,
+        'warlock_redirect',
+      );
+      const skips = await getNightActions(
+        ctx,
+        gameId,
+        nightNumber,
+        'warlock_skip',
+      );
+      return kills.length + skips.length >= actors.length;
     }
     case 'bodyguard': {
       const protects = await getNightActions(ctx, gameId, nightNumber, 'bg_protect');
@@ -635,6 +662,20 @@ async function autoResolveStep(
       }
       return;
     }
+    case 'warlock': {
+      // Bot warlock always passes — never burn a one-time power on a random
+      // target in tests.
+      for (const w of actors) {
+        await ctx.db.insert('nightActions', {
+          gameId,
+          nightNumber,
+          actorPlayerId: w._id,
+          actionType: 'warlock_skip',
+          resolvedAt: now,
+        });
+      }
+      return;
+    }
     case 'bodyguard': {
       for (const bg of actors) {
         const lastProtected = bg.roleState?.bgLastProtected as
@@ -773,38 +814,56 @@ async function resolveMorning(
       addCandidate(p._id, 'tough_guy', false);
     }
   }
-  // Leprechaun in the game = plausible deniability for wolf-on-wolf kills.
-  // Without a Leprechaun, wolves who target a fellow wolf are obviously
-  // abusing the mechanic to farm their own death powers (Wolf Cub vengeance,
-  // Hunter Wolf shot), so we suppress those benefits below. The Lep counts
-  // even if dead — at the table the wolves don't necessarily know that, and
-  // they may have been hoping for a redirect.
-  const leprechaunInGame = allPlayersForTG.some(p => p.role === 'Leprechaun');
+  // A Leprechaun OR a Warlock in the game = plausible deniability for
+  // wolf-on-wolf kills. Without either, wolves who target a fellow wolf are
+  // obviously abusing the mechanic to farm their own death powers (Wolf Cub
+  // vengeance, Hunter Wolf shot), so we suppress those benefits below. Both
+  // count even if dead (or spent) — at the table the wolves don't
+  // necessarily know that, and they may have been hoping for a redirect /
+  // cancellation.
+  const redirectorInGame = allPlayersForTG.some(
+    p => p.role === 'Leprechaun' || p.role === 'Warlock',
+  );
   const roleById = new Map(allPlayersForTG.map(p => [p._id, p.role ?? '']));
 
   const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
-  // Leprechaun redirect: only applies to the FIRST wolf_kill row (oldest by
-  // resolvedAt). A direction of 'L' or 'R' swaps that kill's effective
-  // target to result.newTargetId; 'leave' is a no-op for resolution.
-  // Downstream protections (BG, witch save, TG resist) and the Diseased
-  // trigger all key off the EFFECTIVE target so the redirect propagates
-  // naturally.
+  // Effective-target overrides on the FIRST wolf_kill row (oldest by
+  // resolvedAt). Priority: Warlock cancel > Leprechaun redirect > original.
+  // 'leave' Lep rows are no-ops. Downstream protections (BG, witch save,
+  // TG resist) and the Diseased trigger all key off the EFFECTIVE target so
+  // the redirect propagates naturally. The wolf_kill row itself stays
+  // pristine so refreshStep can wipe the redirect/cancel rows cleanly.
   const sortedKills = kills.slice().sort((a, b) => a.resolvedAt - b.resolvedAt);
-  const redirects = await getNightActions(
+  const lepRedirects = await getNightActions(
     ctx,
     gameId,
     nightNumber,
     'leprechaun_redirect',
   );
-  let firstKillOverride: Id<'players'> | null = null;
-  for (const r of redirects) {
-    const dir = r.result?.direction;
-    if (dir === 'L' || dir === 'R') {
-      const newId = r.result?.newTargetId as Id<'players'> | undefined;
-      if (newId) firstKillOverride = newId;
+  const warlockRedirects = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'warlock_redirect',
+  );
+  let warlockTarget: Id<'players'> | null = null;
+  for (const w of warlockRedirects) {
+    const t = w.targetPlayerId as Id<'players'> | undefined;
+    if (t) {
+      warlockTarget = t;
       break;
     }
   }
+  let lepOverride: Id<'players'> | null = null;
+  for (const r of lepRedirects) {
+    const dir = r.result?.direction;
+    if (dir === 'L' || dir === 'R') {
+      const newId = r.result?.newTargetId as Id<'players'> | undefined;
+      if (newId) lepOverride = newId;
+      break;
+    }
+  }
+  const firstKillOverride: Id<'players'> | null = warlockTarget ?? lepOverride;
   const effectiveKillTarget = (
     k: (typeof kills)[number],
   ): Id<'players'> | undefined => {
@@ -816,6 +875,13 @@ async function resolveMorning(
   for (const kill of kills) {
     const id = effectiveKillTarget(kill);
     if (id) addCandidate(id, 'wolf', true);
+  }
+  // Diseased-blocked / no-wolf-kill night where the Warlock still fired:
+  // there's no wolf_kill row to override, so spawn a synthetic wolf-cause
+  // candidate at the warlock's target. Power still consumed regardless of
+  // outcome.
+  if (warlockTarget && sortedKills.length === 0) {
+    addCandidate(warlockTarget, 'wolf', true);
   }
 
   const witchPoisons = await getNightActions(ctx, gameId, nightNumber, 'witch_poison');
@@ -934,12 +1000,12 @@ async function resolveMorning(
   }
 
   // Self-inflicted wolf-team deaths (wolves voted to kill one of their own)
-  // forfeit their death powers when there's no Leprechaun in the game — see
-  // the leprechaunInGame comment above. Cause === 'wolf' and dead player is
-  // wolf-team is the signature. With a Lep present, this set stays empty
-  // and all powers fire normally.
+  // forfeit their death powers when there's no Leprechaun or Warlock in the
+  // game — see the redirectorInGame comment above. Cause === 'wolf' and dead
+  // player is wolf-team is the signature. With either redirector present,
+  // this set stays empty and all powers fire normally.
   const suppressedSelfWolfKills = new Set<Id<'players'>>();
-  if (!leprechaunInGame) {
+  if (!redirectorInGame) {
     for (const id of newDeadIds) {
       const cause = candidates.get(id)?.cause;
       if (cause !== 'wolf') continue;
@@ -1264,24 +1330,41 @@ async function resolveCursedConversionsForNight(
   );
   if (cursedPlayers.length === 0) return;
 
-  // Effective wolf targets after the Leprechaun redirect on the first kill.
+  // Effective wolf targets after Warlock cancel / Leprechaun redirect on the
+  // first kill. Priority: Warlock > Lep > original. Diseased-night Warlock
+  // synthesizes a target even with no wolf_kill row.
   const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
   const sortedKills = kills.slice().sort((a, b) => a.resolvedAt - b.resolvedAt);
-  const redirects = await getNightActions(
+  const lepRedirects = await getNightActions(
     ctx,
     gameId,
     nightNumber,
     'leprechaun_redirect',
   );
-  let firstKillOverride: Id<'players'> | null = null;
-  for (const r of redirects) {
-    const dir = r.result?.direction;
-    if (dir === 'L' || dir === 'R') {
-      const newId = r.result?.newTargetId as Id<'players'> | undefined;
-      if (newId) firstKillOverride = newId;
+  const warlockRedirects = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'warlock_redirect',
+  );
+  let warlockTarget: Id<'players'> | null = null;
+  for (const w of warlockRedirects) {
+    const t = w.targetPlayerId as Id<'players'> | undefined;
+    if (t) {
+      warlockTarget = t;
       break;
     }
   }
+  let lepOverride: Id<'players'> | null = null;
+  for (const r of lepRedirects) {
+    const dir = r.result?.direction;
+    if (dir === 'L' || dir === 'R') {
+      const newId = r.result?.newTargetId as Id<'players'> | undefined;
+      if (newId) lepOverride = newId;
+      break;
+    }
+  }
+  const firstKillOverride: Id<'players'> | null = warlockTarget ?? lepOverride;
   const effectiveTargets = new Set<Id<'players'>>();
   for (const k of kills) {
     if (firstKillOverride && sortedKills[0]?._id === k._id) {
@@ -1289,6 +1372,10 @@ async function resolveCursedConversionsForNight(
     } else if (k.targetPlayerId) {
       effectiveTargets.add(k.targetPlayerId);
     }
+  }
+  // Diseased-blocked night: Warlock's synthetic kill still targets a Cursed.
+  if (warlockTarget && sortedKills.length === 0) {
+    effectiveTargets.add(warlockTarget);
   }
 
   // BG covers everything (including the conversion itself); Witch save
@@ -1640,24 +1727,40 @@ async function predictNightVictims(
     }
   }
 
-  // Wolves + Leprechaun redirect — mirrors resolveMorning's effectiveKillTarget.
+  // Wolves + Warlock cancel + Leprechaun redirect — mirrors resolveMorning's
+  // effectiveKillTarget. Priority: Warlock > Lep > original wolf_kill target.
   const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
   const sortedKills = kills.slice().sort((a, b) => a.resolvedAt - b.resolvedAt);
-  const redirects = await getNightActions(
+  const lepRedirects = await getNightActions(
     ctx,
     gameId,
     nightNumber,
     'leprechaun_redirect',
   );
-  let firstKillOverride: Id<'players'> | null = null;
-  for (const r of redirects) {
-    const dir = r.result?.direction;
-    if (dir === 'L' || dir === 'R') {
-      const newId = r.result?.newTargetId as Id<'players'> | undefined;
-      if (newId) firstKillOverride = newId;
+  const warlockRedirects = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'warlock_redirect',
+  );
+  let warlockTarget: Id<'players'> | null = null;
+  for (const w of warlockRedirects) {
+    const t = w.targetPlayerId as Id<'players'> | undefined;
+    if (t) {
+      warlockTarget = t;
       break;
     }
   }
+  let lepOverride: Id<'players'> | null = null;
+  for (const r of lepRedirects) {
+    const dir = r.result?.direction;
+    if (dir === 'L' || dir === 'R') {
+      const newId = r.result?.newTargetId as Id<'players'> | undefined;
+      if (newId) lepOverride = newId;
+      break;
+    }
+  }
+  const firstKillOverride: Id<'players'> | null = warlockTarget ?? lepOverride;
   const effectiveKillTargetId = (
     k: (typeof kills)[number],
   ): Id<'players'> | undefined => {
@@ -1669,6 +1772,10 @@ async function predictNightVictims(
   for (const k of kills) {
     const id = effectiveKillTargetId(k);
     if (id) addCandidate(id, 'wolf', true);
+  }
+  // Diseased-blocked night: Warlock's kill still lands.
+  if (warlockTarget && sortedKills.length === 0) {
+    addCandidate(warlockTarget, 'wolf', true);
   }
 
   const witchPoisons = await getNightActions(
@@ -3591,6 +3698,138 @@ export const submitLeprechaunMove = mutation({
   },
 });
 
+// ───── Warlock ─────────────────────────────────────────────────────────────
+//
+// One-time night power. Each night until used, the Warlock is asked whether
+// to use their power. They do NOT see the wolves' chosen target — they pick
+// any alive player as a NEW kill target (cancelling the wolves' pick), or
+// pass for the night. Picking spends the power (`roleState.warlockSpent`);
+// passing preserves it for a later night.
+//
+// `warlock_redirect` is recorded with the chosen target. Resolution at dawn:
+//   - If a wolf_kill row exists, the warlock's target overrides the FIRST
+//     wolf_kill's effective target (taking priority over a Leprechaun redirect).
+//   - If no wolf_kill row exists (diseased-blocked night, wolves all dead),
+//     the warlock's pick is still added as a wolf-cause kill candidate.
+//
+// `warlock_skip` is a pass — power not consumed.
+
+export const submitWarlockKill = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    targetPlayerId: v.id('players'),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || !isStepActive(game, 'warlock')) {
+      throw new Error('The warlock is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Warlock') {
+      throw new Error('Only the warlock can act.');
+    }
+    if (me.roleState?.warlockSpent) {
+      throw new Error('You have already used your power.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'warlock_redirect',
+      )
+    ) {
+      throw new Error('Already acted tonight.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'warlock_skip',
+      )
+    ) {
+      throw new Error('You have already passed tonight.');
+    }
+
+    const target = await ctx.db.get(args.targetPlayerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new Error('Invalid target.');
+    }
+    if (!target.alive) throw new Error('Target is already eliminated.');
+
+    await ctx.db.patch(me._id, {
+      roleState: { ...(me.roleState ?? {}), warlockSpent: true },
+    });
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'warlock_redirect',
+      targetPlayerId: args.targetPlayerId,
+      resolvedAt: Date.now(),
+    });
+
+    await ensureReadingWindow(ctx, args.gameId, 'warlock');
+  },
+});
+
+export const submitWarlockPass = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || !isStepActive(game, 'warlock')) {
+      throw new Error('The warlock is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Warlock') {
+      throw new Error('Only the warlock can pass tonight.');
+    }
+    if (me.roleState?.warlockSpent) {
+      throw new Error('You have already used your power.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'warlock_redirect',
+      ) ||
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'warlock_skip',
+      )
+    ) {
+      return; // already decided
+    }
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'warlock_skip',
+      resolvedAt: Date.now(),
+    });
+
+    await ensureReadingWindow(ctx, args.gameId, 'warlock');
+  },
+});
+
 /**
  * Idempotent advance — anyone can call it; the engine only moves forward
  * when the current step is complete AND the dwell deadline has passed.
@@ -3667,6 +3906,7 @@ const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
   mentalist: ['mentalist_check'],
   witch: ['witch_save', 'witch_poison', 'witch_done'],
   leprechaun: ['leprechaun_redirect'],
+  warlock: ['warlock_redirect', 'warlock_skip'],
   bodyguard: ['bg_protect'],
   huntress: ['huntress_shot', 'huntress_skip'],
   revealer: ['revealer_shot', 'revealer_skip'],
@@ -3742,6 +3982,16 @@ export const refreshStep = mutation({
         if (a.targetPlayerId) nwSleepTargets.add(a.targetPlayerId);
       }
     }
+    // Warlock: capture every actor who submitted a warlock_redirect this
+    // night BEFORE deletion, so we can unset `warlockSpent` on the do-over.
+    // warlock_skip rows don't spend, so no revert needed for skippers.
+    const warlockActorsToUnspend = new Set<Id<'players'>>();
+    if (step === 'warlock') {
+      for (const a of actions) {
+        if (a.actionType !== 'warlock_redirect') continue;
+        if (a.actorPlayerId) warlockActorsToUnspend.add(a.actorPlayerId);
+      }
+    }
     for (const a of actions) {
       if (types.has(a.actionType)) {
         await ctx.db.delete(a._id);
@@ -3770,6 +4020,18 @@ export const refreshStep = mutation({
           void nightmaredOn;
           await ctx.db.patch(targetId, { roleState: rest });
         }
+      }
+    }
+
+    // Warlock: unset the `warlockSpent` flag on every warlock who submitted
+    // a kill row this night, so they can re-decide on the refresh.
+    if (step === 'warlock') {
+      for (const wid of warlockActorsToUnspend) {
+        const w = await ctx.db.get(wid);
+        if (!w || !w.roleState?.warlockSpent) continue;
+        const { warlockSpent, ...rest } = w.roleState;
+        void warlockSpent;
+        await ctx.db.patch(wid, { roleState: rest });
       }
     }
 
@@ -3955,6 +4217,7 @@ const STEP_ROLE_LABEL: Record<NightStep, string> = {
   mentalist: 'Mentalist',
   witch: 'Witch',
   leprechaun: 'Leprechaun',
+  warlock: 'Warlock',
   bodyguard: 'Bodyguard',
   huntress: 'Huntress',
   revealer: 'Revealer',
@@ -3975,6 +4238,7 @@ const STEP_TO_ROLE: Partial<Record<NightStep, string>> = {
   mentalist: 'Mentalist',
   witch: 'Witch',
   leprechaun: 'Leprechaun',
+  warlock: 'Warlock',
   bodyguard: 'Bodyguard',
   huntress: 'Huntress',
   revealer: 'Revealer',
@@ -4180,6 +4444,24 @@ function buildActorCardForStep(
       }
       if (eliminated) return eliminatedEntry();
       if (nightmared) return nightmaredEntry();
+      return null;
+    }
+    case 'warlock': {
+      const redirect = findRow('warlock_redirect');
+      if (redirect?.targetPlayerId) {
+        return entry(
+          `Targeted ${nameOf(redirect.targetPlayerId as Id<'players'>)}`,
+          LOG_COLOR_WOLF,
+          'action',
+          redirect._id as unknown as string,
+        );
+      }
+      const skip = findRow('warlock_skip');
+      if (skip) return passEntry(skip);
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
+      if (actor.roleState?.warlockSpent)
+        return spentEntry('Power has been used.');
       return null;
     }
     case 'bodyguard': {
@@ -4959,6 +5241,48 @@ export const nightView = query({
       };
     }
 
+    // Warlock-only state. Once-per-game cancel + retarget. Does NOT see the
+    // wolves' chosen target — picker just offers any alive player (or pass).
+    // `spent` survives across nights; `hasActedThisNight` drives the locked
+    // waiting view after the pick.
+    let warlockState: {
+      spent: boolean;
+      hasActedThisNight: boolean;
+      tonightTarget: { _id: Id<'players'>; name: string } | null;
+      tonightSkipped: boolean;
+    } | null = null;
+    const warlockActor = actorForRole('Warlock', 'warlock');
+    if (warlockActor) {
+      const playerById = new Map(players.map(p => [p._id, p]));
+      const myActions = await ctx.db
+        .query('nightActions')
+        .withIndex('by_game_night', q =>
+          q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
+        )
+        .collect();
+      const killAction = myActions.find(
+        a =>
+          a.actorPlayerId === warlockActor._id &&
+          a.actionType === 'warlock_redirect',
+      );
+      const skipAction = myActions.find(
+        a =>
+          a.actorPlayerId === warlockActor._id &&
+          a.actionType === 'warlock_skip',
+      );
+      let tonightTarget: { _id: Id<'players'>; name: string } | null = null;
+      if (killAction?.targetPlayerId) {
+        const t = playerById.get(killAction.targetPlayerId);
+        if (t) tonightTarget = { _id: t._id, name: t.name };
+      }
+      warlockState = {
+        spent: !!warlockActor.roleState?.warlockSpent,
+        hasActedThisNight: !!(killAction || skipAction),
+        tonightTarget,
+        tonightSkipped: !!skipAction,
+      };
+    }
+
     // Nightmare Wolf state. Visible to the alive NW always, and to dead
     // spectators during the nightmare_wolf step (ghost mirror). `charges`
     // counts down from 2; `prevTargetIds` tracks the same-target restriction;
@@ -5031,6 +5355,7 @@ export const nightView = query({
           (s === 'mentalist' && me.role === 'Mentalist') ||
           (s === 'witch' && me.role === 'Witch') ||
           (s === 'leprechaun' && me.role === 'Leprechaun') ||
+          (s === 'warlock' && me.role === 'Warlock') ||
           (s === 'bodyguard' && me.role === 'Bodyguard') ||
           (s === 'huntress' && me.role === 'Huntress') ||
           (s === 'revealer' && me.role === 'Revealer') ||
@@ -5337,6 +5662,12 @@ export const nightView = query({
       } else if (step === 'witch') {
         // Poison targets — alive, non-self.
         pool = alive.filter(p => p._id !== v._id);
+      } else if (step === 'warlock') {
+        // Warlock may pick any alive player, including wolves and themselves.
+        // Self-sacrifice is intentional (parallels Leprechaun); wolves are
+        // pickable since the Warlock has no information about the wolves'
+        // own target.
+        pool = alive;
       } else if (step === 'bodyguard') {
         const lastProtected = v.roleState?.bgLastProtected as
           | Id<'players'>
@@ -5442,6 +5773,7 @@ export const nightView = query({
       mentalistState,
       witchState,
       leprechaunState,
+      warlockState,
       bgState,
       huntressState,
       revealerState,

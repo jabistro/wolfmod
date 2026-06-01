@@ -41,7 +41,7 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
   "Frankenstein's Monster": 'Each time a special role dies, gains that role\'s power. Abilities stack as the game grinds on.',
   'Mystic Seer': 'Each night, learns the exact role of a chosen player.',
   'Gemini': 'Wakes on the first night to identify the other Gemini.',
-  'Warlock': 'Once per game, may cancel a night kill and aim it at a different player instead.',
+  'Warlock': 'Once per game, may redirect the wolves\' kill onto any player of their choosing.',
   'Exposer': 'Wakes every night. Once per game, may pick a player to be publicly outed by morning.',
   'Insomniac': 'Each night, learns whether at least one of their neighbors performed a night action.',
   'Tough Girl': 'Survives the first wolf attack until the next night. If only she and one wolf remain, village wins.',

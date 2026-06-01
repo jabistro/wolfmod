@@ -47,7 +47,7 @@ export const ROLES: Role[] = [
   { name: 'Mason',                   category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),                   thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Villager',                category: 'villagers', image: require('../../roles_ghibli_medium/villager.jpg'),                thumb: require('../../roles_ghibli_thumbs/villager.jpg') },
   { name: 'Mentalist',               category: 'villagers', image: require('../../roles_ghibli_medium/mentalist.jpg'),               thumb: require('../../roles_ghibli_thumbs/mentalist.jpg') },
-  { name: 'Warlock',                 category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),                 thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
+  { name: 'Warlock',                 category: 'villagers', image: require('../../roles_ghibli_medium/warlock.jpg'),                 thumb: require('../../roles_ghibli_thumbs/warlock.jpg') },
   { name: 'Bodyguard',               category: 'villagers', image: require('../../roles_ghibli_medium/bodyguard.jpg'),               thumb: require('../../roles_ghibli_thumbs/bodyguard.jpg') },
   { name: 'Tough Guy',               category: 'villagers', image: require('../../roles_ghibli_medium/tough_guy.jpg'),               thumb: require('../../roles_ghibli_thumbs/tough_guy.jpg') },
   { name: 'Exposer',                 category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),                 thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
