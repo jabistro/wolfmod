@@ -16,14 +16,42 @@ export default defineSchema({
     ),
     nightNumber: v.number(),
     dayNumber: v.number(),
-    nightStep: v.optional(v.string()),
     /**
-     * Wall-clock deadline (ms) for the current night step. Each step holds at
-     * least until this passes, even if the action is recorded earlier. This
-     * cloaks "actor is dead" (instant skip) vs "actor is deciding" (variable
-     * time) — they look the same to other players.
+     * Legacy single-step pointer (sequential engine). Engine no longer
+     * writes these — `nightActiveSteps` + `nightCompletedSteps` are the
+     * authoritative state. Kept optional so any docs from older deploys
+     * still validate.
      */
+    nightStep: v.optional(v.string()),
     nightStepEndsAt: v.optional(v.number()),
+
+    /**
+     * Currently-active night steps. Multiple steps can be active in parallel
+     * once their gates are satisfied (see src/data/nightOrder.ts → gateFor).
+     * Each entry carries its own dwell deadline so an actor's reading window
+     * is per-step, not global. Cleared on transition to morning.
+     */
+    nightActiveSteps: v.optional(
+      v.array(
+        v.object({
+          step: v.string(),
+          endsAt: v.number(),
+        }),
+      ),
+    ),
+    /**
+     * Steps that have already completed this night (action(s) recorded +
+     * dwell elapsed). Drives gate evaluation for newly-activatable steps.
+     * Cleared on transition to morning.
+     */
+    nightCompletedSteps: v.optional(v.array(v.string())),
+    /**
+     * Minimum wall-clock deadline before the night can transition to morning,
+     * even if every active step finishes earlier. Cloaks games where most
+     * roles are dead/spent — without this floor, fast-resolving nights would
+     * tell observers that the table is thinned out. Cleared at morning.
+     */
+    nightFloorEndsAt: v.optional(v.number()),
     selectedRoles: v.array(v.string()),
     winner: v.optional(v.union(v.literal('village'), v.literal('wolf'))),
     createdAt: v.number(),

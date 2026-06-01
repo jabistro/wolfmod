@@ -116,6 +116,7 @@ export default function NightScreen() {
     me,
     isMyStep,
     stepLabel,
+    myActivePickerStep,
     wolfState,
     sasquatchReveal,
     seerHistory,
@@ -145,14 +146,16 @@ export default function NightScreen() {
   }
 
   const isGhost = !me.alive;
+  const activeStepNames: string[] = game.activeSteps.map(e => e.step);
 
-  // The picker tree gates on `nightStep === 'X' && XState` rather than
-  // `isMyStep`, because XState is server-populated only for the role's actor
-  // (alive) or for dead spectators viewing that step. This lets ghosts mirror
-  // exactly what the alive actor sees, with the wrapper below disabling taps.
+  // With parallel waves, the picker tree gates on `myActivePickerStep`. The
+  // server picks the single step whose picker this caller should see right
+  // now (at most one, since one player can only fill one role-step). Other
+  // active steps are running concurrently on other phones, but this user's
+  // view shows only their own picker.
   const pickerTree = (
     <>
-      {game.nightStep === 'wolves' && wolfState && (
+      {myActivePickerStep === 'wolves' && wolfState && (
         wolfState.blocked ? (
           <WolvesBlockedView wolves={wolfState.wolves} isGhost={isGhost} />
         ) : (
@@ -171,7 +174,7 @@ export default function NightScreen() {
         )
       )}
 
-      {game.nightStep === 'seer' && seerHistory != null && (
+      {myActivePickerStep === 'seer' && seerHistory != null && (
         <SeerPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -185,7 +188,7 @@ export default function NightScreen() {
         />
       )}
 
-      {game.nightStep === 'pi' && piState && (
+      {myActivePickerStep === 'pi' && piState && (
         <PIPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -198,7 +201,7 @@ export default function NightScreen() {
         />
       )}
 
-      {game.nightStep === 'mentalist' && mentalistState && (
+      {myActivePickerStep === 'mentalist' && mentalistState && (
         <MentalistPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -212,7 +215,7 @@ export default function NightScreen() {
         />
       )}
 
-      {game.nightStep === 'witch' && witchState && (
+      {myActivePickerStep === 'witch' && witchState && (
         <WitchPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -225,7 +228,7 @@ export default function NightScreen() {
         />
       )}
 
-      {game.nightStep === 'leprechaun' && leprechaunState && (
+      {myActivePickerStep === 'leprechaun' && leprechaunState && (
         <LeprechaunPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -234,7 +237,7 @@ export default function NightScreen() {
         />
       )}
 
-      {game.nightStep === 'bodyguard' && bgState && (
+      {myActivePickerStep === 'bodyguard' && bgState && (
         <BodyguardPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -247,7 +250,7 @@ export default function NightScreen() {
         />
       )}
 
-      {game.nightStep === 'huntress' && huntressState && (
+      {myActivePickerStep === 'huntress' && huntressState && (
         <HuntressPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -260,7 +263,7 @@ export default function NightScreen() {
         />
       )}
 
-      {game.nightStep === 'revealer' && revealerState && (
+      {myActivePickerStep === 'revealer' && revealerState && (
         <RevealerPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -273,7 +276,7 @@ export default function NightScreen() {
         />
       )}
 
-      {game.nightStep === 'reviler' && revilerState && (
+      {myActivePickerStep === 'reviler' && revilerState && (
         <RevilerPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -286,7 +289,7 @@ export default function NightScreen() {
         />
       )}
 
-      {game.nightStep === 'cursed_conversion' && cursedConversionState && (
+      {activeStepNames.includes('cursed_conversion') && cursedConversionState && (
         <CursedRevealView
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -296,8 +299,8 @@ export default function NightScreen() {
         />
       )}
 
-      {(game.nightStep === 'doppelganger_dawn' ||
-        game.nightStep === 'doppelganger_dusk') &&
+      {(activeStepNames.includes('doppelganger_dawn') ||
+        activeStepNames.includes('doppelganger_dusk')) &&
         doppelgangerRevealState && (
           <DoppelgangerRevealView
             isMine={doppelgangerRevealState.isMine}
@@ -307,7 +310,7 @@ export default function NightScreen() {
           />
         )}
 
-      {game.nightStep === 'nightmare_wolf' && nightmareWolfState && (
+      {myActivePickerStep === 'nightmare_wolf' && nightmareWolfState && (
         <NightmareWolfPicker
           gameId={game._id}
           deviceClientId={deviceClientId}
@@ -381,30 +384,12 @@ export default function NightScreen() {
             )}
           </>
         )
-      ) : !game.nightStep ? (
+      ) : activeStepNames.length === 0 ? (
         <View className="flex-1 items-center justify-center px-8">
           <Text className="text-wolf-muted text-sm text-center">
             You are out of the game. The night unfolds without you.
           </Text>
         </View>
-      ) : game.nightStep === 'cursed_conversion' &&
-        cursedConversionState?.isMine ? (
-        <CursedRevealView
-          gameId={game._id}
-          deviceClientId={deviceClientId}
-          isMine={cursedConversionState.isMine}
-          acknowledged={cursedConversionState.acknowledged}
-          convertedNames={cursedConversionState.convertedNames}
-        />
-      ) : (game.nightStep === 'doppelganger_dawn' ||
-          game.nightStep === 'doppelganger_dusk') &&
-        doppelgangerRevealState?.isMine ? (
-        <DoppelgangerRevealView
-          isMine={doppelgangerRevealState.isMine}
-          fromRole={doppelgangerRevealState.fromRole}
-          toRole={doppelgangerRevealState.toRole}
-          conversions={doppelgangerRevealState.conversions}
-        />
       ) : (
         <NightLogView entries={nightLog ?? []} />
       )}
@@ -414,42 +399,49 @@ export default function NightScreen() {
         wolves={wolfState?.wolves ?? []}
       />
 
-      {me.alive &&
-        me.isHost &&
-        game.nightStep != null &&
-        view.game.skipEligibleAt != null &&
-        now > view.game.skipEligibleAt && (
+      {(() => {
+        if (!me.alive || !me.isHost) return null;
+        const stalled = game.activeSteps.filter(s => now > s.skipEligibleAt);
+        if (stalled.length === 0) return null;
+        return (
           <HostStallOverride
             onRefresh={async () => {
-              try {
-                await refreshStep({
-                  gameId: game._id,
-                  callerDeviceClientId: deviceClientId,
-                  expectedStep: game.nightStep!,
-                });
-              } catch (e) {
-                showAlert(
-                  'Could not refresh',
-                  e instanceof Error ? e.message : String(e),
-                );
+              for (const s of stalled) {
+                try {
+                  await refreshStep({
+                    gameId: game._id,
+                    callerDeviceClientId: deviceClientId,
+                    expectedStep: s.step,
+                  });
+                } catch (e) {
+                  showAlert(
+                    'Could not refresh',
+                    e instanceof Error ? e.message : String(e),
+                  );
+                  return;
+                }
               }
             }}
             onSkip={async () => {
-              try {
-                await forceAdvance({
-                  gameId: game._id,
-                  callerDeviceClientId: deviceClientId,
-                  expectedStep: game.nightStep!,
-                });
-              } catch (e) {
-                showAlert(
-                  'Could not skip',
-                  e instanceof Error ? e.message : String(e),
-                );
+              for (const s of stalled) {
+                try {
+                  await forceAdvance({
+                    gameId: game._id,
+                    callerDeviceClientId: deviceClientId,
+                    expectedStep: s.step,
+                  });
+                } catch (e) {
+                  showAlert(
+                    'Could not skip',
+                    e instanceof Error ? e.message : String(e),
+                  );
+                  return;
+                }
               }
             }}
           />
-        )}
+        );
+      })()}
     </SafeAreaView>
   );
 }

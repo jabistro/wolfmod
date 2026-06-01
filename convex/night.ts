@@ -31,7 +31,7 @@ import {
 import {
   NIGHT_STEPS,
   isNightStep,
-  nextNightStep,
+  gateSatisfied,
   nightStepLabel,
   type NightStep,
 } from '../src/data/nightOrder';
@@ -1175,13 +1175,24 @@ async function resolveMorning(
     await filterRoles(ctx, newDeadIds, ['Hunter', 'Hunter Wolf'])
   ).filter(id => !suppressedSelfWolfKills.has(id));
   if (hunterDeaths.length === 0) {
-    await ctx.db.patch(gameId, { phase: 'morning', nightStep: undefined });
+    await ctx.db.patch(gameId, {
+      phase: 'morning',
+      nightStep: undefined,
+      nightStepEndsAt: undefined,
+      nightActiveSteps: [],
+      nightCompletedSteps: [],
+      nightFloorEndsAt: undefined,
+    });
     await recordWinIfReached(ctx, gameId);
     return;
   }
   await ctx.db.patch(gameId, {
     phase: 'morning',
     nightStep: undefined,
+    nightStepEndsAt: undefined,
+    nightActiveSteps: [],
+    nightCompletedSteps: [],
+    nightFloorEndsAt: undefined,
     triggersFollowUp: 'day',
   });
   await enqueueTriggersForDeaths(ctx, gameId, hunterDeaths);
@@ -1849,17 +1860,153 @@ async function resolveDoppelgangerDuskConversions(
 
 // ───── Step engine ──────────────────────────────────────────────────────────
 //
-// The engine has three primitives:
+// Multiple steps can run in parallel. Each in-game step has a declarative
+// gate (src/data/nightOrder.ts → gateFor) that must be satisfied before its
+// picker activates. Wave layout:
 //
-//   enterStep(step)              — set up a step and start its dwell timer
-//   maybeAdvance()               — advance now if step is complete + dwell over
-//   advanceFromCurrentStep()     — move to next step or resolve morning
+//   no NW in game: wolves + every info/picker role race from t=0;
+//                  witch + lep activate as soon as wolves completes.
+//   NW in game:    wolves alone; nightmare_wolf activates after wolves;
+//                  everyone else activates after nightmare_wolf.
 //
-// Plus a scheduled internal mutation `dwellTick` that fires when each step's
-// dwell deadline arrives. After every state change (action submitted, step
-// entered, dwell elapsed), one of these checks runs, and whichever sees the
-// "complete + elapsed" condition is the one that actually advances. The
-// others are no-ops, so concurrent triggers don't double-advance.
+// State (game doc):
+//   nightActiveSteps      — [{ step, endsAt }] of pickers currently showing
+//   nightCompletedSteps   — steps fully resolved (action(s) + dwell elapsed)
+//                           Also seeded at beginNight with every step whose
+//                           role isn't in the game, so gate evaluation treats
+//                           "not present" identically to "already done".
+//   nightFloorEndsAt      — minimum wall-clock before the night can hand off
+//                           to morning. Cloaks games where most roles are
+//                           dead/spent — a thin table can't finish faster
+//                           than this floor.
+//
+// Primitives:
+//   beginNightWaves(gameId)              — init wave state, activate t=0 steps
+//   enterStep(step)                      — append to active + insert inline rows
+//   completeStep(step)                   — remove from active, add to completed,
+//                                          then try to activate newly-unblocked
+//                                          steps and possibly resolve morning
+//   tryActivateUnblockedSteps(gameId)    — walk all not-yet-active in-game
+//                                          steps; enter any whose gate is met
+//   maybeAdvanceStep(gameId, step)       — if step is complete + its dwell
+//                                          elapsed, completeStep
+//   ensureReadingWindow(gameId, step)    — extend this step's dwell to give
+//                                          actor/ghosts time to read results
+//   tryResolveMorningIfDone(gameId)      — if every in-game step completed +
+//                                          floor elapsed → resolveMorning
+//
+// Scheduled:
+//   dwellTick({ gameId, expectedStep })  — per-step deadline tick. No-ops when
+//                                          the step is no longer active.
+//   nightFloorTick({ gameId })           — when the night-floor elapses, retry
+//                                          morning transition.
+
+const NIGHT_FLOOR_MIN_MS = 20_000;
+const NIGHT_FLOOR_MAX_MS = 30_000;
+
+function randomNightFloorMs(): number {
+  return (
+    NIGHT_FLOOR_MIN_MS +
+    Math.floor(Math.random() * (NIGHT_FLOOR_MAX_MS - NIGHT_FLOOR_MIN_MS))
+  );
+}
+
+function getActiveStepEntries(
+  game: Doc<'games'>,
+): { step: NightStep; endsAt: number }[] {
+  const out: { step: NightStep; endsAt: number }[] = [];
+  for (const e of game.nightActiveSteps ?? []) {
+    if (isNightStep(e.step)) out.push({ step: e.step, endsAt: e.endsAt });
+  }
+  return out;
+}
+
+function getCompletedStepSet(game: Doc<'games'>): Set<NightStep> {
+  const set = new Set<NightStep>();
+  for (const s of game.nightCompletedSteps ?? []) {
+    if (isNightStep(s)) set.add(s);
+  }
+  return set;
+}
+
+export function isStepActive(
+  game: Doc<'games'> | null | undefined,
+  step: NightStep,
+): boolean {
+  if (!game) return false;
+  return (game.nightActiveSteps ?? []).some(e => e.step === step);
+}
+
+function getStepEndsAt(
+  game: Doc<'games'>,
+  step: NightStep,
+): number | undefined {
+  return (game.nightActiveSteps ?? []).find(e => e.step === step)?.endsAt;
+}
+
+function inGameStepSet(selectedRoles: string[]): Set<NightStep> {
+  const set = new Set<NightStep>();
+  for (const s of NIGHT_STEPS) {
+    if (stepIsInGame(s, selectedRoles)) set.add(s);
+  }
+  return set;
+}
+
+function hasNightmareWolfInGame(selectedRoles: string[]): boolean {
+  return selectedRoles.includes('Nightmare Wolf');
+}
+
+export async function beginNightWaves(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<void> {
+  const game = await ctx.db.get(gameId);
+  if (!game) return;
+  const allInGame = inGameStepSet(game.selectedRoles);
+  // Pre-complete every step that's NOT in the game. Gate evaluation treats
+  // "role not present" as equivalent to "step already done" so 'wolves' /
+  // 'nightmare_wolf' gates resolve cleanly even when those roles aren't
+  // selected.
+  const preCompleted: string[] = [];
+  for (const s of NIGHT_STEPS) {
+    if (!allInGame.has(s)) preCompleted.push(s);
+  }
+  const floorMs = randomNightFloorMs();
+  await ctx.db.patch(gameId, {
+    nightActiveSteps: [],
+    nightCompletedSteps: preCompleted,
+    nightFloorEndsAt: Date.now() + floorMs,
+    // Legacy single-step fields are unused — clear them so any stale data
+    // can't confuse query readers during the rollout.
+    nightStep: undefined,
+    nightStepEndsAt: undefined,
+  });
+  await ctx.scheduler.runAfter(floorMs, internal.night.nightFloorTick, {
+    gameId,
+  });
+  await tryActivateUnblockedSteps(ctx, gameId);
+}
+
+async function tryActivateUnblockedSteps(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<void> {
+  const game = await ctx.db.get(gameId);
+  if (!game || game.phase !== 'night') return;
+  const allInGame = inGameStepSet(game.selectedRoles);
+  const completed = getCompletedStepSet(game);
+  const active = new Set(getActiveStepEntries(game).map(e => e.step));
+  const nw = hasNightmareWolfInGame(game.selectedRoles);
+  for (const step of NIGHT_STEPS) {
+    if (!allInGame.has(step)) continue;
+    if (completed.has(step) || active.has(step)) continue;
+    if (!gateSatisfied(step, nw, completed, allInGame)) continue;
+    await enterStep(ctx, gameId, step);
+  }
+  // If everything's already complete (e.g. all in-game steps had no actors
+  // and resolved inline), this checks the floor and possibly hands off.
+  await tryResolveMorningIfDone(ctx, gameId);
+}
 
 export async function enterStep(
   ctx: MutationCtx,
@@ -1868,26 +2015,14 @@ export async function enterStep(
 ): Promise<void> {
   const game = await ctx.db.get(gameId);
   if (!game || game.phase !== 'night') return;
-
-  // Roles not in the role list are publicly known to be empty — skip
-  // immediately rather than fake-waking. Cloaking only matters when the role
-  // *might* be present.
-  if (!stepIsInGame(step, game.selectedRoles)) {
-    const next = nextNightStep(step);
-    if (next) {
-      await enterStep(ctx, gameId, next);
-    } else {
-      await resolveMorning(ctx, gameId, game.nightNumber);
-    }
-    return;
-  }
+  if (isStepActive(game, step)) return;
+  if (getCompletedStepSet(game).has(step)) return;
 
   const dwellMs = randomDwellMs();
   const endsAt = Date.now() + dwellMs;
-  await ctx.db.patch(gameId, {
-    nightStep: step,
-    nightStepEndsAt: endsAt,
-  });
+  const active = getActiveStepEntries(game);
+  active.push({ step, endsAt });
+  await ctx.db.patch(gameId, { nightActiveSteps: active });
 
   // If the active actors are all bots (or there are none), perform their
   // action immediately so the action is recorded by the time the dwell ends.
@@ -1968,23 +2103,51 @@ export async function enterStep(
   }
 
   // Schedule the dwell-end tick. If a real player acts before then, their
-  // action triggers `maybeAdvance` directly — which will see dwell not yet
-  // elapsed and defer to this scheduled tick.
+  // action triggers `ensureReadingWindow` directly — which may bump endsAt
+  // and re-schedule. Stale ticks no-op via the active-set check.
   await ctx.scheduler.runAfter(dwellMs, internal.night.dwellTick, {
     gameId,
     expectedStep: step,
   });
 }
 
-export async function maybeAdvance(
+async function completeStep(
   ctx: MutationCtx,
   gameId: Id<'games'>,
+  step: NightStep,
 ): Promise<void> {
   const game = await ctx.db.get(gameId);
   if (!game || game.phase !== 'night') return;
+  const active = getActiveStepEntries(game);
+  const idx = active.findIndex(e => e.step === step);
+  if (idx < 0) return;
+  // Step-scoped cleanup before transitioning out (preserves today's behavior).
+  if (step === 'doppelganger_dawn' || step === 'doppelganger_dusk') {
+    await clearDoppelgangerRevealsForStep(ctx, gameId, step);
+  }
+  if (step === 'wolves') {
+    await clearSasquatchReveals(ctx, gameId);
+  }
+  active.splice(idx, 1);
+  const completed = Array.from(getCompletedStepSet(game));
+  completed.push(step);
+  await ctx.db.patch(gameId, {
+    nightActiveSteps: active,
+    nightCompletedSteps: completed,
+  });
+  await tryActivateUnblockedSteps(ctx, gameId);
+}
 
-  const step = isNightStep(game.nightStep) ? game.nightStep : undefined;
-  if (!step) return;
+async function maybeAdvanceStep(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  step: NightStep,
+): Promise<void> {
+  const game = await ctx.db.get(gameId);
+  if (!game || game.phase !== 'night') return;
+  const endsAt = getStepEndsAt(game, step);
+  if (endsAt === undefined) return; // not active anymore
+  if (Date.now() < endsAt) return; // dwell still active
 
   const players = await ctx.db
     .query('players')
@@ -1996,47 +2159,13 @@ export async function maybeAdvance(
   if (!(await isStepComplete(ctx, gameId, step, actors, game.nightNumber))) {
     return;
   }
-
-  if (Date.now() < (game.nightStepEndsAt ?? 0)) {
-    return; // dwell still active
-  }
-
-  await advanceFromCurrentStep(ctx, gameId);
-}
-
-async function advanceFromCurrentStep(
-  ctx: MutationCtx,
-  gameId: Id<'games'>,
-): Promise<void> {
-  const game = await ctx.db.get(gameId);
-  if (!game) return;
-  const step = isNightStep(game.nightStep) ? game.nightStep : undefined;
-  if (!step) return;
-  // Doppelganger reveal steps auto-advance on dwell; clear the pending-reveal
-  // flags here so the field is gone by the time the next step renders. If
-  // the field stayed set, the dawn step on the FOLLOWING night would treat
-  // these as a fresh batch and replay the modal.
-  if (step === 'doppelganger_dawn' || step === 'doppelganger_dusk') {
-    await clearDoppelgangerRevealsForStep(ctx, gameId, step);
-  }
-  // Sasquatch conversion reveal is rendered as an overlay during the wolves
-  // step. Once that step advances, clear the flag so subsequent nights don't
-  // replay it.
-  if (step === 'wolves') {
-    await clearSasquatchReveals(ctx, gameId);
-  }
-  const next = nextNightStep(step);
-  if (next) {
-    await enterStep(ctx, gameId, next);
-  } else {
-    await resolveMorning(ctx, gameId, game.nightNumber);
-  }
+  await completeStep(ctx, gameId, step);
 }
 
 /**
  * Removes `pendingDoppelgangerReveal` from every alive player whose phase
- * matches the just-completed reveal step. Called from advanceFromCurrentStep
- * when leaving a doppelganger_dawn / doppelganger_dusk step.
+ * matches the just-completed reveal step. Called from completeStep when
+ * leaving a doppelganger_dawn / doppelganger_dusk step.
  */
 async function clearDoppelgangerRevealsForStep(
   ctx: MutationCtx,
@@ -2062,16 +2191,14 @@ async function clearDoppelgangerRevealsForStep(
  * inserted. Ensures there's still enough remaining dwell for:
  *   - the actor to read their own result (Seer/PI/Mentalist), and
  *   - ghosts/spectators to observe the new action row on the table
- * before the step advances. Bumps `nightStepEndsAt` only if it's about to
+ * before the step advances. Bumps the step's endsAt only if it's about to
  * expire — most of the time this is a no-op, preserving the original
  * cloaking variance.
  *
  * When we do bump, we also schedule a fresh `dwellTick` at the new deadline.
- * The original tick will still fire at the old time, but will no-op via the
- * dwell check; the new tick is the one that ultimately advances.
- *
- * Use this in place of `maybeAdvance` from action mutations. It does not
- * itself attempt to advance — the scheduled tick (old or new) handles that.
+ * The original tick will still fire at the old time, but will see the step
+ * not yet at its deadline and no-op; the new tick is the one that
+ * ultimately advances.
  */
 async function ensureReadingWindow(
   ctx: MutationCtx,
@@ -2079,14 +2206,38 @@ async function ensureReadingWindow(
   step: NightStep,
 ): Promise<void> {
   const game = await ctx.db.get(gameId);
-  if (!game || game.phase !== 'night' || game.nightStep !== step) return;
+  if (!game || game.phase !== 'night') return;
+  const active = getActiveStepEntries(game);
+  const idx = active.findIndex(e => e.step === step);
+  if (idx < 0) return; // not currently active
   const minEndsAt = Date.now() + REVEAL_WINDOW_MS;
-  if ((game.nightStepEndsAt ?? 0) >= minEndsAt) return;
-  await ctx.db.patch(gameId, { nightStepEndsAt: minEndsAt });
+  if (active[idx].endsAt >= minEndsAt) return;
+  active[idx] = { step, endsAt: minEndsAt };
+  await ctx.db.patch(gameId, { nightActiveSteps: active });
   await ctx.scheduler.runAfter(REVEAL_WINDOW_MS, internal.night.dwellTick, {
     gameId,
     expectedStep: step,
   });
+}
+
+async function tryResolveMorningIfDone(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<void> {
+  const game = await ctx.db.get(gameId);
+  if (!game || game.phase !== 'night') return;
+  // Still have active pickers in flight.
+  if (getActiveStepEntries(game).length > 0) return;
+  const allInGame = inGameStepSet(game.selectedRoles);
+  const completed = getCompletedStepSet(game);
+  for (const s of allInGame) {
+    if (!completed.has(s)) return;
+  }
+  // Floor cloak: never finish faster than the per-night minimum. The
+  // scheduled `nightFloorTick` will re-fire this check at the deadline.
+  const floor = game.nightFloorEndsAt ?? 0;
+  if (Date.now() < floor) return;
+  await resolveMorning(ctx, gameId, game.nightNumber);
 }
 
 export const dwellTick = internalMutation({
@@ -2095,13 +2246,15 @@ export const dwellTick = internalMutation({
     expectedStep: v.string(),
   },
   handler: async (ctx, args) => {
-    const game = await ctx.db.get(args.gameId);
-    if (!game || game.phase !== 'night') return;
-    // Ignore stale ticks — if the step has already advanced (e.g., a fast
-    // real-player action after the dwell), there's a phantom scheduled call
-    // for the previous step that should be a no-op.
-    if (game.nightStep !== args.expectedStep) return;
-    await maybeAdvance(ctx, args.gameId);
+    if (!isNightStep(args.expectedStep)) return;
+    await maybeAdvanceStep(ctx, args.gameId, args.expectedStep);
+  },
+});
+
+export const nightFloorTick = internalMutation({
+  args: { gameId: v.id('games') },
+  handler: async (ctx, args) => {
+    await tryResolveMorningIfDone(ctx, args.gameId);
   },
 });
 
@@ -2116,7 +2269,7 @@ export const submitWolfVote = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'wolves') {
+    if (game.phase !== 'night' || !isStepActive(game, 'wolves')) {
       throw new Error('Wolves are not currently awake.');
     }
 
@@ -2245,7 +2398,7 @@ export const submitSeerCheck = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'seer') {
+    if (game.phase !== 'night' || !isStepActive(game, 'seer')) {
       throw new Error('The Seer is not currently awake.');
     }
 
@@ -2299,7 +2452,7 @@ export const submitPICheck = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'pi') {
+    if (game.phase !== 'night' || !isStepActive(game, 'pi')) {
       throw new Error('The PI is not currently awake.');
     }
 
@@ -2358,7 +2511,7 @@ export const submitPISkip = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'pi') {
+    if (game.phase !== 'night' || !isStepActive(game, 'pi')) {
       throw new Error('The PI is not currently awake.');
     }
 
@@ -2406,7 +2559,7 @@ export const submitMentalistCheck = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'mentalist') {
+    if (game.phase !== 'night' || !isStepActive(game, 'mentalist')) {
       throw new Error('The mentalist is not currently awake.');
     }
 
@@ -2491,7 +2644,7 @@ export const submitBGProtect = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'bodyguard') {
+    if (game.phase !== 'night' || !isStepActive(game, 'bodyguard')) {
       throw new Error('The bodyguard is not currently awake.');
     }
 
@@ -2563,7 +2716,7 @@ export const submitHuntressShot = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'huntress') {
+    if (game.phase !== 'night' || !isStepActive(game, 'huntress')) {
       throw new Error('The huntress is not currently awake.');
     }
 
@@ -2625,7 +2778,7 @@ export const submitHuntressSkip = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'huntress') {
+    if (game.phase !== 'night' || !isStepActive(game, 'huntress')) {
       throw new Error('The huntress is not currently awake.');
     }
 
@@ -2679,7 +2832,7 @@ export const submitRevealerShot = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'revealer') {
+    if (game.phase !== 'night' || !isStepActive(game, 'revealer')) {
       throw new Error('The revealer is not currently awake.');
     }
 
@@ -2738,7 +2891,7 @@ export const submitRevealerSkip = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'revealer') {
+    if (game.phase !== 'night' || !isStepActive(game, 'revealer')) {
       throw new Error('The revealer is not currently awake.');
     }
 
@@ -2799,7 +2952,7 @@ export const submitRevilerShot = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'reviler') {
+    if (game.phase !== 'night' || !isStepActive(game, 'reviler')) {
       throw new Error('The reviler is not currently awake.');
     }
 
@@ -2858,7 +3011,7 @@ export const submitRevilerSkip = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'reviler') {
+    if (game.phase !== 'night' || !isStepActive(game, 'reviler')) {
       throw new Error('The reviler is not currently awake.');
     }
 
@@ -2918,7 +3071,7 @@ export const submitNightmarePut = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'nightmare_wolf') {
+    if (game.phase !== 'night' || !isStepActive(game, 'nightmare_wolf')) {
       throw new Error('The nightmare wolf is not currently awake.');
     }
 
@@ -3002,7 +3155,7 @@ export const submitNightmareSkip = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'nightmare_wolf') {
+    if (game.phase !== 'night' || !isStepActive(game, 'nightmare_wolf')) {
       throw new Error('The nightmare wolf is not currently awake.');
     }
 
@@ -3058,7 +3211,7 @@ export const submitCursedAck = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'cursed_conversion') {
+    if (game.phase !== 'night' || !isStepActive(game, 'cursed_conversion')) {
       throw new Error('Not in the cursed conversion step.');
     }
 
@@ -3096,7 +3249,7 @@ export const submitCursedAck = mutation({
       resolvedAt: Date.now(),
     });
 
-    await maybeAdvance(ctx, args.gameId);
+    await maybeAdvanceStep(ctx, args.gameId, 'cursed_conversion');
   },
 });
 
@@ -3138,7 +3291,7 @@ export const submitWitchSave = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'witch') {
+    if (game.phase !== 'night' || !isStepActive(game, 'witch')) {
       throw new Error('The witch is not currently awake.');
     }
 
@@ -3200,7 +3353,7 @@ export const submitWitchPoison = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'witch') {
+    if (game.phase !== 'night' || !isStepActive(game, 'witch')) {
       throw new Error('The witch is not currently awake.');
     }
 
@@ -3248,7 +3401,7 @@ export const submitWitchDone = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'witch') {
+    if (game.phase !== 'night' || !isStepActive(game, 'witch')) {
       throw new Error('The witch is not currently awake.');
     }
 
@@ -3308,7 +3461,7 @@ export const submitLeprechaunMove = mutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || game.nightStep !== 'leprechaun') {
+    if (game.phase !== 'night' || !isStepActive(game, 'leprechaun')) {
       throw new Error('The leprechaun is not currently awake.');
     }
 
@@ -3453,7 +3606,13 @@ export const tickNight = mutation({
   handler: async (ctx, args) => {
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me) throw new Error('You are not in this game.');
-    await maybeAdvance(ctx, args.gameId);
+    // Walk every active step and try to advance each. With parallel waves
+    // any one of them may be ready; the per-step check no-ops the others.
+    const game = await ctx.db.get(args.gameId);
+    if (!game) return;
+    for (const entry of getActiveStepEntries(game)) {
+      await maybeAdvanceStep(ctx, args.gameId, entry.step);
+    }
   },
 });
 
@@ -3478,16 +3637,20 @@ export const forceAdvanceStep = mutation({
     if (game.phase !== 'night') {
       throw new Error('Not currently in a night phase.');
     }
+    if (!isNightStep(args.expectedStep)) {
+      throw new Error('Unknown night step.');
+    }
+    const step: NightStep = args.expectedStep;
     // If the step has already moved on between the host tapping and the
     // mutation running, treat as success so the host doesn't see a confusing
     // error message.
-    if (game.nightStep !== args.expectedStep) return;
-    const eligibleAt =
-      (game.nightStepEndsAt ?? 0) + SKIP_STALL_THRESHOLD_MS;
+    if (!isStepActive(game, step)) return;
+    const endsAt = getStepEndsAt(game, step) ?? 0;
+    const eligibleAt = endsAt + SKIP_STALL_THRESHOLD_MS;
     if (Date.now() < eligibleAt) {
       throw new Error('This step has not stalled long enough to skip.');
     }
-    await advanceFromCurrentStep(ctx, args.gameId);
+    await completeStep(ctx, args.gameId, step);
   },
 });
 
@@ -3536,14 +3699,13 @@ export const refreshStep = mutation({
     if (game.phase !== 'night') {
       throw new Error('Not currently in a night phase.');
     }
-    if (game.nightStep !== args.expectedStep) return;
     if (!isNightStep(args.expectedStep)) {
       throw new Error('Unknown night step.');
     }
     const step: NightStep = args.expectedStep;
-
-    const eligibleAt =
-      (game.nightStepEndsAt ?? 0) + SKIP_STALL_THRESHOLD_MS;
+    if (!isStepActive(game, step)) return;
+    const stepEndsAt = getStepEndsAt(game, step) ?? 0;
+    const eligibleAt = stepEndsAt + SKIP_STALL_THRESHOLD_MS;
     if (Date.now() < eligibleAt) {
       throw new Error('This step has not stalled long enough to refresh.');
     }
@@ -3632,8 +3794,11 @@ export const refreshStep = mutation({
     // Fresh dwell + new tick. Mirror enterStep's auto-resolve so bot actors
     // and "no decision left" witches re-record their no-op actions.
     const dwellMs = randomDwellMs();
-    const endsAt = Date.now() + dwellMs;
-    await ctx.db.patch(args.gameId, { nightStepEndsAt: endsAt });
+    const newEndsAt = Date.now() + dwellMs;
+    const freshActive = getActiveStepEntries(game).map(e =>
+      e.step === step ? { step, endsAt: newEndsAt } : e,
+    );
+    await ctx.db.patch(args.gameId, { nightActiveSteps: freshActive });
 
     const players = await ctx.db
       .query('players')
@@ -3717,7 +3882,7 @@ export const beginNight = mutation({
       phase: 'night',
       nightNumber: upcomingNightNumber,
     });
-    await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
+    await beginNightWaves(ctx, args.gameId);
   },
 });
 
@@ -4113,7 +4278,8 @@ async function buildNightLog(
   ctx: QueryCtx,
   gameId: Id<'games'>,
   nightNumber: number,
-  currentStep: NightStep,
+  activeStepSet: ReadonlySet<NightStep>,
+  completedStepSet: ReadonlySet<NightStep>,
   selectedRoles: string[],
   players: Player[],
 ): Promise<NightLogEntry[]> {
@@ -4133,15 +4299,15 @@ async function buildNightLog(
     return playerById.get(id as Id<'players'>)?.role ?? '';
   };
 
-  const currentIdx = NIGHT_STEPS.indexOf(currentStep);
-  if (currentIdx < 0) return [];
-
   const log: NightLogEntry[] = [];
   let wolfKillSeen = 0;
 
-  for (let i = 0; i <= currentIdx; i++) {
-    const step = NIGHT_STEPS[i];
+  // Walk every step in canonical wake order. Emit cards only for steps
+  // that are currently active or already completed — pending (gated) steps
+  // stay invisible until their actors are actually able to act.
+  for (const step of NIGHT_STEPS) {
     if (!stepIsInGame(step, selectedRoles)) continue;
+    if (!activeStepSet.has(step) && !completedStepSet.has(step)) continue;
 
     if (step === 'wolves') {
       // Collective pack actions: kill rows + diseased-block + sasquatch flip.
@@ -4310,41 +4476,63 @@ export const nightView = query({
     if (!me) return null;
 
     const alive = players.filter(p => p.alive);
-    const step = isNightStep(game.nightStep) ? game.nightStep : undefined;
+    const activeStepEntries = getActiveStepEntries(game);
+    const activeSteps: NightStep[] = activeStepEntries.map(e => e.step);
+    const activeStepSet = new Set<NightStep>(activeSteps);
+    const completedSteps = Array.from(getCompletedStepSet(game));
 
-    let isMyStep = false;
-    if (step && me.alive && me.role) {
-      const actors = activePlayersForStep(step, alive, game.nightNumber);
-      isMyStep = actors.some(a => a._id === me._id);
+    // Compute per-step actor lists once for every currently-active step. Used
+    // both for `isMyStep`-style checks and for the actorForRole gate below.
+    const stepActorsByStep = new Map<NightStep, Player[]>();
+    for (const s of activeSteps) {
+      stepActorsByStep.set(
+        s,
+        activePlayersForStep(s, alive, game.nightNumber),
+      );
     }
 
+    // Which active step (if any) is currently rendering MY picker. Spent /
+    // nightmared / not-an-actor players get null and the client falls back
+    // to WaitingView. With parallel steps a player can only ever be the
+    // actor for at most one role, so the first match is sufficient.
+    let myActivePickerStep: NightStep | null = null;
+    if (me.alive && me.role) {
+      for (const s of activeSteps) {
+        const actors = stepActorsByStep.get(s) ?? [];
+        if (actors.some(a => a._id === me._id)) {
+          myActivePickerStep = s;
+          break;
+        }
+      }
+    }
+    const isMyStep = myActivePickerStep !== null;
+
     // Ghost-spectator perspective: dead players mirror exactly what the alive
-    // actor of the current step sees. `actorForRole` returns me when I'm the
-    // alive actor for a role, or the alive actor when I'm dead and the step
-    // matches. Returning undefined means this role's data is not visible to
-    // this viewer.
-    const stepActors: Player[] = step
-      ? activePlayersForStep(step, alive, game.nightNumber)
-      : [];
+    // actor of an active step sees. `actorForRole` returns me when I'm the
+    // alive actor for a role, or the alive actor when I'm dead and the
+    // role's step is active. Returning undefined means this role's data is
+    // not visible to this viewer.
     const actorForRole = (
       roleName: string,
       stepName: NightStep,
     ): Player | undefined => {
+      const stepActors = stepActorsByStep.get(stepName) ?? [];
       if (me.alive && me.role === roleName) {
-        // On the role's own step, only return me if I'm still in the active
-        // list — otherwise spent one-time roles (PI, Huntress, fully-used
-        // Nightmare Wolf) and nightmared pickers would have their XState
-        // populated and their picker would flash on-screen during the
-        // step's natural cloaking dwell before it auto-advances. On any
-        // other step, return me eagerly — the picker tree only renders
-        // when nightStep matches the role, so populating XState elsewhere
-        // is harmless and keeps spectator views consistent.
-        if (step === stepName) {
+        // While the role's step is active, only populate XState when I'm
+        // still in the active actor list — otherwise spent one-time roles
+        // (PI, Huntress, fully-used Nightmare Wolf) and nightmared pickers
+        // would have their XState populated and their picker would flash
+        // on-screen during the step's natural cloaking dwell before it
+        // auto-advances. When the step isn't currently active, return me
+        // eagerly — the picker tree is gated on `myActivePickerStep`, so
+        // populating XState ahead of time is harmless and keeps
+        // history-driven views consistent.
+        if (activeStepSet.has(stepName)) {
           return stepActors.some(a => a._id === me._id) ? me : undefined;
         }
         return me;
       }
-      if (!me.alive && step === stepName) {
+      if (!me.alive && activeStepSet.has(stepName)) {
         return stepActors.find(a => a.role === roleName);
       }
       return undefined;
@@ -4374,12 +4562,12 @@ export const nightView = query({
     // wolves-step overlay reads this to show "YOU NOW JOIN THE WOLVES" once.
     // Cleared server-side when the wolves step advances.
     const sasquatchReveal =
-      step === 'wolves' &&
+      activeStepSet.has('wolves') &&
       me.alive &&
       me.role === 'Werewolf' &&
       !!me.roleState?.pendingSasquatchReveal;
     const wolfPerspective =
-      step === 'wolves' &&
+      activeStepSet.has('wolves') &&
       ((me.alive && me.role && isWolfTeam(me.role)) || !me.alive);
     if (wolfPerspective) {
       const aliveWolves = alive.filter(p => p.role && isWolfTeam(p.role));
@@ -4825,20 +5013,34 @@ export const nightView = query({
     // NightScreen replaces their normal picker with a "you've been put to
     // sleep" overlay during the step's dwell. Wolves / nightmare_wolf /
     // resolution steps are never blocked.
-    const nightmaredBlocking =
+    // Show the "you've been put to sleep" overlay only while my role's step
+    // is actually active — and only when I am one of that step's would-be
+    // actors, blocked by NW. Walking activeSteps catches the parallel-mode
+    // case where multiple picker steps run side-by-side.
+    let nightmaredBlocking = false;
+    if (
       me.alive &&
-      step !== undefined &&
-      NIGHTMARE_BLOCKABLE_STEPS.has(step) &&
-      isNightmared(me, game.nightNumber) &&
-      ((step === 'seer' && me.role === 'Seer') ||
-        (step === 'pi' && me.role === 'Paranormal Investigator') ||
-        (step === 'mentalist' && me.role === 'Mentalist') ||
-        (step === 'witch' && me.role === 'Witch') ||
-        (step === 'leprechaun' && me.role === 'Leprechaun') ||
-        (step === 'bodyguard' && me.role === 'Bodyguard') ||
-        (step === 'huntress' && me.role === 'Huntress') ||
-        (step === 'revealer' && me.role === 'Revealer') ||
-        (step === 'reviler' && me.role === 'Reviler'));
+      me.role &&
+      isNightmared(me, game.nightNumber)
+    ) {
+      for (const s of activeSteps) {
+        if (!NIGHTMARE_BLOCKABLE_STEPS.has(s)) continue;
+        if (
+          (s === 'seer' && me.role === 'Seer') ||
+          (s === 'pi' && me.role === 'Paranormal Investigator') ||
+          (s === 'mentalist' && me.role === 'Mentalist') ||
+          (s === 'witch' && me.role === 'Witch') ||
+          (s === 'leprechaun' && me.role === 'Leprechaun') ||
+          (s === 'bodyguard' && me.role === 'Bodyguard') ||
+          (s === 'huntress' && me.role === 'Huntress') ||
+          (s === 'revealer' && me.role === 'Revealer') ||
+          (s === 'reviler' && me.role === 'Reviler')
+        ) {
+          nightmaredBlocking = true;
+          break;
+        }
+      }
+    }
 
     // Reviler-only state. Solo antagonist; same shape as revealerState.
     let revilerState: {
@@ -4888,7 +5090,7 @@ export const nightView = query({
       acknowledged: boolean;
       convertedNames: string[];
     } | null = null;
-    if (step === 'cursed_conversion') {
+    if (activeStepSet.has('cursed_conversion')) {
       const conversions = await getNightActions(
         ctx,
         args.gameId,
@@ -4933,8 +5135,14 @@ export const nightView = query({
       toRole?: string;
       conversions: Array<{ name: string; toRole: string }>;
     } | null = null;
-    if (step === 'doppelganger_dawn' || step === 'doppelganger_dusk') {
-      const expectedPhase = step === 'doppelganger_dawn' ? 'day' : 'night';
+    const activeDoppelgangerStep: 'doppelganger_dawn' | 'doppelganger_dusk' | undefined =
+      activeStepSet.has('doppelganger_dawn')
+        ? 'doppelganger_dawn'
+        : activeStepSet.has('doppelganger_dusk')
+          ? 'doppelganger_dusk'
+          : undefined;
+    if (activeDoppelgangerStep) {
+      const expectedPhase = activeDoppelgangerStep === 'doppelganger_dawn' ? 'day' : 'night';
       const convertedPlayers = players.filter(
         p =>
           p.alive &&
@@ -5089,14 +5297,16 @@ export const nightView = query({
       name: string;
       seatPosition?: number;
     }> = [];
-    // Ghost spectators see the same targetable pool the step's actor sees.
-    const targetablesViewer: Player | undefined = isMyStep
-      ? me
-      : !me.alive
-        ? stepActors[0]
-        : undefined;
-    if (targetablesViewer && step) {
+    // With parallel waves, targetables is derived for the active step whose
+    // picker the caller is currently seeing. Dead spectators don't render
+    // pickers — they see the night log — so we no longer mirror an alive
+    // actor's pool to them.
+    const targetablesViewer: Player | undefined =
+      myActivePickerStep ? me : undefined;
+    const targetablesStep: NightStep | undefined = myActivePickerStep ?? undefined;
+    if (targetablesViewer && targetablesStep) {
       const v = targetablesViewer;
+      const step = targetablesStep;
       let pool: Player[] = [];
       if (step === 'wolves') {
         // Wolves may target each other (and themselves) — see submitWolfVote
@@ -5166,38 +5376,53 @@ export const nightView = query({
         seatPosition: p.seatPosition,
       }));
 
-    // Chronological + per-actor ghost log. Walks NIGHT_STEPS up to the
-    // current step and emits one card per role-holder (actor-driven steps)
-    // or per event row (wolves, conversions). Alive viewers get null —
-    // they see the live picker UX instead.
+    // Chronological + per-actor ghost log. Walks NIGHT_STEPS in order and
+    // emits cards for every step that's already completed OR currently
+    // active. Alive viewers get null — they see the live picker UX instead.
     let nightLog: NightLogEntry[] | null = null;
-    if (!me.alive && step) {
+    if (!me.alive && (activeSteps.length > 0 || completedSteps.length > 0)) {
       nightLog = await buildNightLog(
         ctx,
         args.gameId,
         game.nightNumber,
-        step,
+        activeStepSet,
+        new Set<NightStep>(
+          completedSteps.filter((s): s is NightStep => isNightStep(s)),
+        ),
         game.selectedRoles,
         players,
       );
     }
+
+    // Per-step skip-eligibility surfaces only for currently-active steps.
+    // The client iterates and shows the host stall override the moment
+    // wall-clock passes any of these thresholds.
+    const activeStepsForClient = activeStepEntries.map(e => ({
+      step: e.step,
+      endsAt: e.endsAt,
+      skipEligibleAt: e.endsAt + SKIP_STALL_THRESHOLD_MS,
+    }));
+
+    // Header label: only meaningful when exactly one step is active (the
+    // ghost view header used to say "THE SEER IS AWAKE"). With multiple
+    // parallel pickers the label collapses to the neutral "village stirs"
+    // wording — same phrasing as the conversion-step header so spectators
+    // can't tell from this text which roles are awake.
+    const stepLabel =
+      activeSteps.length === 1
+        ? nightStepLabel(activeSteps[0])
+        : activeSteps.length > 1
+          ? 'The village stirs'
+          : null;
 
     return {
       game: {
         _id: game._id,
         phase: game.phase,
         nightNumber: game.nightNumber,
-        nightStep: step,
         playerCount: game.playerCount,
         roomCode: game.roomCode,
-        nightStepEndsAt: game.nightStepEndsAt ?? null,
-        // Wall-clock time at which the host's "skip ahead" override unlocks.
-        // The client computes "now > this" locally on a 1-second tick so
-        // the button surfaces without needing a server roundtrip.
-        skipEligibleAt:
-          game.nightStepEndsAt != null
-            ? game.nightStepEndsAt + SKIP_STALL_THRESHOLD_MS
-            : null,
+        activeSteps: activeStepsForClient,
       },
       me: {
         _id: me._id,
@@ -5207,8 +5432,9 @@ export const nightView = query({
         isHost: me.isHost,
         seatPosition: me.seatPosition,
       },
+      myActivePickerStep,
       isMyStep,
-      stepLabel: step ? nightStepLabel(step) : null,
+      stepLabel,
       wolfState,
       sasquatchReveal,
       seerHistory,
