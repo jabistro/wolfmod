@@ -326,11 +326,9 @@ export default function DayScreen() {
             isHost={isHost}
             nomination={currentNomination}
             cascadeDeaths={view.cascadeDeaths}
-            players={players}
             onLeavePress={confirmLeave}
             hostMissing={hostMissing}
             meAlive={me.alive}
-            meSeatPosition={me.seatPosition}
             passHostCandidates={passHostCandidates}
           />
           {passPicker}
@@ -1663,29 +1661,20 @@ function ResultsView({
   isHost,
   nomination,
   cascadeDeaths,
-  players,
   onLeavePress,
   hostMissing,
   meAlive,
-  meSeatPosition,
   passHostCandidates,
 }: {
   game: DayGame;
   deviceClientId: string;
   isHost: boolean;
   nomination: Nomination;
-  meSeatPosition?: number;
   cascadeDeaths: Array<{
     _id: Id<'players'>;
     name: string;
     cause: string;
     shotByName: string | null;
-  }>;
-  players: Array<{
-    _id: Id<'players'>;
-    name: string;
-    seatPosition?: number;
-    alive: boolean;
   }>;
   onLeavePress: () => void;
   hostMissing: boolean;
@@ -1762,25 +1751,16 @@ function ResultsView({
           alignItems: 'center',
         }}
       >
-        <View className="mt-2 mb-6">
-          <SeatingCircle
-            totalSeats={game.playerCount}
-            players={players}
-            viewerSeatIndex={meSeatPosition}
-            centerOverlay={
-              <View style={{ alignItems: 'center', paddingHorizontal: 8 }}>
-                <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1">
-                  VOTED ON
-                </Text>
-                <Text
-                  className="text-wolf-text text-xl font-extrabold tracking-widest text-center"
-                  numberOfLines={2}
-                >
-                  {nomination.nominee?.name.toUpperCase() ?? '—'}
-                </Text>
-              </View>
-            }
-          />
+        <View className="mt-2 mb-6 items-center">
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1">
+            VOTED ON
+          </Text>
+          <Text
+            className="text-wolf-text text-2xl font-extrabold tracking-widest text-center"
+            numberOfLines={2}
+          >
+            {nomination.nominee?.name.toUpperCase() ?? '—'}
+          </Text>
         </View>
 
         <View className="flex-row self-stretch" style={{ gap: 12 }}>
