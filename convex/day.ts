@@ -2,6 +2,7 @@ import {
   internalMutation,
   mutation,
   query,
+  type MutationCtx,
 } from './_generated/server';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
@@ -17,6 +18,7 @@ import {
   dayConfigOf,
   DAY_CONFIG_DEFAULTS,
   flagCubDeathIfApplicable,
+  wipeNomTapsForDay,
 } from './helpers';
 import { enterStep, fireDoppelgangerConversionsForDeaths } from './night';
 import {
@@ -35,6 +37,14 @@ import { NIGHT_STEPS } from '../src/data/nightOrder';
 // RTTs >1500ms (poor cellular) can still race past this and fall through
 // to the "vote didn't count" alert on the client. Tunable.
 const VOTE_GRACE_MS = 1500;
+
+// Dwell between the 2nd nomination tap (or host force-nominate) and the
+// real trial taking over. During this window the discussion view stays
+// up, the nommed seat plays a white-fill animation, and a banner names
+// the accuser/seconder. Keeps the transition from feeling abrupt and
+// gives the table a moment to register who's on the stand. The day
+// clock is paused for the duration, so the dwell doesn't eat day time.
+const TRIAL_CONFIRM_DWELL_MS = 3000;
 
 // ───── Config mutation ─────────────────────────────────────────────────────
 //
@@ -213,8 +223,18 @@ export const resetDayClock = mutation({
 });
 
 // ───── Nomination flow ─────────────────────────────────────────────────────
+//
+// Nominations are player-driven. Any alive player taps a target seat on the
+// circle to register a tap; a second distinct alive tap on the same seat
+// fires the trial. The first tapper is the accuser, the second is the
+// seconder — both are stamped on `currentNomination` and shown in the
+// accusation banner. Self-taps and dead-target taps are rejected. Each
+// nominator has at most one live tap on the table: tapping a different
+// seat moves the highlight, tapping the same seat untaps. Host has no
+// special nomination button anymore (they tap like everyone else); the
+// host can still cancel an in-flight trial via `cancelNomination`.
 
-export const nominate = mutation({
+export const toggleNomTap = mutation({
   args: {
     gameId: v.id('games'),
     callerDeviceClientId: v.string(),
@@ -225,9 +245,11 @@ export const nominate = mutation({
     if (!game) throw new Error('Game not found.');
     if (game.phase !== 'day') throw new Error('Not currently in day.');
     if (game.currentNomination) {
-      throw new Error('A nomination is already active.');
+      throw new Error('A nomination is already in progress.');
     }
-    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+    if (game.pendingTrial) {
+      throw new Error('A nomination is being confirmed.');
+    }
 
     const cfg = dayConfigOf(game);
     const dayExpired =
@@ -242,30 +264,160 @@ export const nominate = mutation({
       throw new Error('No nominations remain for today.');
     }
 
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me) throw new Error('You are not in this game.');
+    if (!me.alive) throw new Error('Eliminated players cannot nominate.');
+    if (me._id === args.targetPlayerId) {
+      throw new Error('You cannot nominate yourself.');
+    }
+
     const target = await ctx.db.get(args.targetPlayerId);
     if (!target || target.gameId !== args.gameId) {
       throw new Error('Invalid target.');
     }
     if (!target.alive) throw new Error('Target is already eliminated.');
 
+    // Find any existing tap rows I own for today.
+    const myExistingTaps = await ctx.db
+      .query('nomTaps')
+      .withIndex('by_game_day_nominator', q =>
+        q
+          .eq('gameId', args.gameId)
+          .eq('dayNumber', game.dayNumber)
+          .eq('nominatorPlayerId', me._id),
+      )
+      .collect();
+
+    const existingOnTarget = myExistingTaps.find(
+      r => r.targetPlayerId === args.targetPlayerId,
+    );
+    if (existingOnTarget) {
+      // Tap-same → untap. No trial check (count can only go down).
+      await ctx.db.delete(existingOnTarget._id);
+      return;
+    }
+
+    // Tap-different (or first tap). One live tap per player, so drop any
+    // other taps I own before inserting the new one.
+    for (const r of myExistingTaps) {
+      await ctx.db.delete(r._id);
+    }
+
+    const now = Date.now();
+    await ctx.db.insert('nomTaps', {
+      gameId: args.gameId,
+      dayNumber: game.dayNumber,
+      targetPlayerId: args.targetPlayerId,
+      nominatorPlayerId: me._id,
+      createdAt: now,
+    });
+
+    // Re-read the target's taps to see if my insert crossed the 2-distinct
+    // threshold that fires a trial.
+    const targetTaps = await ctx.db
+      .query('nomTaps')
+      .withIndex('by_game_day_target', q =>
+        q
+          .eq('gameId', args.gameId)
+          .eq('dayNumber', game.dayNumber)
+          .eq('targetPlayerId', args.targetPlayerId),
+      )
+      .collect();
+
+    if (targetTaps.length < 2) return;
+
+    // Earliest tap = accuser, second-earliest = seconder. Anyone after
+    // doesn't carry weight — once the 2nd tap lands, the trial starts.
+    const sorted = [...targetTaps].sort((a, b) => a.createdAt - b.createdAt);
+    const accuserPlayerId = sorted[0].nominatorPlayerId;
+    const seconderPlayerId = sorted[1].nominatorPlayerId;
+
+    // Clean slate during the trial — no in-flight highlights linger.
+    await wipeNomTapsForDay(ctx, args.gameId, game.dayNumber);
+
+    await scheduleTrialConfirmDwell(ctx, {
+      gameId: args.gameId,
+      game,
+      now,
+      targetPlayerId: args.targetPlayerId,
+      accuserPlayerId,
+      seconderPlayerId,
+    });
+  },
+});
+
+/**
+ * Stage the confirmation dwell. Pauses the day clock (so the dwell
+ * doesn't eat day time), sets `pendingTrial` for every client to read,
+ * and schedules `finalizePendingTrial` to fire when the dwell expires.
+ * Used by both the 2-tap path and the host force-nominate path so the
+ * visual rhythm is uniform.
+ */
+async function scheduleTrialConfirmDwell(
+  ctx: MutationCtx,
+  args: {
+    gameId: Id<'games'>;
+    game: Doc<'games'>;
+    now: number;
+    targetPlayerId: Id<'players'>;
+    accuserPlayerId: Id<'players'>;
+    seconderPlayerId?: Id<'players'>;
+  },
+) {
+  const dwellEndsAt = args.now + TRIAL_CONFIRM_DWELL_MS;
+  const dayPatch: Partial<Doc<'games'>> = {};
+  if (args.game.dayPausedRemainingMs === undefined) {
+    dayPatch.dayPausedRemainingMs = Math.max(
+      0,
+      (args.game.dayEndsAt ?? args.now) - args.now,
+    );
+  }
+  await ctx.db.patch(args.gameId, {
+    ...dayPatch,
+    pendingTrial: {
+      targetPlayerId: args.targetPlayerId,
+      accuserPlayerId: args.accuserPlayerId,
+      seconderPlayerId: args.seconderPlayerId,
+      dwellEndsAt,
+    },
+  });
+  await ctx.scheduler.runAfter(
+    TRIAL_CONFIRM_DWELL_MS,
+    internal.day.finalizePendingTrial,
+    { gameId: args.gameId, expectedDwellEndsAt: dwellEndsAt },
+  );
+}
+
+/**
+ * Promotes `pendingTrial` into the real `currentNomination`. Defensive
+ * against stale schedules: if the stored dwellEndsAt no longer matches
+ * what we scheduled for (because the game ended, a cancel happened, or
+ * a new pendingTrial superseded ours), this is a no-op.
+ */
+export const finalizePendingTrial = internalMutation({
+  args: {
+    gameId: v.id('games'),
+    expectedDwellEndsAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) return;
+    if (game.phase !== 'day') return;
+    const pending = game.pendingTrial;
+    if (!pending) return;
+    if (pending.dwellEndsAt !== args.expectedDwellEndsAt) return;
+    if (game.currentNomination) return;
+
+    const cfg = dayConfigOf(game);
     const accusationMs = cfg.accusationSec * 1000;
+    const nominationsUsed = game.nominationsThisDay ?? 0;
     const nominationIndex = nominationsUsed;
     const now = Date.now();
 
-    // Pause the day clock for the duration of the trial — capture remaining
-    // so it can be resumed if the trial concludes without a lynch.
-    const dayPatch: Partial<Doc<'games'>> = {};
-    if (game.dayPausedRemainingMs === undefined) {
-      dayPatch.dayPausedRemainingMs = Math.max(
-        0,
-        (game.dayEndsAt ?? now) - now,
-      );
-    }
-
     await ctx.db.patch(args.gameId, {
-      ...dayPatch,
+      pendingTrial: undefined,
       currentNomination: {
-        nominatedPlayerId: args.targetPlayerId,
+        nominatedPlayerId: pending.targetPlayerId,
         nominationIndex,
         subPhase: 'accusation' as const,
         // Trial timer starts PAUSED at full duration. Host taps START to
@@ -274,8 +426,79 @@ export const nominate = mutation({
         subPhaseEndsAt: now + accusationMs,
         subPhasePausedRemainingMs: accusationMs,
         resultsRevealed: false,
+        accuserPlayerId: pending.accuserPlayerId,
+        seconderPlayerId: pending.seconderPlayerId,
       },
       nominationsThisDay: nominationIndex + 1,
+    });
+  },
+});
+
+// Host escape hatch: bypass the 2-tap requirement and put a player on
+// trial directly. The host is recorded as the accuser; no seconder is
+// stamped (the accusation banner gracefully omits the seconder line).
+// Otherwise indistinguishable from a normal trial — same accusation
+// timer, same nominations-budget decrement, same wipe of in-flight
+// nomTaps. Useful for solo-with-bots testing and as an emergency
+// fallback if the table can't get a second tap (e.g. one alive
+// villager + bots).
+export const hostForceNominate = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    targetPlayerId: v.id('players'),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'day') throw new Error('Not currently in day.');
+    if (game.currentNomination) {
+      throw new Error('A nomination is already in progress.');
+    }
+    if (game.pendingTrial) {
+      throw new Error('A nomination is being confirmed.');
+    }
+    const host = await requireHost(
+      ctx,
+      args.gameId,
+      args.callerDeviceClientId,
+    );
+
+    const cfg = dayConfigOf(game);
+    const now = Date.now();
+    const dayExpired =
+      game.dayPausedRemainingMs === undefined &&
+      game.dayEndsAt !== undefined &&
+      now > game.dayEndsAt;
+    if (dayExpired) {
+      throw new Error('The day has ended — no more nominations.');
+    }
+    const nominationsUsed = game.nominationsThisDay ?? 0;
+    if (nominationsUsed >= cfg.maxNominationsPerDay) {
+      throw new Error('No nominations remain for today.');
+    }
+
+    if (host._id === args.targetPlayerId) {
+      throw new Error('You cannot nominate yourself.');
+    }
+    const target = await ctx.db.get(args.targetPlayerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new Error('Invalid target.');
+    }
+    if (!target.alive) throw new Error('Target is already eliminated.');
+
+    await wipeNomTapsForDay(ctx, args.gameId, game.dayNumber);
+
+    await scheduleTrialConfirmDwell(ctx, {
+      gameId: args.gameId,
+      game,
+      now,
+      targetPlayerId: args.targetPlayerId,
+      accuserPlayerId: host._id,
+      // No seconder — the banner omits the SECONDED BY line when this
+      // field is absent. Same dwell length as the 2-tap path so the
+      // table sees the same animation regardless of how the trial fired.
+      seconderPlayerId: undefined,
     });
   },
 });
@@ -315,6 +538,12 @@ export const cancelNomination = mutation({
     for (const row of stale) {
       await ctx.db.delete(row._id);
     }
+
+    // Defensive: trial-start already wiped taps, but any tap that landed
+    // after the trial began (shouldn't be possible — toggleNomTap rejects
+    // when currentNomination is set — but belt-and-braces) gets cleared
+    // here so the next round starts clean.
+    await wipeNomTapsForDay(ctx, args.gameId, game.dayNumber);
 
     const now = Date.now();
     const dayClockRemaining = game.dayPausedRemainingMs ?? 0;
@@ -925,6 +1154,8 @@ export const dayView = query({
       diesVoters: string[];
       myVote: 'lives' | 'dies' | null;
       iAmNominee: boolean;
+      accuser: { _id: Id<'players'>; name: string } | null;
+      seconder: { _id: Id<'players'>; name: string } | null;
     } | null = null;
 
     if (game.currentNomination) {
@@ -966,6 +1197,12 @@ export const dayView = query({
       }
 
       const eligibleCount = Math.max(0, alive.length - 1);
+      const accuser = nom.accuserPlayerId
+        ? playerById.get(nom.accuserPlayerId) ?? null
+        : null;
+      const seconder = nom.seconderPlayerId
+        ? playerById.get(nom.seconderPlayerId) ?? null
+        : null;
       nomination = {
         nominee: nominee
           ? { _id: nominee._id, name: nominee.name }
@@ -980,7 +1217,68 @@ export const dayView = query({
         diesVoters,
         myVote,
         iAmNominee: me._id === nom.nominatedPlayerId,
+        accuser: accuser ? { _id: accuser._id, name: accuser.name } : null,
+        seconder: seconder ? { _id: seconder._id, name: seconder.name } : null,
       };
+    }
+
+    // Live nomination-highlight taps, oldest first. Empty during a trial
+    // (trial-start wipes them). Drives the discussion-view seating ring:
+    // seats with ≥1 tap glow, and the tapper's name renders next to the
+    // seat so the table sees who pushed the highlight.
+    let nomTaps: Array<{
+      targetPlayerId: Id<'players'>;
+      nominatorPlayerId: Id<'players'>;
+      nominatorName: string;
+      isMe: boolean;
+      createdAt: number;
+    }> = [];
+    if (game.phase === 'day' && !game.currentNomination) {
+      const tapRows = await ctx.db
+        .query('nomTaps')
+        .withIndex('by_game_day_target', q =>
+          q.eq('gameId', args.gameId).eq('dayNumber', game.dayNumber),
+        )
+        .collect();
+      tapRows.sort((a, b) => a.createdAt - b.createdAt);
+      nomTaps = tapRows.map(r => {
+        const nominator = playerById.get(r.nominatorPlayerId);
+        return {
+          targetPlayerId: r.targetPlayerId,
+          nominatorPlayerId: r.nominatorPlayerId,
+          nominatorName: nominator?.name ?? '???',
+          isMe: r.nominatorPlayerId === me._id,
+          createdAt: r.createdAt,
+        };
+      });
+    }
+
+    // Trial-confirm dwell (2s between the 2nd tap and the trial actually
+    // starting). Surfaces names so DiscussionView can render the seat
+    // fill animation + accuser/seconder banner without a second round-trip.
+    let pendingTrial: {
+      target: { _id: Id<'players'>; name: string };
+      accuser: { _id: Id<'players'>; name: string } | null;
+      seconder: { _id: Id<'players'>; name: string } | null;
+      dwellEndsAt: number;
+    } | null = null;
+    if (game.pendingTrial) {
+      const pt = game.pendingTrial;
+      const target = playerById.get(pt.targetPlayerId);
+      const accuser = playerById.get(pt.accuserPlayerId) ?? null;
+      const seconder = pt.seconderPlayerId
+        ? playerById.get(pt.seconderPlayerId) ?? null
+        : null;
+      if (target) {
+        pendingTrial = {
+          target: { _id: target._id, name: target.name },
+          accuser: accuser ? { _id: accuser._id, name: accuser.name } : null,
+          seconder: seconder
+            ? { _id: seconder._id, name: seconder.name }
+            : null,
+          dwellEndsAt: pt.dwellEndsAt,
+        };
+      }
     }
 
     return {
@@ -1036,6 +1334,8 @@ export const dayView = query({
           alive: p.alive,
         })),
       currentNomination: nomination,
+      pendingTrial,
+      nomTaps,
       cascadeDeaths,
       hostMissing: !players.some(p => p.isHost),
     };

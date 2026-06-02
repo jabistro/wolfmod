@@ -1,5 +1,11 @@
-import React from 'react';
-import { View, Text, TouchableOpacity, Dimensions } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Dimensions,
+  Animated,
+} from 'react-native';
 import type { Id } from '../../convex/_generated/dataModel';
 
 export type SeatingPlayer = {
@@ -13,6 +19,15 @@ export type SeatingPlayer = {
    * pure gaps should simply drop them from the `players` array.
    */
   alive?: boolean;
+};
+
+export type SeatNomTap = {
+  /** Player id of the target seat that's been tapped. */
+  targetPlayerId: string;
+  /** Display name of the player whose tap is live on this seat. */
+  nominatorName: string;
+  /** True if the local viewer's own tap is the one on this seat. */
+  isMe: boolean;
 };
 
 interface SeatingCircleProps {
@@ -45,6 +60,31 @@ interface SeatingCircleProps {
    * (wolves can't kill wolves, BG can't repeat last protected, etc.).
    */
   selectableIds?: ReadonlySet<string>;
+  /**
+   * Live nomination-highlight taps. Each tapped target seat shows a red
+   * ring + the tapper's name below the seat. At most one entry per
+   * targetPlayerId (a 2nd distinct tap fires the trial server-side and
+   * the list resets). `isMe` adds an inner gold tick on the ring so the
+   * viewer can find their own active tap at a glance.
+   */
+  nomTaps?: ReadonlyArray<SeatNomTap>;
+  /**
+   * Trial-confirm dwell: while set, that seat animates from the tap-
+   * highlight state to a fully-white fill (text color inverts to dark).
+   * Used between the 2nd tap and the real trial taking over, so the
+   * table has a beat to register who's on the stand before the screen
+   * switches.
+   */
+  pendingTrialTargetId?: Id<'players'> | null;
+  /**
+   * Wall-clock deadline (ms epoch) the server's `finalizePendingTrial`
+   * will fire at. The seat animation runs from now → this deadline so
+   * the fill lands ~when the trial screen takes over. Stable per
+   * pending trial — must be passed as an absolute timestamp (not a
+   * derived remaining-ms) so the SeatingCircle effect doesn't re-trigger
+   * on every tick.
+   */
+  pendingTrialDwellEndsAt?: number | null;
   /** Tap handler. If absent (or selectableIds excludes the tapped seat), tap is a no-op. */
   onPress?: (player: SeatingPlayer) => void;
   /** Override the default circle size; defaults to ~min(320, screen-32). */
@@ -95,6 +135,9 @@ export function SeatingCircle({
   selectedId,
   selectedIds,
   selectableIds,
+  nomTaps,
+  pendingTrialTargetId,
+  pendingTrialDwellEndsAt,
   onPress,
   size = DEFAULT_CIRCLE_SIZE,
   centerOverlay,
@@ -109,6 +152,43 @@ export function SeatingCircle({
     }
   }
   const seatSize = computeSeatSize(totalSeats, size);
+
+  const nomTapByTarget = new Map<string, SeatNomTap>();
+  if (nomTaps) {
+    for (const t of nomTaps) nomTapByTarget.set(t.targetPlayerId, t);
+  }
+  const tapBorder = '#F0EDE8';
+  const tapBackground = '#33333F';
+  const tapLabelColor = '#F0EDE8';
+  const tapLabelFontSize = seatSize >= 56 ? 10 : seatSize >= 44 ? 9 : 8;
+
+  // Pending-trial fill animation. 0 = tap-highlight state, 1 = solid
+  // white fill with inverted text. Restarted whenever the pending target
+  // id changes (a new trial confirmation began) or the server's dwell
+  // deadline updates — both are stable per pending trial, so the effect
+  // doesn't churn every tick.
+  const pendingAnim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (pendingTrialTargetId && pendingTrialDwellEndsAt != null) {
+      const remaining = Math.max(0, pendingTrialDwellEndsAt - Date.now());
+      pendingAnim.setValue(0);
+      Animated.timing(pendingAnim, {
+        toValue: 1,
+        duration: remaining,
+        useNativeDriver: false,
+      }).start();
+    } else {
+      pendingAnim.setValue(0);
+    }
+  }, [pendingTrialTargetId, pendingTrialDwellEndsAt, pendingAnim]);
+  const pendingBg = pendingAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(51, 51, 63, 1)', 'rgba(240, 237, 232, 1)'],
+  });
+  const pendingTextColor = pendingAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['rgba(240, 237, 232, 1)', 'rgba(15, 15, 20, 1)'],
+  });
 
   return (
     <View
@@ -134,17 +214,33 @@ export function SeatingCircle({
             selectableIds.has(occupant._id as unknown as string));
         const tappable = !!onPress && isSelectable;
         const fontSize = seatFontSize(seatSize, occupant.name.length > 6);
+        const tap = !isDead
+          ? nomTapByTarget.get(occupant._id as unknown as string)
+          : undefined;
+        const isPending =
+          !isDead && pendingTrialTargetId === occupant._id;
 
+        // Tap-highlight wins over `selected` and the gold self-ring so the
+        // village always sees who's been nominated, even on seats that
+        // happen to also be the viewer's own.
         const borderColor = isDead
           ? '#2A2A38'
+          : isPending
+            ? '#F0EDE8'
+            : tap
+              ? tapBorder
+              : isSelected
+                ? selectedBorder
+                : isMe
+                  ? '#D4A017'
+                  : isSelectable
+                    ? '#3A3A48'
+                    : '#2A2A38';
+        const backgroundColor = tap
+          ? tapBackground
           : isSelected
-            ? selectedBorder
-            : isMe
-              ? '#D4A017'
-              : isSelectable
-                ? '#3A3A48'
-                : '#2A2A38';
-        const backgroundColor = isSelected ? selectedBackground : '#22222F';
+            ? selectedBackground
+            : '#22222F';
         const textColor = isDead
           ? '#5A5560'
           : isSelectable
@@ -152,12 +248,73 @@ export function SeatingCircle({
             : '#5A5560';
         const seatOpacity = isDead ? 0.35 : isSelectable ? 1 : 0.5;
 
+        const tapLabel = tap && !isPending ? (
+          <View
+            key={`tap-${i}`}
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: pos.left - 4,
+              top: pos.top + seatSize + 2,
+              width: seatSize + 8,
+              alignItems: 'center',
+            }}
+          >
+            <Text
+              numberOfLines={1}
+              style={{
+                color: tapLabelColor,
+                fontSize: tapLabelFontSize,
+                fontWeight: '700',
+              }}
+            >
+              {tap.isMe ? `${tap.nominatorName} (you)` : tap.nominatorName}
+            </Text>
+          </View>
+        ) : null;
+
+        // Pending-trial seat renders as Animated.View so its background
+        // and text color can morph over the dwell window. Other seats use
+        // the regular static style.
+        if (isPending) {
+          const animatedSeatStyle = {
+            position: 'absolute' as const,
+            left: pos.left,
+            top: pos.top,
+            width: seatSize,
+            height: seatSize,
+            borderRadius: seatSize / 2,
+            backgroundColor: pendingBg,
+            borderWidth: 2,
+            borderColor: '#F0EDE8',
+            alignItems: 'center' as const,
+            justifyContent: 'center' as const,
+            paddingHorizontal: 2,
+            opacity: 1,
+          };
+          return (
+            <Animated.View key={i} style={animatedSeatStyle} pointerEvents="none">
+              <Animated.Text
+                style={{
+                  color: pendingTextColor,
+                  fontSize,
+                  fontWeight: '700',
+                  textAlign: 'center',
+                }}
+                numberOfLines={2}
+              >
+                {occupant.name}
+              </Animated.Text>
+            </Animated.View>
+          );
+        }
+
         const content = (
           <Text
             style={{
               color: textColor,
               fontSize,
-              fontWeight: isSelected || isMe ? '700' : '600',
+              fontWeight: tap || isSelected || isMe ? '700' : '600',
               textAlign: 'center',
               textDecorationLine: isDead ? 'line-through' : 'none',
             }}
@@ -175,7 +332,7 @@ export function SeatingCircle({
           height: seatSize,
           borderRadius: seatSize / 2,
           backgroundColor,
-          borderWidth: isSelected || (isMe && !isDead) ? 2 : 1,
+          borderWidth: tap || isSelected || (isMe && !isDead) ? 2 : 1,
           borderColor,
           alignItems: 'center' as const,
           justifyContent: 'center' as const,
@@ -185,20 +342,23 @@ export function SeatingCircle({
 
         if (tappable) {
           return (
-            <TouchableOpacity
-              key={i}
-              activeOpacity={0.6}
-              onPress={() => onPress!(occupant)}
-              style={sharedStyle}
-            >
-              {content}
-            </TouchableOpacity>
+            <React.Fragment key={i}>
+              <TouchableOpacity
+                activeOpacity={0.6}
+                onPress={() => onPress!(occupant)}
+                style={sharedStyle}
+              >
+                {content}
+              </TouchableOpacity>
+              {tapLabel}
+            </React.Fragment>
           );
         }
         return (
-          <View key={i} style={sharedStyle}>
-            {content}
-          </View>
+          <React.Fragment key={i}>
+            <View style={sharedStyle}>{content}</View>
+            {tapLabel}
+          </React.Fragment>
         );
       })}
       {centerOverlay ? (

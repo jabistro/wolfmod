@@ -16,6 +16,7 @@ import {
   applyWinIfReached,
   initializeDayClock,
   flagCubDeathIfApplicable,
+  wipeNomTapsForDay,
 } from './helpers';
 import {
   enqueueTriggersForDeaths,
@@ -4123,6 +4124,9 @@ export const beginNight = mutation({
     const game = await ctx.db.get(args.gameId);
     if (!game) throw new Error('Game not found.');
     if (game.phase !== 'day') throw new Error('Not currently in day.');
+    if (game.pendingTrial) {
+      throw new Error('A nomination is being confirmed — wait for the trial.');
+    }
 
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
 
@@ -4139,6 +4143,11 @@ export const beginNight = mutation({
       upcomingNightNumber,
     );
     if (await applyWinIfReached(ctx, args.gameId)) return;
+
+    // Wipe any leftover nomination-highlight taps from the day that's
+    // ending. The toggleNomTap path already wipes on trial-start; this is
+    // the cleanup for taps that never fired a trial.
+    await wipeNomTapsForDay(ctx, args.gameId, game.dayNumber);
 
     await ctx.db.patch(args.gameId, {
       phase: 'night',

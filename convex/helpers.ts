@@ -2,6 +2,28 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { isWolfTeam } from '../src/data/v1Roles';
 
+/**
+ * Wipe every `nomTaps` row for (gameId, dayNumber). Called on trial start
+ * (inside `toggleNomTap`), trial cancel (`cancelNomination`), and at
+ * `beginNight` so the table never accumulates across days. Bounded
+ * per-day by the alive player count.
+ */
+export async function wipeNomTapsForDay(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  dayNumber: number,
+): Promise<void> {
+  const rows = await ctx.db
+    .query('nomTaps')
+    .withIndex('by_game_day_target', q =>
+      q.eq('gameId', gameId).eq('dayNumber', dayNumber),
+    )
+    .collect();
+  for (const row of rows) {
+    await ctx.db.delete(row._id);
+  }
+}
+
 // Trigger roles are those whose death prompts an actor decision (shoot or
 // hold fire) before the engine advances. Mad Bomber is NOT a trigger role
 // — its detonation is automatic and applied at the moment of death by

@@ -107,9 +107,45 @@ export default defineSchema({
          */
         subPhasePausedRemainingMs: v.optional(v.number()),
         resultsRevealed: v.boolean(),
+        /**
+         * The player whose tap first highlighted this seat (earliest tap
+         * still standing at the moment the trial fired). Surfaced in the
+         * accusation banner so the village knows who pushed the trial.
+         * Optional because legacy in-flight rows from older deploys may
+         * have been written before this field existed.
+         */
+        accuserPlayerId: v.optional(v.id('players')),
+        /**
+         * The player whose second tap on the same target tipped it into a
+         * trial. Surfaced alongside the accuser. Optional for the same
+         * legacy reason as accuserPlayerId.
+         */
+        seconderPlayerId: v.optional(v.id('players')),
       }),
     ),
     nominationsThisDay: v.optional(v.number()),
+
+    /**
+     * Confirmation dwell between "the 2nd tap landed" and "the trial
+     * screen takes over". While set, all clients stay on the discussion
+     * screen with the target seat playing a white-fill animation + a
+     * banner showing accuser/seconder names — gives the table a moment
+     * to register who got put on the stand instead of jarring straight
+     * into the accusation timer. An internal `finalizePendingTrial` is
+     * scheduled for `dwellEndsAt`; when it fires it patches
+     * `currentNomination` (the real trial state) and clears this field.
+     * The day clock is paused the moment this is set, so the dwell
+     * doesn't burn day time. `seconderPlayerId` is absent for the host
+     * force-nominate path.
+     */
+    pendingTrial: v.optional(
+      v.object({
+        targetPlayerId: v.id('players'),
+        accuserPlayerId: v.id('players'),
+        seconderPlayerId: v.optional(v.id('players')),
+        dwellEndsAt: v.number(),
+      }),
+    ),
 
     /**
      * Carryover from a Diseased death. Flipped on at the morning resolution
@@ -264,4 +300,22 @@ export default defineSchema({
     vote: v.union(v.literal('lives'), v.literal('dies')),
     votedAt: v.number(),
   }).index('by_game_nomination', ['gameId', 'dayNumber', 'nominationIndex']),
+
+  /**
+   * Live nomination-highlight taps for the current day. Every alive player
+   * may have at most one active tap (enforced in `toggleNomTap`); a second
+   * distinct tapper on the same target fires the trial. All rows for the
+   * day are wiped when a trial starts, when a trial is cancelled, on
+   * `beginNight`, and on day expiry — so this table never accumulates
+   * across days.
+   */
+  nomTaps: defineTable({
+    gameId: v.id('games'),
+    dayNumber: v.number(),
+    targetPlayerId: v.id('players'),
+    nominatorPlayerId: v.id('players'),
+    createdAt: v.number(),
+  })
+    .index('by_game_day_target', ['gameId', 'dayNumber', 'targetPlayerId'])
+    .index('by_game_day_nominator', ['gameId', 'dayNumber', 'nominatorPlayerId']),
 });

@@ -41,6 +41,23 @@ type Nomination = {
   diesVoters: string[];
   myVote: 'lives' | 'dies' | null;
   iAmNominee: boolean;
+  accuser: { _id: Id<'players'>; name: string } | null;
+  seconder: { _id: Id<'players'>; name: string } | null;
+};
+
+type NomTap = {
+  targetPlayerId: Id<'players'>;
+  nominatorPlayerId: Id<'players'>;
+  nominatorName: string;
+  isMe: boolean;
+  createdAt: number;
+};
+
+type PendingTrial = {
+  target: { _id: Id<'players'>; name: string };
+  accuser: { _id: Id<'players'>; name: string } | null;
+  seconder: { _id: Id<'players'>; name: string } | null;
+  dwellEndsAt: number;
 };
 
 type DayGame = {
@@ -67,6 +84,24 @@ type DayGame = {
     maxNominationsPerDay: number;
   };
 };
+
+// Small attribution line shown under the nominee name on the Trial /
+// Vote screens. Surfaces who pushed the highlight tap and who tipped it
+// into a trial — important strategic info (a wolf railroading a trial
+// looks different from a villager calling out a known wolf). Renders
+// nothing when both fields are absent (legacy in-flight rows from before
+// the player-driven flow).
+function AccusationCredit({ nomination }: { nomination: Nomination }) {
+  if (!nomination.accuser && !nomination.seconder) return null;
+  return (
+    <Text className="text-wolf-muted text-xs tracking-widest text-center mt-1">
+      ACCUSED BY {(nomination.accuser?.name ?? '???').toUpperCase()}
+      {nomination.seconder
+        ? ` · SECONDED BY ${nomination.seconder.name.toUpperCase()}`
+        : ''}
+    </Text>
+  );
+}
 
 function formatTime(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
@@ -177,7 +212,7 @@ export default function DayScreen() {
     );
   }
 
-  const { game, me, alive, players, currentNomination } = view;
+  const { game, me, alive, players, currentNomination, nomTaps, pendingTrial } = view;
   const isHost = me.isHost;
   const hostMissing = view.hostMissing;
   const passHostCandidates = isHost
@@ -261,6 +296,8 @@ export default function DayScreen() {
       meId={me._id}
       alive={alive}
       players={players}
+      nomTaps={nomTaps}
+      pendingTrial={pendingTrial}
       onLeavePress={confirmLeave}
       hostMissing={hostMissing}
       passHostCandidates={passHostCandidates}
@@ -446,15 +483,55 @@ function DayActionRow({
 // Host-only settings cog, far-left, on its own row directly below
 // DayActionRow. Kept separate so the stats row can stay symmetrical.
 
-function DayCogRow({ onPress }: { onPress: () => void }) {
+function DayCogRow({
+  onPress,
+  nomArmed,
+  onNomToggle,
+  nomDisabled,
+}: {
+  onPress: () => void;
+  /** If set, render a NOM toggle next to the cog (host-only override that
+   *  bypasses the 2-tap requirement). Omit on non-discussion views. */
+  onNomToggle?: () => void;
+  nomArmed?: boolean;
+  /** Disable the NOM toggle visually (e.g. day over / noms exhausted). */
+  nomDisabled?: boolean;
+}) {
   return (
     <View
-      className="mb-2"
-      style={{ paddingHorizontal: 16, alignItems: 'flex-start' }}
+      className="mb-2 flex-row items-center"
+      style={{ paddingHorizontal: 16, gap: 14 }}
     >
       <TouchableOpacity onPress={onPress} hitSlop={8} style={{ padding: 4 }}>
         <Text style={{ color: '#8A8590', fontSize: 26 }}>⚙</Text>
       </TouchableOpacity>
+      {onNomToggle && (
+        <TouchableOpacity
+          onPress={onNomToggle}
+          disabled={nomDisabled}
+          hitSlop={6}
+          style={{
+            paddingHorizontal: 12,
+            paddingVertical: 6,
+            borderRadius: 8,
+            backgroundColor: nomArmed ? '#D4A017' : 'transparent',
+            borderWidth: 1,
+            borderColor: nomArmed ? '#D4A017' : '#3A3A48',
+            opacity: nomDisabled ? 0.35 : 1,
+          }}
+        >
+          <Text
+            style={{
+              color: nomArmed ? '#0F0F14' : '#8A8590',
+              fontSize: 14,
+              fontWeight: '800',
+              letterSpacing: 2,
+            }}
+          >
+            NOM
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -590,6 +667,8 @@ function DiscussionView({
   meId,
   alive,
   players,
+  nomTaps,
+  pendingTrial,
   onBeginNight,
   onLeavePress,
   hostMissing,
@@ -607,6 +686,8 @@ function DiscussionView({
     seatPosition?: number;
     alive: boolean;
   }>;
+  nomTaps: NomTap[];
+  pendingTrial: PendingTrial | null;
   onBeginNight: () => Promise<void>;
   onLeavePress: () => void;
   hostMissing: boolean;
@@ -614,36 +695,89 @@ function DiscussionView({
 }) {
   const insets = useSafeAreaInsets();
   const now = useNow();
-  const nominate = useMutation(api.day.nominate);
-  const [confirmTarget, setConfirmTarget] = useState<{
-    id: Id<'players'>;
-    name: string;
-  } | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const toggleNomTap = useMutation(api.day.toggleNomTap);
+  const hostForceNominate = useMutation(api.day.hostForceNominate);
   const [cogOpen, setCogOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
+  // Host override: when armed, the host's next seat tap fires a trial
+  // directly (bypasses the 2-tap consensus). Solo-test escape hatch. The
+  // toggle is silent — other phones see only the resulting trial, with
+  // the host as accuser and no seconder. Tapping NOM again disarms.
+  const [nomArmed, setNomArmed] = useState(false);
 
   const dayRemMs = dayRemainingMs(game, now);
   const dayExpired = dayRemMs <= 0;
   const noNomsLeft = game.nominationsRemaining <= 0;
   const dayOver = dayExpired || noNomsLeft;
+  // While a pending-trial dwell is in flight, the seat fill animation is
+  // running on every phone and the screen is about to switch to the trial
+  // view — freeze nominations, taps, NOM button, and BEGIN NIGHT until
+  // the server promotes the dwell into a real currentNomination.
+  const pending = pendingTrial !== null;
 
-  async function handleBeginVote() {
-    if (!confirmTarget) return;
-    setSubmitting(true);
+  // When the day closes mid-armed (e.g. last nom consumed by another path)
+  // or a pending trial starts, drop the armed state so the highlighted
+  // button doesn't look stuck.
+  useEffect(() => {
+    if ((dayOver || pending) && nomArmed) setNomArmed(false);
+  }, [dayOver, pending, nomArmed]);
+
+  // Tap rejection lands here when the server's "no noms left / day expired
+  // / target dead / target is self" gates fire. Surface as a themed alert
+  // so a stray tap doesn't silently no-op.
+  async function handleSeatPress(p: { _id: Id<'players'>; alive?: boolean }) {
+    if (dayOver) return; // client-side disabled below; belt + braces
+    if (p.alive === false) return;
+    if (p._id === meId) return;
+
+    // Host force-nominate path. Allowed even when the host is dead, since
+    // the host can keep moderating after elimination.
+    if (nomArmed && isHost) {
+      try {
+        await hostForceNominate({
+          gameId: game._id,
+          callerDeviceClientId: deviceClientId,
+          targetPlayerId: p._id,
+        });
+      } catch (e) {
+        showAlert(
+          'Could not nominate',
+          e instanceof Error ? e.message : String(e),
+        );
+      } finally {
+        setNomArmed(false);
+      }
+      return;
+    }
+
+    // Regular player-tap path. Dead spectators can't tap.
+    if (!meAlive) return;
     try {
-      await nominate({
+      await toggleNomTap({
         gameId: game._id,
         callerDeviceClientId: deviceClientId,
-        targetPlayerId: confirmTarget.id,
+        targetPlayerId: p._id,
       });
-      setConfirmTarget(null);
     } catch (e) {
-      showAlert('Could not put on trial', e instanceof Error ? e.message : String(e));
-    } finally {
-      setSubmitting(false);
+      showAlert(
+        'Could not nominate',
+        e instanceof Error ? e.message : String(e),
+      );
     }
   }
+
+  // Selectable = alive, non-self, day still open, no pending dwell, and
+  // the viewer can act. Dead spectators can normally not tap — but when
+  // the (possibly-dead) host has the NOM override armed, the ring opens
+  // up for them too.
+  const canTap = !dayOver && !pending && (meAlive || (isHost && nomArmed));
+  const selectableIds: ReadonlySet<string> | undefined = canTap
+    ? new Set(
+        alive
+          .filter(p => p._id !== meId)
+          .map(p => p._id as unknown as string),
+      )
+    : undefined;
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
@@ -688,20 +822,54 @@ function DiscussionView({
         showBuild
         onBuildPress={() => setBuildOpen(true)}
       />
-      {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
+      {isHost && (
+        <DayCogRow
+          onPress={() => setCogOpen(true)}
+          nomArmed={nomArmed}
+          nomDisabled={dayOver || pending}
+          onNomToggle={() => setNomArmed(a => !a)}
+        />
+      )}
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24, alignItems: 'center' }}>
         <SeatingCircle
           totalSeats={game.playerCount}
           players={players}
           meId={meId}
-          onPress={
-            isHost && !dayOver
-              ? p => setConfirmTarget({ id: p._id, name: p.name })
-              : undefined
+          selectableIds={selectableIds}
+          nomTaps={
+            pending
+              ? []
+              : nomTaps.map(t => ({
+                  targetPlayerId: t.targetPlayerId as unknown as string,
+                  nominatorName: t.nominatorName,
+                  isMe: t.isMe,
+                }))
           }
+          pendingTrialTargetId={pendingTrial?.target._id ?? null}
+          // Pass the absolute server deadline so the animation duration is
+          // computed once at effect-start time. Passing a derived `now`-
+          // dependent ms here causes the effect to re-fire every tick →
+          // setValue(0) flashes mid-fill.
+          pendingTrialDwellEndsAt={pendingTrial?.dwellEndsAt ?? null}
+          onPress={canTap ? handleSeatPress : undefined}
         />
-        {dayOver ? (
+        {pendingTrial ? (
+          <View className="mt-6 items-center">
+            <Text className="text-wolf-accent text-2xl font-extrabold tracking-widest text-center">
+              {pendingTrial.target.name.toUpperCase()}
+            </Text>
+            <Text className="text-wolf-muted text-xs tracking-widest text-center mt-1">
+              IS ON THE STAND
+            </Text>
+            <Text className="text-wolf-muted text-xs tracking-widest text-center mt-3">
+              ACCUSED BY {(pendingTrial.accuser?.name ?? '???').toUpperCase()}
+              {pendingTrial.seconder
+                ? ` · SECONDED BY ${pendingTrial.seconder.name.toUpperCase()}`
+                : ''}
+            </Text>
+          </View>
+        ) : dayOver ? (
           <View
             className="mt-6 rounded-xl px-5 py-4"
             style={{ borderWidth: 1, borderColor: '#3A3A48', backgroundColor: '#1A1A24' }}
@@ -719,19 +887,24 @@ function DiscussionView({
                 : 'Waiting for the host to begin night.'}
             </Text>
           </View>
-        ) : isHost ? (
+        ) : nomArmed && isHost ? (
+          <Text className="text-wolf-accent text-xs text-center mt-4 font-bold tracking-widest">
+            HOST OVERRIDE — TAP A PLAYER TO PUT THEM ON TRIAL
+          </Text>
+        ) : meAlive ? (
           <Text className="text-wolf-muted text-xs text-center mt-4">
-            Tap a player to put them on trial.
+            Tap a player to nominate them. A second tap by anyone puts them
+            on trial.
           </Text>
         ) : null}
-        {!meAlive && (
+        {!pendingTrial && !meAlive && !(nomArmed && isHost) && (
           <Text className="text-wolf-muted text-xs text-center mt-4 italic">
             You are out of the game — spectating.
           </Text>
         )}
       </ScrollView>
 
-      {isHost && (
+      {isHost && !pending && (
         <View
           style={{
             paddingHorizontal: 24,
@@ -750,7 +923,7 @@ function DiscussionView({
         </View>
       )}
 
-      {!isHost && (
+      {!isHost && !pending && (
         <View
           style={{
             paddingHorizontal: 24,
@@ -762,61 +935,6 @@ function DiscussionView({
           </Text>
         </View>
       )}
-
-      {/* Confirm / put-on-trial modal */}
-      <Modal
-        visible={!!confirmTarget}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setConfirmTarget(null)}
-      >
-        <View
-          style={{
-            flex: 1,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
-        >
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
-            PUT ON TRIAL
-          </Text>
-          <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
-            {confirmTarget?.name.toUpperCase()}
-          </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10">
-            Announce to the table that this player is on trial, then start
-            the accusation timer when the accuser is ready.
-          </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={() => setConfirmTarget(null)}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-8"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                CANCEL
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleBeginVote}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-8"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  ON TRIAL
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
       <TimersConfigModal
         visible={cogOpen}
@@ -962,6 +1080,7 @@ function TrialView({
         <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
           {nomination.nominee?.name.toUpperCase() ?? '—'}
         </Text>
+        <AccusationCredit nomination={nomination} />
       </View>
 
       <TrialStatusBar
@@ -1259,9 +1378,12 @@ function VoteView({
         <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
           VOTE ON
         </Text>
-        <Text className="text-wolf-text text-4xl font-extrabold tracking-widest mb-8 text-center">
+        <Text className="text-wolf-text text-4xl font-extrabold tracking-widest mb-2 text-center">
           {nomination.nominee?.name.toUpperCase() ?? '—'}
         </Text>
+        <View className="mb-6">
+          <AccusationCredit nomination={nomination} />
+        </View>
 
         <Pressable
           onPress={isHost && !notStartedYet ? toggleClock : undefined}
