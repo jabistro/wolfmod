@@ -73,7 +73,7 @@ const STEPPERS: StepperConfig[] = [
   { key: 'defenseSec', label: 'DEFENSE', step: 10, min: 10, isTime: true },
   { key: 'voteTimerSec', label: 'VOTE', step: 1, min: 1, isTime: false },
   { key: 'maxNominationsPerDay', label: 'NOMINATIONS', step: 1, min: 1, isTime: false },
-  { key: 'wolfPickerSec', label: 'WOLF PICKER', step: 10, min: 10, max: 60, isTime: true },
+  { key: 'wolfPickerSec', label: 'WOLF DECISION', step: 10, min: 10, max: 60, isTime: true },
 ];
 
 export default function TimersConfigModal({

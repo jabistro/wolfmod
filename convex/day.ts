@@ -448,13 +448,14 @@ export const finalizePendingTrial = internalMutation({
 });
 
 // Host escape hatch: bypass the 2-tap requirement and put a player on
-// trial directly. The host is recorded as the accuser; no seconder is
-// stamped (the accusation banner gracefully omits the seconder line).
-// Otherwise indistinguishable from a normal trial — same accusation
-// timer, same nominations-budget decrement, same wipe of in-flight
-// nomTaps. Useful for solo-with-bots testing and as an emergency
-// fallback if the table can't get a second tap (e.g. one alive
-// villager + bots).
+// trial directly. The host is recorded as BOTH the accuser and seconder
+// — solo playtesters need both banner blocks to render so they can see
+// the layout, and at a real table the host is functionally vouching for
+// the call anyway. Otherwise indistinguishable from a normal trial —
+// same accusation timer, same nominations-budget decrement, same wipe
+// of in-flight nomTaps. Useful for solo-with-bots testing and as an
+// emergency fallback if the table can't get a second tap (e.g. one
+// alive villager + bots).
 export const hostForceNominate = mutation({
   args: {
     gameId: v.id('games'),
@@ -508,10 +509,7 @@ export const hostForceNominate = mutation({
       now,
       targetPlayerId: args.targetPlayerId,
       accuserPlayerId: host._id,
-      // No seconder — the banner omits the SECONDED BY line when this
-      // field is absent. Same dwell length as the 2-tap path so the
-      // table sees the same animation regardless of how the trial fired.
-      seconderPlayerId: undefined,
+      seconderPlayerId: host._id,
     });
   },
 });
@@ -558,28 +556,17 @@ export const cancelNomination = mutation({
     // here so the next round starts clean.
     await wipeNomTapsForDay(ctx, args.gameId, game.dayNumber);
 
-    const now = Date.now();
-    const dayClockRemaining = game.dayPausedRemainingMs ?? 0;
     const nominationsUsed = game.nominationsThisDay ?? 0;
 
-    const basePatch: Partial<Doc<'games'>> = {
+    // Leave `dayPausedRemainingMs` alone so the day clock stays paused at
+    // exactly the value it had when the trial fired. The host then taps
+    // the play button on the DayClockBar to resume when the village is
+    // ready — gives them a beat to settle the table after the cancel
+    // instead of jamming straight back into ticking discussion time.
+    await ctx.db.patch(args.gameId, {
       currentNomination: undefined,
       nominationsThisDay: Math.max(0, nominationsUsed - 1),
-    };
-
-    if (dayClockRemaining > 0) {
-      await ctx.db.patch(args.gameId, {
-        ...basePatch,
-        dayEndsAt: now + dayClockRemaining,
-        dayPausedRemainingMs: undefined,
-      });
-    } else {
-      await ctx.db.patch(args.gameId, {
-        ...basePatch,
-        dayEndsAt: now,
-        dayPausedRemainingMs: undefined,
-      });
-    }
+    });
   },
 });
 

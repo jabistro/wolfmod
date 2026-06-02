@@ -104,6 +104,89 @@ function AccusationCredit({ nomination }: { nomination: Nomination }) {
   );
 }
 
+// Two-block row matching TrialStatusBar's visual rhythm: ACCUSED / name
+// on the left, SECONDED / name on the right. If only one is present
+// (e.g. a host-forced nomination), that block renders alone and stretches.
+// The name preserves the user-typed casing (matches the seat-ring labels)
+// and uses flexShrink + minWidth: 0 so it ellipsizes inside the block
+// instead of spilling past the right edge.
+//
+// If the local viewer's id matches the accuser or seconder, that block
+// gets a gold border + gold label — self-identification cue for tables
+// with duplicate first names ("Christopher C" vs another Christopher).
+// Renders gold only on the matching player's own phone; everyone else
+// sees the plain card treatment.
+function AccusationStatusBar({
+  nomination,
+  meId,
+}: {
+  nomination: Nomination;
+  meId: Id<'players'>;
+}) {
+  if (!nomination.accuser && !nomination.seconder) return null;
+  const isMyAccusation = nomination.accuser?._id === meId;
+  const isMySecond = nomination.seconder?._id === meId;
+  const accent = '#D4A017';
+  return (
+    <View className="mx-4 mb-2 flex-row" style={{ gap: 10 }}>
+      {nomination.accuser && (
+        <View
+          className="flex-1 bg-wolf-card rounded-xl flex-row items-center"
+          style={{
+            paddingVertical: 8,
+            paddingHorizontal: 14,
+            gap: 10,
+            borderWidth: 1,
+            borderColor: isMyAccusation ? accent : 'transparent',
+          }}
+        >
+          <Text
+            className="text-xs tracking-widest"
+            style={{ color: isMyAccusation ? accent : '#8A8590' }}
+          >
+            ACCUSED
+          </Text>
+          <Text
+            className="text-wolf-text text-right"
+            style={{ fontSize: 14, fontWeight: '600', flexShrink: 1, minWidth: 0, flex: 1 }}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {nomination.accuser.name}
+          </Text>
+        </View>
+      )}
+      {nomination.seconder && (
+        <View
+          className="flex-1 bg-wolf-card rounded-xl flex-row items-center"
+          style={{
+            paddingVertical: 8,
+            paddingHorizontal: 14,
+            gap: 10,
+            borderWidth: 1,
+            borderColor: isMySecond ? accent : 'transparent',
+          }}
+        >
+          <Text
+            className="text-xs tracking-widest"
+            style={{ color: isMySecond ? accent : '#8A8590' }}
+          >
+            SECONDED
+          </Text>
+          <Text
+            className="text-wolf-text text-right"
+            style={{ fontSize: 14, fontWeight: '600', flexShrink: 1, minWidth: 0, flex: 1 }}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {nomination.seconder.name}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 function formatTime(ms: number): string {
   const total = Math.max(0, Math.ceil(ms / 1000));
   const m = Math.floor(total / 60);
@@ -276,6 +359,7 @@ export default function DayScreen() {
           game={game}
           deviceClientId={deviceClientId}
           isHost={isHost}
+          meId={me._id}
           nomination={currentNomination}
           onLeavePress={confirmLeave}
           hostMissing={hostMissing}
@@ -344,7 +428,7 @@ function TrialStatusBar({
         style={{ paddingVertical: 8, paddingHorizontal: 14 }}
       >
         <Text className="text-wolf-muted text-xs tracking-widest">
-          DAY (PAUSED)
+          TIME REMAINING
         </Text>
         <Text
           className="text-wolf-muted"
@@ -617,9 +701,11 @@ function DayClockBar({
         )}
       </View>
       <View className="flex-1 items-center">
-        <Text className="text-wolf-muted text-xs tracking-widest">
-          {dayOver ? 'DAY OVER' : paused ? 'DAY (PAUSED)' : 'DAY'}
-        </Text>
+        {(dayOver || paused) && (
+          <Text className="text-wolf-muted text-xs tracking-widest">
+            {dayOver ? 'TIME UP' : 'PAUSED'}
+          </Text>
+        )}
         <Text
           className="font-extrabold"
           style={{
@@ -963,6 +1049,7 @@ function TrialView({
   game,
   deviceClientId,
   isHost,
+  meId,
   nomination,
   onLeavePress,
   hostMissing,
@@ -972,6 +1059,7 @@ function TrialView({
   game: DayGame;
   deviceClientId: string;
   isHost: boolean;
+  meId: Id<'players'>;
   nomination: Nomination;
   onLeavePress: () => void;
   hostMissing: boolean;
@@ -1077,12 +1165,13 @@ function TrialView({
         />
       )}
 
-      <View className="items-center mb-2">
-        <Text className="text-wolf-text text-2xl font-extrabold tracking-widest">
+      <View className="items-center mb-3">
+        <Text className="text-wolf-text text-3xl font-extrabold tracking-widest">
           {nomination.nominee?.name.toUpperCase() ?? '—'}
         </Text>
-        <AccusationCredit nomination={nomination} />
       </View>
+
+      <AccusationStatusBar nomination={nomination} meId={meId} />
 
       <TrialStatusBar
         dayRemMs={dayRemMs}

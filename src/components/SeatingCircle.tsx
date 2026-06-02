@@ -65,10 +65,11 @@ interface SeatingCircleProps {
    * shows a tinted ring + the tapper's name(s) below the seat. Day-phase
    * nominations enforce at most one entry per targetPlayerId server-side;
    * the wolves' picker can attach multiple entries to the same target
-   * when several wolves agree, and all names render stacked. `isMe` adds
-   * a "(you)" suffix on the label so the viewer can find their own tap
-   * at a glance. Color follows `selectedVariant` (white/neutral vs
-   * red/danger).
+   * when several wolves agree, and all names render stacked. `isMe`
+   * swaps the label to "(Me)" on the local viewer's screen so they can
+   * find their own tap at a glance; on every other phone the same tap
+   * still renders as the nominator's name. Color follows
+   * `selectedVariant` (white/neutral vs red/danger).
    */
   nomTaps?: ReadonlyArray<SeatNomTap>;
   /**
@@ -261,7 +262,7 @@ export function SeatingCircle({
                 fontWeight: '700',
               }}
             >
-              {t.isMe ? `${t.nominatorName} (you)` : t.nominatorName}
+              {t.isMe ? '(Me)' : t.nominatorName}
             </Text>
           ))}
         </View>,

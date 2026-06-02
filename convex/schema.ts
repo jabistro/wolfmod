@@ -150,8 +150,8 @@ export default defineSchema({
      * scheduled for `dwellEndsAt`; when it fires it patches
      * `currentNomination` (the real trial state) and clears this field.
      * The day clock is paused the moment this is set, so the dwell
-     * doesn't burn day time. `seconderPlayerId` is absent for the host
-     * force-nominate path.
+     * doesn't burn day time. On host force-nominate, the host is
+     * stamped as both accuser and seconder.
      */
     pendingTrial: v.optional(
       v.object({
