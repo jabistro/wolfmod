@@ -22,6 +22,7 @@ import RoleCard from '../components/RoleCard';
 import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
+import { SeatingCircle, type SeatingPlayer } from '../components/SeatingCircle';
 
 type Nav = StackNavigationProp<RootStackParamList, 'RoleReveal'>;
 type Route = RouteProp<RootStackParamList, 'RoleReveal'>;
@@ -228,8 +229,33 @@ export default function RoleRevealScreen() {
 
   // Doppelganger seat-picker: shown after the role reveal is acked but
   // before `confirmDoppelgangerTarget` lands. Until they pick, they aren't
-  // counted ready and the host can't start the game.
+  // counted ready and the host can't start the game. Uses the SeatingCircle
+  // so the picker matches every other in-game target picker — self at 6
+  // o'clock, neighbors fanning out to match the real table. Tap → confirm
+  // overlay → lock in (SeerPicker pattern).
   if (pickingDoppelganger && !isConfirmed) {
+    const pickedCandidate =
+      doppelgangerPick !== null
+        ? doppelgangerCandidates.find(c => c._id === doppelgangerPick) ?? null
+        : null;
+    const seatingPlayers: SeatingPlayer[] = [
+      ...doppelgangerCandidates.map(c => ({
+        _id: c._id,
+        name: c.name,
+        seatPosition: c.seatPosition,
+      })),
+      // Include the viewer's own seat so the 6 o'clock anchor is visible.
+      // Marked non-selectable via selectableIds below; the gold self-ring
+      // still renders from meId.
+      {
+        _id: me._id,
+        name: me.name,
+        seatPosition: me.seatPosition,
+      },
+    ];
+    const selectableIds = new Set(
+      doppelgangerCandidates.map(c => c._id as unknown as string),
+    );
     return (
       <SafeAreaView className="flex-1 bg-wolf-bg">
         <InGameLeaveButton onPress={confirmLeave} />
@@ -244,76 +270,73 @@ export default function RoleRevealScreen() {
           When this player is eliminated, you become their role.
         </Text>
         <ScrollView
-          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}
+          contentContainerStyle={{
+            paddingHorizontal: 24,
+            paddingBottom: 24,
+            alignItems: 'center',
+          }}
           style={{ flex: 1 }}
         >
-          {doppelgangerCandidates.map(c => {
-            const selected = doppelgangerPick === c._id;
-            return (
+          <SeatingCircle
+            totalSeats={game.playerCount}
+            players={seatingPlayers}
+            meId={me._id}
+            viewerSeatIndex={me.seatPosition}
+            selectableIds={selectableIds}
+            onPress={p => setDoppelgangerPick(p._id)}
+          />
+        </ScrollView>
+        {pickedCandidate && (
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.92)',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 32,
+            }}
+          >
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
+              MARK YOUR SHADOW
+            </Text>
+            <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
+              {pickedCandidate.name.toUpperCase()}
+            </Text>
+            <Text className="text-wolf-muted text-sm text-center mb-10">
+              When they fall, you inherit their role.
+            </Text>
+            <View className="flex-row" style={{ gap: 14 }}>
               <TouchableOpacity
-                key={c._id}
-                onPress={() => setDoppelgangerPick(c._id)}
-                style={{
-                  backgroundColor: selected ? '#D4A017' : '#22222F',
-                  borderRadius: 12,
-                  paddingVertical: 16,
-                  paddingHorizontal: 16,
-                  marginBottom: 8,
-                  borderWidth: 1,
-                  borderColor: selected ? '#D4A017' : '#2A2A38',
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                }}
+                onPress={() => setDoppelgangerPick(null)}
+                disabled={submittingPick}
+                className="bg-wolf-card rounded-xl py-4 px-10"
+                style={{ borderWidth: 1, borderColor: '#3A3A48' }}
               >
-                <Text
-                  style={{
-                    color: selected ? '#0F0F14' : '#8A8590',
-                    fontSize: 12,
-                    fontWeight: '700',
-                    width: 56,
-                  }}
-                >
-                  {typeof c.seatPosition === 'number'
-                    ? `SEAT ${c.seatPosition + 1}`
-                    : ''}
-                </Text>
-                <Text
-                  style={{
-                    color: selected ? '#0F0F14' : '#F0EDE8',
-                    fontSize: 16,
-                    fontWeight: selected ? '700' : '500',
-                    flex: 1,
-                  }}
-                >
-                  {c.name}
+                <Text className="text-wolf-text text-base font-extrabold tracking-widest">
+                  NO
                 </Text>
               </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-        <View
-          style={{
-            paddingHorizontal: 24,
-            paddingBottom: Math.max(insets.bottom, 16) + 16,
-          }}
-        >
-          <TouchableOpacity
-            onPress={submitDoppelgangerPick}
-            disabled={doppelgangerPick === null || submittingPick}
-            style={{
-              opacity: doppelgangerPick !== null && !submittingPick ? 1 : 0.4,
-            }}
-            className="bg-wolf-accent rounded-xl py-5 items-center"
-          >
-            {submittingPick ? (
-              <ActivityIndicator color="#0F0F14" />
-            ) : (
-              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-                LOCK IN
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
+              <TouchableOpacity
+                onPress={submitDoppelgangerPick}
+                disabled={submittingPick}
+                style={{ opacity: submittingPick ? 0.4 : 1 }}
+                className="bg-wolf-accent rounded-xl py-4 px-10"
+              >
+                {submittingPick ? (
+                  <ActivityIndicator color="#0F0F14" />
+                ) : (
+                  <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                    YES
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
       </SafeAreaView>
     );
   }

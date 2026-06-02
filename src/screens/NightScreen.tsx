@@ -171,6 +171,7 @@ export default function NightScreen() {
             targetables={targetables}
             totalSeats={game.playerCount}
             meId={me._id}
+            meSeatPosition={me.seatPosition}
             wolves={wolfState.wolves}
             requiredKills={wolfState.requiredKills}
             killsSoFar={wolfState.killsSoFar}
@@ -937,6 +938,7 @@ function WolvesPicker({
   targetables,
   totalSeats,
   meId,
+  meSeatPosition,
   wolves,
   requiredKills,
   killsSoFar,
@@ -950,6 +952,7 @@ function WolvesPicker({
   targetables: Targetable[];
   totalSeats: number;
   meId: Id<'players'>;
+  meSeatPosition?: number;
   wolves: Array<{
     _id: Id<'players'>;
     name: string;
@@ -1179,6 +1182,7 @@ function WolvesPicker({
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
+            viewerSeatIndex={meSeatPosition}
             selectedId={seatSelectedId}
             selectedVariant="danger"
             selectableIds={selectableForThisKill}
@@ -1244,6 +1248,7 @@ function SeerPicker({
   targetables,
   totalSeats,
   meId,
+  meSeatPosition,
   history,
   nightNumber,
   isGhost,
@@ -1254,6 +1259,7 @@ function SeerPicker({
   targetables: Targetable[];
   totalSeats: number;
   meId: Id<'players'>;
+  meSeatPosition?: number;
   history: Array<{
     nightNumber: number;
     targetName: string;
@@ -1400,6 +1406,7 @@ function SeerPicker({
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
+            viewerSeatIndex={meSeatPosition}
             selectableIds={
               new Set(targetables.map(t => t._id as unknown as string))
             }
@@ -1524,6 +1531,7 @@ function PIPicker({
   targetables,
   totalSeats,
   meId,
+  meSeatPosition,
   piState,
   isGhost,
 }: {
@@ -1533,6 +1541,7 @@ function PIPicker({
   targetables: Targetable[];
   totalSeats: number;
   meId: Id<'players'>;
+  meSeatPosition?: number;
   piState: {
     piUsed: boolean;
     hasActedThisNight: boolean;
@@ -1676,6 +1685,7 @@ function PIPicker({
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
+            viewerSeatIndex={meSeatPosition}
             selectableIds={
               new Set(targetables.map(t => t._id as unknown as string))
             }
@@ -1815,6 +1825,7 @@ function MentalistPicker({
   targetables,
   totalSeats,
   meId,
+  meSeatPosition,
   mentalistState,
   nightNumber,
   isGhost,
@@ -1825,6 +1836,7 @@ function MentalistPicker({
   targetables: Targetable[];
   totalSeats: number;
   meId: Id<'players'>;
+  meSeatPosition?: number;
   mentalistState: {
     hasActedThisNight: boolean;
     noValidTargets: boolean;
@@ -2030,6 +2042,7 @@ function MentalistPicker({
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
+            viewerSeatIndex={meSeatPosition}
             selectedIds={selectedSet}
             selectableIds={selectableSet}
             onPress={
@@ -2181,6 +2194,7 @@ function WitchPicker({
   targetables,
   totalSeats,
   meId,
+  meSeatPosition,
   witchState,
   isGhost,
 }: {
@@ -2190,6 +2204,7 @@ function WitchPicker({
   targetables: Targetable[];
   totalSeats: number;
   meId: Id<'players'>;
+  meSeatPosition?: number;
   witchState: {
     saveUsed: boolean;
     poisonUsed: boolean;
@@ -2561,6 +2576,7 @@ function WitchPicker({
                 totalSeats={totalSeats}
                 players={alivePlayers}
                 meId={meId}
+                viewerSeatIndex={meSeatPosition}
                 selectableIds={
                   new Set(targetables.map(t => t._id as unknown as string))
                 }
@@ -2985,6 +3001,7 @@ function BodyguardPicker({
   totalSeats,
   bgState,
   meId,
+  meSeatPosition,
   isGhost,
 }: {
   gameId: Id<'games'>;
@@ -3000,6 +3017,7 @@ function BodyguardPicker({
     tonightProtected: { _id: Id<'players'>; name: string } | null;
   };
   meId: Id<'players'>;
+  meSeatPosition?: number;
   isGhost?: boolean;
 }) {
   const submitProtect = useMutation(api.night.submitBGProtect);
@@ -3094,6 +3112,7 @@ function BodyguardPicker({
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
+            viewerSeatIndex={meSeatPosition}
             selectableIds={
               new Set(targetables.map(t => t._id as unknown as string))
             }
@@ -3175,6 +3194,7 @@ function HuntressPicker({
   totalSeats,
   huntressState,
   meId,
+  meSeatPosition,
   isGhost,
 }: {
   gameId: Id<'games'>;
@@ -3189,6 +3209,7 @@ function HuntressPicker({
     tonightSkipped: boolean;
   };
   meId: Id<'players'>;
+  meSeatPosition?: number;
   isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
@@ -3277,6 +3298,7 @@ function HuntressPicker({
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
+            viewerSeatIndex={meSeatPosition}
             selectableIds={
               new Set(targetables.map(t => t._id as unknown as string))
             }
@@ -3377,6 +3399,7 @@ function WarlockPicker({
   totalSeats,
   warlockState,
   meId,
+  meSeatPosition,
   isGhost,
 }: {
   gameId: Id<'games'>;
@@ -3391,6 +3414,7 @@ function WarlockPicker({
     tonightSkipped: boolean;
   };
   meId: Id<'players'>;
+  meSeatPosition?: number;
   isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
@@ -3482,6 +3506,7 @@ function WarlockPicker({
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
+            viewerSeatIndex={meSeatPosition}
             selectableIds={
               new Set(targetables.map(t => t._id as unknown as string))
             }
@@ -3582,6 +3607,7 @@ function RevealerPicker({
   totalSeats,
   revealerState,
   meId,
+  meSeatPosition,
   isGhost,
 }: {
   gameId: Id<'games'>;
@@ -3595,6 +3621,7 @@ function RevealerPicker({
     tonightSkipped: boolean;
   };
   meId: Id<'players'>;
+  meSeatPosition?: number;
   isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
@@ -3683,6 +3710,7 @@ function RevealerPicker({
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
+            viewerSeatIndex={meSeatPosition}
             selectableIds={
               new Set(targetables.map(t => t._id as unknown as string))
             }
@@ -3782,6 +3810,7 @@ function RevilerPicker({
   totalSeats,
   revilerState,
   meId,
+  meSeatPosition,
   isGhost,
 }: {
   gameId: Id<'games'>;
@@ -3795,6 +3824,7 @@ function RevilerPicker({
     tonightSkipped: boolean;
   };
   meId: Id<'players'>;
+  meSeatPosition?: number;
   isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
@@ -3883,6 +3913,7 @@ function RevilerPicker({
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
+            viewerSeatIndex={meSeatPosition}
             selectableIds={
               new Set(targetables.map(t => t._id as unknown as string))
             }
@@ -3983,6 +4014,7 @@ function NightmareWolfPicker({
   totalSeats,
   nightmareState,
   meId,
+  meSeatPosition,
   isGhost,
 }: {
   gameId: Id<'games'>;
@@ -3998,6 +4030,7 @@ function NightmareWolfPicker({
     tonightSkipped: boolean;
   };
   meId: Id<'players'>;
+  meSeatPosition?: number;
   isGhost?: boolean;
 }) {
   const insets = useSafeAreaInsets();
@@ -4108,6 +4141,7 @@ function NightmareWolfPicker({
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
+            viewerSeatIndex={meSeatPosition}
             selectableIds={
               new Set(targetables.map(t => t._id as unknown as string))
             }

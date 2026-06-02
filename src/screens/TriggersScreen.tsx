@@ -123,6 +123,7 @@ export default function TriggersScreen() {
           targetables={view.targetables}
           totalSeats={view.game.playerCount}
           myId={me._id}
+          mySeatPosition={me.seatPosition}
           insetBottom={insets.bottom}
         />,
       );
@@ -212,6 +213,7 @@ function HunterPickerView({
   targetables,
   totalSeats,
   myId,
+  mySeatPosition,
   insetBottom,
 }: {
   gameId: Id<'games'>;
@@ -224,6 +226,7 @@ function HunterPickerView({
   }>;
   totalSeats: number;
   myId: Id<'players'>;
+  mySeatPosition?: number;
   insetBottom: number;
 }) {
   const submitShot = useMutation(api.triggers.submitHunterShot);
@@ -282,6 +285,7 @@ function HunterPickerView({
           totalSeats={totalSeats}
           players={seating}
           meId={myId}
+          viewerSeatIndex={mySeatPosition}
           onPress={p => !submitting && shoot(p._id)}
         />
         <Text className="text-wolf-muted text-xs text-center mt-4 max-w-xs">

@@ -330,6 +330,7 @@ export default function DayScreen() {
             onLeavePress={confirmLeave}
             hostMissing={hostMissing}
             meAlive={me.alive}
+            meSeatPosition={me.seatPosition}
             passHostCandidates={passHostCandidates}
           />
           {passPicker}
@@ -379,6 +380,7 @@ export default function DayScreen() {
       isHost={isHost}
       meAlive={me.alive}
       meId={me._id}
+      meSeatPosition={me.seatPosition}
       alive={alive}
       players={players}
       nomTaps={nomTaps}
@@ -752,6 +754,7 @@ function DiscussionView({
   isHost,
   meAlive,
   meId,
+  meSeatPosition,
   alive,
   players,
   nomTaps,
@@ -766,6 +769,7 @@ function DiscussionView({
   isHost: boolean;
   meAlive: boolean;
   meId: Id<'players'>;
+  meSeatPosition?: number;
   alive: Array<{ _id: Id<'players'>; name: string; seatPosition?: number }>;
   players: Array<{
     _id: Id<'players'>;
@@ -923,6 +927,7 @@ function DiscussionView({
           totalSeats={game.playerCount}
           players={players}
           meId={meId}
+          viewerSeatIndex={meSeatPosition}
           selectableIds={selectableIds}
           nomTaps={
             pending
@@ -1662,12 +1667,14 @@ function ResultsView({
   onLeavePress,
   hostMissing,
   meAlive,
+  meSeatPosition,
   passHostCandidates,
 }: {
   game: DayGame;
   deviceClientId: string;
   isHost: boolean;
   nomination: Nomination;
+  meSeatPosition?: number;
   cascadeDeaths: Array<{
     _id: Id<'players'>;
     name: string;
@@ -1759,6 +1766,7 @@ function ResultsView({
           <SeatingCircle
             totalSeats={game.playerCount}
             players={players}
+            viewerSeatIndex={meSeatPosition}
             centerOverlay={
               <View style={{ alignItems: 'center', paddingHorizontal: 8 }}>
                 <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1">
@@ -1962,6 +1970,7 @@ function LynchTriggerOverlay({
         targetables={view.targetables}
         totalSeats={view.game.playerCount}
         myId={view.me._id}
+        mySeatPosition={view.me.seatPosition}
       />
     );
   }
@@ -1989,6 +1998,7 @@ function HunterModal({
   targetables,
   totalSeats,
   myId,
+  mySeatPosition,
 }: {
   gameId: Id<'games'>;
   deviceClientId: string;
@@ -2000,6 +2010,7 @@ function HunterModal({
   }>;
   totalSeats: number;
   myId: Id<'players'>;
+  mySeatPosition?: number;
 }) {
   const submitShot = useMutation(api.triggers.submitHunterShot);
   const submitSkip = useMutation(api.triggers.submitHunterSkip);
@@ -2055,6 +2066,7 @@ function HunterModal({
           totalSeats={totalSeats}
           players={targetables}
           meId={myId}
+          viewerSeatIndex={mySeatPosition}
           onPress={p => !submitting && shoot(p._id)}
         />
         <Text className="text-wolf-muted text-xs text-center mt-4 max-w-xs">

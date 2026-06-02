@@ -418,6 +418,7 @@ export default function EndGameScreen() {
   }
 
   const { game, players } = view;
+  const mySeatPosition = players.find(p => p.isMe)?.seatPosition;
   const winnerLabel =
     game.winner === 'village'
       ? 'VILLAGE WINS'
@@ -464,6 +465,7 @@ export default function EndGameScreen() {
           <SeatingCircle
             totalSeats={game.playerCount}
             players={players}
+            viewerSeatIndex={mySeatPosition}
             centerOverlay={
               <View
                 className="rounded-2xl px-5 py-2"

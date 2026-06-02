@@ -6178,6 +6178,7 @@ export const morningView = query({
         name: me.name,
         isHost: me.isHost,
         alive: me.alive,
+        seatPosition: me.seatPosition,
       },
       deaths,
       triggersPending,

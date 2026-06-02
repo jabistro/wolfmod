@@ -99,6 +99,15 @@ interface SeatingCircleProps {
    * NAME" on the vote-result screen, "VILLAGE WINS" on end-game).
    */
   centerOverlay?: React.ReactNode;
+  /**
+   * Seat index of the local viewer. When provided, the circle is rotated
+   * so this seat sits at 6 o'clock (bottom), and neighboring seats fan
+   * out left/right to match the player's real-world view of the table.
+   * Stable for ghosts (their original seat at death persists for the
+   * rest of the game). Omit for lobby/spectator views with no single
+   * "me" — layout then falls back to seat 0 at 12 o'clock.
+   */
+  viewerSeatIndex?: number;
 }
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -117,9 +126,16 @@ function seatPos(
   total: number,
   containerSize: number,
   seatSize: number,
+  viewerSeatIndex?: number,
 ) {
   const radius = (containerSize - seatSize) / 2;
-  const angle = (2 * Math.PI * index) / total - Math.PI / 2;
+  // viewerSeatIndex undefined → seat 0 at 12 o'clock (lobby fallback).
+  // viewerSeatIndex set → that seat lands at 6 o'clock; neighbors fan
+  // out so the player's left/right onscreen matches the real table.
+  const angle =
+    viewerSeatIndex == null
+      ? (2 * Math.PI * index) / total - Math.PI / 2
+      : (2 * Math.PI * (index - viewerSeatIndex)) / total + Math.PI / 2;
   return {
     left: containerSize / 2 + radius * Math.cos(angle) - seatSize / 2,
     top: containerSize / 2 + radius * Math.sin(angle) - seatSize / 2,
@@ -147,6 +163,7 @@ export function SeatingCircle({
   size = DEFAULT_CIRCLE_SIZE,
   centerOverlay,
   selectedVariant = 'neutral',
+  viewerSeatIndex,
 }: SeatingCircleProps) {
   const isDanger = selectedVariant === 'danger';
   const selectedBorder = isDanger ? '#B03A2E' : '#F0EDE8';
@@ -220,7 +237,7 @@ export function SeatingCircle({
     // keep their original positions.
     if (!occupant) continue;
 
-    const pos = seatPos(i, totalSeats, size, seatSize);
+    const pos = seatPos(i, totalSeats, size, seatSize, viewerSeatIndex);
     const isDead = occupant.alive === false;
     const isMe = occupant._id === meId;
     const isSelected =
