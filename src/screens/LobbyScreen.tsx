@@ -734,10 +734,10 @@ export default function LobbyScreen() {
           )}
         </View>
 
-        {/* Timers section */}
+        {/* Settings section */}
         <View className="px-6 mt-6">
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-            TIMERS
+            SETTINGS
           </Text>
           {isHost ? (
             <TouchableOpacity
@@ -1395,6 +1395,7 @@ export default function LobbyScreen() {
             defenseSec: game.defenseSec,
             voteTimerSec: game.voteTimerSec,
             maxNominationsPerDay: game.maxNominationsPerDay,
+            wolfPickerSec: game.wolfPickerSec,
           }}
           passHostCandidates={
             isHost

@@ -119,6 +119,7 @@ export type DayConfig = {
   defenseSec: number;
   voteTimerSec: number;
   maxNominationsPerDay: number;
+  wolfPickerSec: number;
 };
 
 export const DAY_CONFIG_DEFAULTS: DayConfig = {
@@ -127,6 +128,7 @@ export const DAY_CONFIG_DEFAULTS: DayConfig = {
   defenseSec: 30,
   voteTimerSec: 5,
   maxNominationsPerDay: 3,
+  wolfPickerSec: 30,
 };
 
 export function dayConfigOf(game: Doc<'games'>): DayConfig {
@@ -137,6 +139,7 @@ export function dayConfigOf(game: Doc<'games'>): DayConfig {
     voteTimerSec: game.voteTimerSec ?? DAY_CONFIG_DEFAULTS.voteTimerSec,
     maxNominationsPerDay:
       game.maxNominationsPerDay ?? DAY_CONFIG_DEFAULTS.maxNominationsPerDay,
+    wolfPickerSec: game.wolfPickerSec ?? DAY_CONFIG_DEFAULTS.wolfPickerSec,
   };
 }
 

@@ -61,18 +61,22 @@ interface SeatingCircleProps {
    */
   selectableIds?: ReadonlySet<string>;
   /**
-   * Live nomination-highlight taps. Each tapped target seat shows a red
-   * ring + the tapper's name below the seat. At most one entry per
-   * targetPlayerId (a 2nd distinct tap fires the trial server-side and
-   * the list resets). `isMe` adds an inner gold tick on the ring so the
-   * viewer can find their own active tap at a glance.
+   * Live nomination-/wolf-vote highlight taps. Each tapped target seat
+   * shows a tinted ring + the tapper's name(s) below the seat. Day-phase
+   * nominations enforce at most one entry per targetPlayerId server-side;
+   * the wolves' picker can attach multiple entries to the same target
+   * when several wolves agree, and all names render stacked. `isMe` adds
+   * a "(you)" suffix on the label so the viewer can find their own tap
+   * at a glance. Color follows `selectedVariant` (white/neutral vs
+   * red/danger).
    */
   nomTaps?: ReadonlyArray<SeatNomTap>;
   /**
-   * Trial-confirm dwell: while set, that seat animates from the tap-
-   * highlight state to a fully-white fill (text color inverts to dark).
-   * Used between the 2nd tap and the real trial taking over, so the
-   * table has a beat to register who's on the stand before the screen
+   * Confirmation dwell: while set, that seat animates from the tap-
+   * highlight state to a fully-filled solid (text color inverts to
+   * dark). White on neutral (day-phase trial), red on danger (wolves'
+   * kill). Used between consensus and the real action firing, so the
+   * table has a beat to register who got picked before the screen
    * switches.
    */
   pendingTrialTargetId?: Id<'players'> | null;
@@ -143,8 +147,9 @@ export function SeatingCircle({
   centerOverlay,
   selectedVariant = 'neutral',
 }: SeatingCircleProps) {
-  const selectedBorder = selectedVariant === 'danger' ? '#B03A2E' : '#F0EDE8';
-  const selectedBackground = selectedVariant === 'danger' ? '#3A1614' : '#33333F';
+  const isDanger = selectedVariant === 'danger';
+  const selectedBorder = isDanger ? '#B03A2E' : '#F0EDE8';
+  const selectedBackground = isDanger ? '#3A1614' : '#33333F';
   const playerBySeat = new Map<number, SeatingPlayer>();
   for (const p of players) {
     if (typeof p.seatPosition === 'number') {
@@ -153,13 +158,19 @@ export function SeatingCircle({
   }
   const seatSize = computeSeatSize(totalSeats, size);
 
-  const nomTapByTarget = new Map<string, SeatNomTap>();
+  // Multiple wolves can vote the same target so each seat may carry more
+  // than one tap entry; nomTaps are server-deduped to one entry per target.
+  const nomTapsByTarget = new Map<string, SeatNomTap[]>();
   if (nomTaps) {
-    for (const t of nomTaps) nomTapByTarget.set(t.targetPlayerId, t);
+    for (const t of nomTaps) {
+      const arr = nomTapsByTarget.get(t.targetPlayerId);
+      if (arr) arr.push(t);
+      else nomTapsByTarget.set(t.targetPlayerId, [t]);
+    }
   }
-  const tapBorder = '#F0EDE8';
-  const tapBackground = '#33333F';
-  const tapLabelColor = '#F0EDE8';
+  const tapBorder = isDanger ? '#B03A2E' : '#F0EDE8';
+  const tapBackground = isDanger ? '#3A1614' : '#33333F';
+  const tapLabelColor = isDanger ? '#E07566' : '#F0EDE8';
   const tapLabelFontSize = seatSize >= 56 ? 10 : seatSize >= 44 ? 9 : 8;
 
   // Pending-trial fill animation. 0 = tap-highlight state, 1 = solid
@@ -183,84 +194,66 @@ export function SeatingCircle({
   }, [pendingTrialTargetId, pendingTrialDwellEndsAt, pendingAnim]);
   const pendingBg = pendingAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(51, 51, 63, 1)', 'rgba(240, 237, 232, 1)'],
+    outputRange: isDanger
+      ? ['rgba(58, 22, 20, 1)', 'rgba(176, 58, 46, 1)']
+      : ['rgba(51, 51, 63, 1)', 'rgba(240, 237, 232, 1)'],
   });
   const pendingTextColor = pendingAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['rgba(240, 237, 232, 1)', 'rgba(15, 15, 20, 1)'],
+    outputRange: isDanger
+      ? ['rgba(240, 237, 232, 1)', 'rgba(240, 237, 232, 1)']
+      : ['rgba(240, 237, 232, 1)', 'rgba(15, 15, 20, 1)'],
   });
+  const pendingBorder = isDanger ? '#B03A2E' : '#F0EDE8';
 
-  return (
-    <View
-      style={{ width: size, height: size, position: 'relative', marginTop: 12 }}
-    >
-      {Array.from({ length: totalSeats }).map((_, i) => {
-        const occupant = playerBySeat.get(i);
-        // Empty seat (eliminated mid-game with no faded-roster mode, or
-        // simply unfilled): leave as a visual gap so remaining alive players
-        // keep their original positions.
-        if (!occupant) return null;
+  // Render in two passes so tap labels paint on top of every seat.
+  // Otherwise seats drawn AFTER a labeled seat (in iteration order) cover
+  // the labels positioned below earlier seats — visible on the lower half
+  // of the circle where each seat's label sits over the next seat's space.
+  const seatNodes: React.ReactNode[] = [];
+  const labelNodes: React.ReactNode[] = [];
+  for (let i = 0; i < totalSeats; i++) {
+    const occupant = playerBySeat.get(i);
+    // Empty seat (eliminated mid-game with no faded-roster mode, or
+    // simply unfilled): leave as a visual gap so remaining alive players
+    // keep their original positions.
+    if (!occupant) continue;
 
-        const pos = seatPos(i, totalSeats, size, seatSize);
-        const isDead = occupant.alive === false;
-        const isMe = occupant._id === meId;
-        const isSelected =
-          !isDead &&
-          (occupant._id === selectedId ||
-            (selectedIds?.has(occupant._id as unknown as string) ?? false));
-        const isSelectable =
-          !isDead &&
-          (selectableIds === undefined ||
-            selectableIds.has(occupant._id as unknown as string));
-        const tappable = !!onPress && isSelectable;
-        const fontSize = seatFontSize(seatSize, occupant.name.length > 6);
-        const tap = !isDead
-          ? nomTapByTarget.get(occupant._id as unknown as string)
-          : undefined;
-        const isPending =
-          !isDead && pendingTrialTargetId === occupant._id;
+    const pos = seatPos(i, totalSeats, size, seatSize);
+    const isDead = occupant.alive === false;
+    const isMe = occupant._id === meId;
+    const isSelected =
+      !isDead &&
+      (occupant._id === selectedId ||
+        (selectedIds?.has(occupant._id as unknown as string) ?? false));
+    const isSelectable =
+      !isDead &&
+      (selectableIds === undefined ||
+        selectableIds.has(occupant._id as unknown as string));
+    const tappable = !!onPress && isSelectable;
+    const fontSize = seatFontSize(seatSize, occupant.name.length > 6);
+    const taps = !isDead
+      ? nomTapsByTarget.get(occupant._id as unknown as string)
+      : undefined;
+    const hasTap = !!taps && taps.length > 0;
+    const isPending = !isDead && pendingTrialTargetId === occupant._id;
 
-        // Tap-highlight wins over `selected` and the gold self-ring so the
-        // village always sees who's been nominated, even on seats that
-        // happen to also be the viewer's own.
-        const borderColor = isDead
-          ? '#2A2A38'
-          : isPending
-            ? '#F0EDE8'
-            : tap
-              ? tapBorder
-              : isSelected
-                ? selectedBorder
-                : isMe
-                  ? '#D4A017'
-                  : isSelectable
-                    ? '#3A3A48'
-                    : '#2A2A38';
-        const backgroundColor = tap
-          ? tapBackground
-          : isSelected
-            ? selectedBackground
-            : '#22222F';
-        const textColor = isDead
-          ? '#5A5560'
-          : isSelectable
-            ? '#F0EDE8'
-            : '#5A5560';
-        const seatOpacity = isDead ? 0.35 : isSelectable ? 1 : 0.5;
-
-        const tapLabel = tap && !isPending ? (
-          <View
-            key={`tap-${i}`}
-            pointerEvents="none"
-            style={{
-              position: 'absolute',
-              left: pos.left - 4,
-              top: pos.top + seatSize + 2,
-              width: seatSize + 8,
-              alignItems: 'center',
-            }}
-          >
+    if (hasTap && !isPending) {
+      labelNodes.push(
+        <View
+          key={`tap-${i}`}
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: pos.left - 4,
+            top: pos.top + seatSize + 2,
+            width: seatSize + 8,
+            alignItems: 'center',
+          }}
+        >
+          {taps!.map((t, tIdx) => (
             <Text
+              key={tIdx}
               numberOfLines={1}
               style={{
                 color: tapLabelColor,
@@ -268,99 +261,130 @@ export function SeatingCircle({
                 fontWeight: '700',
               }}
             >
-              {tap.isMe ? `${tap.nominatorName} (you)` : tap.nominatorName}
+              {t.isMe ? `${t.nominatorName} (you)` : t.nominatorName}
             </Text>
-          </View>
-        ) : null;
+          ))}
+        </View>,
+      );
+    }
 
-        // Pending-trial seat renders as Animated.View so its background
-        // and text color can morph over the dwell window. Other seats use
-        // the regular static style.
-        if (isPending) {
-          const animatedSeatStyle = {
-            position: 'absolute' as const,
-            left: pos.left,
-            top: pos.top,
-            width: seatSize,
-            height: seatSize,
-            borderRadius: seatSize / 2,
-            backgroundColor: pendingBg,
-            borderWidth: 2,
-            borderColor: '#F0EDE8',
-            alignItems: 'center' as const,
-            justifyContent: 'center' as const,
-            paddingHorizontal: 2,
-            opacity: 1,
-          };
-          return (
-            <Animated.View key={i} style={animatedSeatStyle} pointerEvents="none">
-              <Animated.Text
-                style={{
-                  color: pendingTextColor,
-                  fontSize,
-                  fontWeight: '700',
-                  textAlign: 'center',
-                }}
-                numberOfLines={2}
-              >
-                {occupant.name}
-              </Animated.Text>
-            </Animated.View>
-          );
-        }
-
-        const content = (
-          <Text
+    // Pending-trial seat renders as Animated.View so its background and
+    // text color can morph over the dwell window. Other seats use the
+    // regular static style.
+    if (isPending) {
+      const animatedSeatStyle = {
+        position: 'absolute' as const,
+        left: pos.left,
+        top: pos.top,
+        width: seatSize,
+        height: seatSize,
+        borderRadius: seatSize / 2,
+        backgroundColor: pendingBg,
+        borderWidth: 2,
+        borderColor: pendingBorder,
+        alignItems: 'center' as const,
+        justifyContent: 'center' as const,
+        paddingHorizontal: 2,
+        opacity: 1,
+      };
+      seatNodes.push(
+        <Animated.View key={i} style={animatedSeatStyle} pointerEvents="none">
+          <Animated.Text
             style={{
-              color: textColor,
+              color: pendingTextColor,
               fontSize,
-              fontWeight: tap || isSelected || isMe ? '700' : '600',
+              fontWeight: '700',
               textAlign: 'center',
-              textDecorationLine: isDead ? 'line-through' : 'none',
             }}
             numberOfLines={2}
           >
             {occupant.name}
-          </Text>
-        );
+          </Animated.Text>
+        </Animated.View>,
+      );
+      continue;
+    }
 
-        const sharedStyle = {
-          position: 'absolute' as const,
-          left: pos.left,
-          top: pos.top,
-          width: seatSize,
-          height: seatSize,
-          borderRadius: seatSize / 2,
-          backgroundColor,
-          borderWidth: tap || isSelected || (isMe && !isDead) ? 2 : 1,
-          borderColor,
-          alignItems: 'center' as const,
-          justifyContent: 'center' as const,
-          paddingHorizontal: 2,
-          opacity: seatOpacity,
-        };
+    // Tap-highlight wins over `selected` and the gold self-ring so the
+    // village always sees who's been nominated, even on seats that
+    // happen to also be the viewer's own.
+    const borderColor = isDead
+      ? '#2A2A38'
+      : hasTap
+        ? tapBorder
+        : isSelected
+          ? selectedBorder
+          : isMe
+            ? '#D4A017'
+            : isSelectable
+              ? '#3A3A48'
+              : '#2A2A38';
+    const backgroundColor = hasTap
+      ? tapBackground
+      : isSelected
+        ? selectedBackground
+        : '#22222F';
+    const textColor = isDead
+      ? '#5A5560'
+      : isSelectable
+        ? '#F0EDE8'
+        : '#5A5560';
+    const seatOpacity = isDead ? 0.35 : isSelectable ? 1 : 0.5;
+    const content = (
+      <Text
+        style={{
+          color: textColor,
+          fontSize,
+          fontWeight: hasTap || isSelected || isMe ? '700' : '600',
+          textAlign: 'center',
+          textDecorationLine: isDead ? 'line-through' : 'none',
+        }}
+        numberOfLines={2}
+      >
+        {occupant.name}
+      </Text>
+    );
+    const sharedStyle = {
+      position: 'absolute' as const,
+      left: pos.left,
+      top: pos.top,
+      width: seatSize,
+      height: seatSize,
+      borderRadius: seatSize / 2,
+      backgroundColor,
+      borderWidth: hasTap || isSelected || (isMe && !isDead) ? 2 : 1,
+      borderColor,
+      alignItems: 'center' as const,
+      justifyContent: 'center' as const,
+      paddingHorizontal: 2,
+      opacity: seatOpacity,
+    };
+    if (tappable) {
+      seatNodes.push(
+        <TouchableOpacity
+          key={i}
+          activeOpacity={0.6}
+          onPress={() => onPress!(occupant)}
+          style={sharedStyle}
+        >
+          {content}
+        </TouchableOpacity>,
+      );
+    } else {
+      seatNodes.push(
+        <View key={i} style={sharedStyle}>
+          {content}
+        </View>,
+      );
+    }
+  }
 
-        if (tappable) {
-          return (
-            <React.Fragment key={i}>
-              <TouchableOpacity
-                activeOpacity={0.6}
-                onPress={() => onPress!(occupant)}
-                style={sharedStyle}
-              >
-                {content}
-              </TouchableOpacity>
-              {tapLabel}
-            </React.Fragment>
-          );
-        }
-        return (
-          <React.Fragment key={i}>
-            <View style={sharedStyle}>{content}</View>
-            {tapLabel}
-          </React.Fragment>
-        );
-      })}
+  return (
+    <View
+      style={{ width: size, height: size, position: 'relative', marginTop: 12 }}
+    >
+      {seatNodes}
+      {labelNodes}
       {centerOverlay ? (
         <View
           pointerEvents="none"

@@ -26,6 +26,7 @@ type Props = {
     defenseSec: number;
     voteTimerSec: number;
     maxNominationsPerDay: number;
+    wolfPickerSec: number;
   };
   /**
    * When provided, the modal renders a PASS HOST row at the top opening
@@ -57,10 +58,12 @@ type StepperConfig = {
     | 'accusationSec'
     | 'defenseSec'
     | 'voteTimerSec'
-    | 'maxNominationsPerDay';
+    | 'maxNominationsPerDay'
+    | 'wolfPickerSec';
   label: string;
   step: number;
   min: number;
+  max?: number;
   isTime: boolean;
 };
 
@@ -70,6 +73,7 @@ const STEPPERS: StepperConfig[] = [
   { key: 'defenseSec', label: 'DEFENSE', step: 10, min: 10, isTime: true },
   { key: 'voteTimerSec', label: 'VOTE', step: 1, min: 1, isTime: false },
   { key: 'maxNominationsPerDay', label: 'NOMINATIONS', step: 1, min: 1, isTime: false },
+  { key: 'wolfPickerSec', label: 'WOLF PICKER', step: 10, min: 10, max: 60, isTime: true },
 ];
 
 export default function TimersConfigModal({
@@ -287,8 +291,9 @@ export default function TimersConfigModal({
                   <Text className="text-wolf-muted">›</Text>
                 </TouchableOpacity>
               )}
-              {STEPPERS.map(({ key, label, step, min, isTime }) => {
+              {STEPPERS.map(({ key, label, step, min, max, isTime }) => {
                 const value = values[key];
+                const atMax = max !== undefined && value >= max;
                 return (
                   <View
                     key={key}
@@ -321,7 +326,16 @@ export default function TimersConfigModal({
                         {isTime ? formatTime(value) : String(value)}
                       </Text>
                       <TouchableOpacity
-                        onPress={() => update(key, value + step)}
+                        onPress={() =>
+                          update(
+                            key,
+                            max !== undefined
+                              ? Math.min(max, value + step)
+                              : value + step,
+                          )
+                        }
+                        disabled={atMax}
+                        style={{ opacity: atMax ? 0.3 : 1 }}
                         className="w-9 h-9 bg-wolf-card rounded-full items-center justify-center"
                       >
                         <Text className="text-wolf-text text-xl">+</Text>

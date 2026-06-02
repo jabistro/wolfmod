@@ -163,6 +163,65 @@ export default defineSchema({
     ),
 
     /**
+     * Confirmation dwell between "the wolves' kill is locked in" and "the
+     * wolf_kill row gets written". While set, the picker is locked and the
+     * target seat plays a red-fill animation so all wolves (and ghosts)
+     * register the chosen victim before the step rolls on. An internal
+     * `finalizePendingWolfKill` is scheduled for `dwellEndsAt`; when it
+     * fires it inserts the `wolf_kill` row, clears this field, and either
+     * resets the wolves' votes (Wolf Cub vengeance kill #1) or force-
+     * advances the wolves step (final kill).
+     *
+     * `kind` distinguishes the two paths into this state:
+     *   - 'consensus': all alive wolves voted the same target before the
+     *     shot clock expired. Standard 3 s dwell with just the red-fill
+     *     animation.
+     *   - 'rng': the shot clock expired and the server rolled dice (either
+     *     a vote tie among the max-vote targets, or zero votes so the
+     *     server randomized over the alive non-wolf village). 5 s dwell so
+     *     the client can play a ~2 s bouncing-highlight animation through
+     *     `candidatePlayerIds` before settling on `targetPlayerId` for the
+     *     red fill.
+     *
+     * `actorPlayerId` is the wolf attributed to the kill on the eventual
+     * `wolf_kill` row. On consensus, it's the wolf whose vote triggered
+     * the lock; on RNG, it's a randomly picked alive wolf.
+     */
+    pendingWolfKill: v.optional(
+      v.object({
+        targetPlayerId: v.id('players'),
+        actorPlayerId: v.id('players'),
+        dwellEndsAt: v.number(),
+        kind: v.optional(
+          v.union(v.literal('consensus'), v.literal('rng')),
+        ),
+        candidatePlayerIds: v.optional(v.array(v.id('players'))),
+      }),
+    ),
+
+    /**
+     * Wall-clock shot-clock deadline for the current wolves' consensus
+     * round. Set when the wolves step activates (and re-set after a
+     * Wolf Cub vengeance kill #1 finalizes, for the kill #2 round).
+     * When wall-clock passes this value and no `pendingWolfKill` has been
+     * locked in yet, `wolfPickerTimeoutTick` auto-resolves: majority vote
+     * wins, ties roll RNG over the tied targets, zero votes roll RNG over
+     * the alive non-wolf village. Cleared the moment a `pendingWolfKill`
+     * is set (so the visible countdown disappears) and on step
+     * completion.
+     */
+    wolvesPickerEndsAt: v.optional(v.number()),
+
+    /**
+     * Per-round shot-clock length for the wolves' picker, in seconds.
+     * Defaults to 30. Constrained to 10–60 in 10 s increments by the
+     * settings UI; the engine reads this when arming each consensus
+     * round. Editable in the lobby TIMERS modal and the day-phase
+     * settings cog — both call `setDayConfig` to patch this field.
+     */
+    wolfPickerSec: v.optional(v.number()),
+
+    /**
      * Carryover from a Diseased death. Flipped on at the morning resolution
      * where a Diseased player actually died from wolf attack; read at the
      * following night's wolves step to insert a `wolf_blocked` action in

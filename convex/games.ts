@@ -963,6 +963,8 @@ export const lobbyView = query({
         maxNominationsPerDay:
           game.maxNominationsPerDay ??
           DAY_CONFIG_DEFAULTS.maxNominationsPerDay,
+        wolfPickerSec:
+          game.wolfPickerSec ?? DAY_CONFIG_DEFAULTS.wolfPickerSec,
         devRoleAssignments: game.devRoleAssignments ?? [],
       },
       players: players.map(p => ({

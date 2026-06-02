@@ -64,6 +64,7 @@ export const setDayConfig = mutation({
     defenseSec: v.optional(v.number()),
     voteTimerSec: v.optional(v.number()),
     maxNominationsPerDay: v.optional(v.number()),
+    wolfPickerSec: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
@@ -93,6 +94,18 @@ export const setDayConfig = mutation({
     if (args.maxNominationsPerDay !== undefined) {
       if (args.maxNominationsPerDay < 1) throw new Error('Need at least 1 nom.');
       patch.maxNominationsPerDay = args.maxNominationsPerDay;
+    }
+    if (args.wolfPickerSec !== undefined) {
+      // Settings UI constrains to 10–60 in 10 s increments; backend
+      // enforces the same so a stale client can't smuggle an out-of-band
+      // value through.
+      if (args.wolfPickerSec < 10 || args.wolfPickerSec > 60) {
+        throw new Error('Wolf picker must be 10–60 s.');
+      }
+      if (args.wolfPickerSec % 10 !== 0) {
+        throw new Error('Wolf picker must step in 10 s increments.');
+      }
+      patch.wolfPickerSec = args.wolfPickerSec;
     }
 
     const now = Date.now();
@@ -1307,6 +1320,7 @@ export const dayView = query({
           defenseSec: cfg.defenseSec,
           voteTimerSec: cfg.voteTimerSec,
           maxNominationsPerDay: cfg.maxNominationsPerDay,
+          wolfPickerSec: cfg.wolfPickerSec,
         },
       },
       me: {

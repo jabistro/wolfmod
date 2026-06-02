@@ -20,7 +20,11 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
-import { SeatingCircle, type SeatingPlayer } from '../components/SeatingCircle';
+import {
+  SeatingCircle,
+  type SeatingPlayer,
+  type SeatNomTap,
+} from '../components/SeatingCircle';
 import { showAlert } from '../components/ThemedAlert';
 import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
@@ -170,6 +174,8 @@ export default function NightScreen() {
             wolves={wolfState.wolves}
             requiredKills={wolfState.requiredKills}
             killsSoFar={wolfState.killsSoFar}
+            pendingKill={wolfState.pendingKill}
+            pickerEndsAt={wolfState.pickerEndsAt}
             isGhost={isGhost}
           />
         )
@@ -918,6 +924,12 @@ function WolvesBlockedView({
 
 // ───── Wolves picker ────────────────────────────────────────────────────────
 
+// How long the RNG bouncing-highlight animation runs before the red-fill
+// kicks in on the final target. Paired with WOLF_KILL_RNG_DWELL_MS on the
+// server (5 s total): ~2 s here + ~3 s for the fill.
+const RNG_BOUNCE_MS = 2000;
+const RNG_BOUNCE_STEP_MS = 130;
+
 function WolvesPicker({
   gameId,
   deviceClientId,
@@ -928,6 +940,8 @@ function WolvesPicker({
   wolves,
   requiredKills,
   killsSoFar,
+  pendingKill,
+  pickerEndsAt,
   isGhost,
 }: {
   gameId: Id<'games'>;
@@ -945,6 +959,13 @@ function WolvesPicker({
   }>;
   requiredKills: number;
   killsSoFar: Array<{ targetId: Id<'players'>; targetName: string }>;
+  pendingKill: {
+    targetPlayerId: Id<'players'>;
+    dwellEndsAt: number;
+    kind: 'consensus' | 'rng';
+    candidatePlayerIds: Id<'players'>[];
+  } | null;
+  pickerEndsAt: number | null;
   isGhost?: boolean;
 }) {
   const submitVote = useMutation(api.night.submitWolfVote);
@@ -957,6 +978,77 @@ function WolvesPicker({
   const vengeance = requiredKills > 1;
   const allKillsLocked = killsSoFar.length >= requiredKills;
   const killNumber = killsSoFar.length + 1;
+
+  // RNG bounce — cycles a highlight through `candidatePlayerIds` for
+  // RNG_BOUNCE_MS, then settles. The seating circle picks up the
+  // pending-fill animation only after the bounce ends, so the dwellEndsAt
+  // (5 s out for RNG) ends up split into ~2 s bounce + ~3 s fill.
+  const isRngPick =
+    pendingKill?.kind === 'rng' &&
+    pendingKill.candidatePlayerIds.length > 1;
+  const [bounceId, setBounceId] = useState<Id<'players'> | null>(null);
+  const [bouncing, setBouncing] = useState(false);
+  // Keyed on dwellEndsAt so vengeance kill #2's RNG round (new pendingKill
+  // with a new deadline) restarts the bounce cleanly.
+  const bounceKey = isRngPick ? pendingKill!.dwellEndsAt : null;
+  useEffect(() => {
+    if (!isRngPick || !pendingKill || bounceKey == null) {
+      setBouncing(false);
+      setBounceId(null);
+      return;
+    }
+    const candidates = pendingKill.candidatePlayerIds;
+    const target = pendingKill.targetPlayerId;
+    const totalSteps = Math.max(1, Math.floor(RNG_BOUNCE_MS / RNG_BOUNCE_STEP_MS));
+    setBouncing(true);
+    // Seed with a random candidate so the very first hop isn't always the
+    // same array index — that was what made the prior bounce look like a
+    // clockwise sweep through the seating circle.
+    let currentIdx = Math.floor(Math.random() * candidates.length);
+    setBounceId(candidates[currentIdx]);
+    let stepCount = 1;
+    const interval = setInterval(() => {
+      stepCount++;
+      if (stepCount >= totalSteps) {
+        // Final hop locks onto the server's actual pick. The red fill
+        // animation that follows takes over on this same seat, so the
+        // transition stays visually anchored instead of darting off to
+        // a seat the bounce never touched.
+        setBounceId(target);
+        return;
+      }
+      if (candidates.length === 1) return;
+      // Reject same-as-previous so consecutive frames always show motion.
+      let nextIdx = Math.floor(Math.random() * candidates.length);
+      if (nextIdx === currentIdx) {
+        nextIdx = (nextIdx + 1) % candidates.length;
+      }
+      currentIdx = nextIdx;
+      setBounceId(candidates[currentIdx]);
+    }, RNG_BOUNCE_STEP_MS);
+    const timeout = setTimeout(() => {
+      clearInterval(interval);
+      setBouncing(false);
+      setBounceId(null);
+    }, RNG_BOUNCE_MS);
+    return () => {
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bounceKey]);
+
+  // Per-seat tap labels mirroring the day-phase nomTaps UI: each wolf's
+  // live vote shows their name under the target seat in red. When several
+  // wolves agree, all names stack under the same seat. The server hides
+  // these labels on the pending-kill seat (it plays the red-fill instead).
+  const wolfTaps: SeatNomTap[] = wolves
+    .filter(w => !!w.currentVote)
+    .map(w => ({
+      targetPlayerId: w.currentVote as unknown as string,
+      nominatorName: w.name,
+      isMe: w.isMe,
+    }));
   // Hide already-locked-in victims from the picker for kill #2.
   const lockedIds = new Set<string>(
     killsSoFar.map(k => k.targetId as unknown as string),
@@ -983,6 +1075,41 @@ function WolvesPicker({
     }
   }
 
+  // While the RNG bounce is running, the pending fill on the seating
+  // circle is suppressed (we'll hand it `null` for targetId/dwellEndsAt
+  // until the bounce settles, at which point ~3 s of dwell remain to
+  // play the fill). The bouncing seat itself rides the existing
+  // selectedId styling so it gets the red ring as the highlight hops.
+  const showPendingFill = !!pendingKill && !bouncing;
+  const seatSelectedId = bouncing
+    ? bounceId ?? undefined
+    : pendingKill
+      ? undefined
+      : myVote;
+  // Wipe the per-wolf tap labels for the entire pendingKill window. They'd
+  // otherwise leave static red rings on the tied candidates during a
+  // bouncing RNG roll, drowning out the highlight as it hops — and on the
+  // settle/fill phase they're just redundant with the red-fill animation.
+  // Matches the day-phase rhythm where `wipeNomTapsForDay` clears taps
+  // the moment a trial confirms.
+  const seatTaps: SeatNomTap[] = pendingKill ? [] : wolfTaps;
+  const showCountdown =
+    !pendingKill && !allKillsLocked && pickerEndsAt != null;
+
+  // Status line above the pack panel. The bounce phase gets its own
+  // "rolling dice" message so wolves understand a random pick is in
+  // progress; the post-bounce settle and consensus paths share the
+  // generic "sealing" copy.
+  const statusText = allKillsLocked
+    ? 'Sealing the night…'
+    : bouncing
+      ? "Time's up — picking a target…"
+      : pendingKill || consensus
+        ? 'Consensus reached. Sealing the kill…'
+        : isGhost
+          ? 'The wolves are voting. They must agree.'
+          : 'Tap a player to vote. All wolves must agree.';
+
   return (
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
@@ -1008,13 +1135,7 @@ function WolvesPicker({
         )}
 
         <Text className="text-wolf-text text-base text-center mt-2 mb-4">
-          {allKillsLocked
-            ? 'Sealing the night…'
-            : consensus
-              ? 'Consensus reached. Sealing the kill…'
-              : isGhost
-                ? 'The wolves are voting. They must agree.'
-                : 'Tap a player to vote. All wolves must agree.'}
+          {statusText}
         </Text>
 
         {/* Wolf-pack awareness panel */}
@@ -1049,17 +1170,30 @@ function WolvesPicker({
 
         {/* Seating circle — selectable seats are any alive players (wolves
             may target each other, including themselves; this keeps the
-            Leprechaun from confirming every kill target as a villager). */}
+            Leprechaun from confirming every kill target as a villager).
+            Live wolf votes render as red tap labels under each target.
+            Once a pick is locked, `pendingKill` triggers the red-fill;
+            RNG picks first bounce the highlight through the candidates. */}
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
-            selectedId={myVote}
+            selectedId={seatSelectedId}
             selectedVariant="danger"
             selectableIds={selectableForThisKill}
+            nomTaps={seatTaps}
+            pendingTrialTargetId={
+              showPendingFill ? pendingKill!.targetPlayerId : null
+            }
+            pendingTrialDwellEndsAt={
+              showPendingFill ? pendingKill!.dwellEndsAt : null
+            }
+            centerOverlay={
+              showCountdown ? <WolfShotClock endsAt={pickerEndsAt!} /> : null
+            }
             onPress={
-              !submitting && !consensus && !allKillsLocked
+              !submitting && !consensus && !allKillsLocked && !pendingKill
                 ? p => handleVote(p._id)
                 : undefined
             }
@@ -1067,6 +1201,37 @@ function WolvesPicker({
         </View>
       </ScrollView>
     </View>
+  );
+}
+
+// Big countdown in the center of the seating circle. >10 s: solid white.
+// 1–10 s: red on even seconds (10, 8, 6, 4, 2) and white on odd seconds
+// (9, 7, 5, 3, 1) — one swap per whole second, paced with the digit.
+// 0 s: solid red (the server's `wolfPickerTimeoutTick` is firing right
+// then; pendingKill will land on the next query tick and the overlay
+// disappears).
+function WolfShotClock({ endsAt }: { endsAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 150);
+    return () => clearInterval(id);
+  }, []);
+  const remainingSec = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  const isLow = remainingSec > 0 && remainingSec <= 10;
+  const isDone = remainingSec === 0;
+  const flashRed = isLow && remainingSec % 2 === 0;
+  const color = isDone || flashRed ? '#B03A2E' : '#F0EDE8';
+  return (
+    <Text
+      style={{
+        color,
+        fontSize: 56,
+        fontWeight: '800',
+        fontVariant: ['tabular-nums'],
+      }}
+    >
+      {remainingSec}
+    </Text>
   );
 }
 

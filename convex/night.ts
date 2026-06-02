@@ -17,6 +17,7 @@ import {
   initializeDayClock,
   flagCubDeathIfApplicable,
   wipeNomTapsForDay,
+  dayConfigOf,
 } from './helpers';
 import {
   enqueueTriggersForDeaths,
@@ -777,6 +778,17 @@ async function resolveMorning(
   // below sets it back on for the following night.
   if (gameAtStart?.wolfCubVengeance) {
     await ctx.db.patch(gameId, { wolfCubVengeance: false });
+  }
+  // Defensive: clear any stale pendingWolfKill in case the dwell never
+  // got to finalize (e.g. game force-ended mid-dwell). Normal flow has
+  // `finalizePendingWolfKill` clear it before the step advances.
+  if (gameAtStart?.pendingWolfKill) {
+    await ctx.db.patch(gameId, { pendingWolfKill: undefined });
+  }
+  // Defensive: clear any stale shot-clock deadline. Normal flow clears
+  // it on consensus / auto-resolve / step completion.
+  if (gameAtStart?.wolvesPickerEndsAt !== undefined) {
+    await ctx.db.patch(gameId, { wolvesPickerEndsAt: undefined });
   }
 
   // Build a set of death candidates from every kill source recorded for the
@@ -2199,6 +2211,13 @@ export async function enterStep(
     // mixed pack — only auto-resolve when the whole pack is bots.
     if (actors.length > 0 && actors.every(a => isBotName(a.name))) {
       await autoResolveStep(ctx, gameId, step, actors, alive, game.nightNumber);
+    } else if (actors.length > 0) {
+      // Real wolves are voting — arm the per-round shot clock. Auto-resolve
+      // at expiry: majority wins; ties roll RNG over the tied targets;
+      // zero votes roll RNG over the alive non-wolf village. The clock is
+      // re-armed in `finalizePendingWolfKill` for a Wolf Cub vengeance
+      // round 2; cleared on consensus or step completion.
+      await armWolfShotClock(ctx, gameId);
     }
   } else {
     // Independent-actor steps (bodyguard, huntress, witch, …): each bot
@@ -2235,6 +2254,12 @@ async function completeStep(
   }
   if (step === 'wolves') {
     await clearSasquatchReveals(ctx, gameId);
+    // Belt-and-braces: any stale shot-clock deadline goes away when the
+    // step itself completes (consensus and auto-resolve both clear it
+    // inline, so this is just a defensive zero-out).
+    if (game.wolvesPickerEndsAt !== undefined) {
+      await ctx.db.patch(gameId, { wolvesPickerEndsAt: undefined });
+    }
   }
   active.splice(idx, 1);
   const completed = Array.from(getCompletedStepSet(game));
@@ -2366,6 +2391,163 @@ export const nightFloorTick = internalMutation({
   },
 });
 
+// ───── Wolves' shot clock + auto-resolve ────────────────────────────────────
+//
+// Each wolves consensus round (kill #1 always; plus kill #2 on a Wolf Cub
+// vengeance night) is gated by a visible per-round shot clock. If consensus
+// isn't reached by expiry, the server auto-resolves: majority vote wins, a
+// tie rolls RNG over the tied targets, and zero votes roll RNG over the
+// alive non-wolf village. Auto-resolved RNG kills lock in via
+// `pendingWolfKill` just like consensus does, with `kind: 'rng'` and a
+// `candidatePlayerIds` list so the client can play a bouncing-highlight
+// animation before the red fill.
+
+const WOLF_KILL_DWELL_MS = 3000;
+// RNG-resolved kills get extra dwell so the client can play ~2 s of
+// bouncing highlight through `candidatePlayerIds` before the ~3 s red fill
+// lands on the final target. Consensus kills skip the bounce.
+const WOLF_KILL_RNG_DWELL_MS = 5000;
+
+/**
+ * Arms (or re-arms) the per-round wolves shot clock: sets
+ * `wolvesPickerEndsAt` to now + configured wolfPickerSec and schedules
+ * `wolfPickerTimeoutTick` to fire at that instant. Stale ticks no-op via
+ * the wall-clock check inside the tick handler, so re-arming on a
+ * vengeance round 2 just supersedes the old timer naturally.
+ */
+async function armWolfShotClock(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<void> {
+  const game = await ctx.db.get(gameId);
+  if (!game) return;
+  const cfg = dayConfigOf(game);
+  const endsAt = Date.now() + cfg.wolfPickerSec * 1000;
+  await ctx.db.patch(gameId, { wolvesPickerEndsAt: endsAt });
+  await ctx.scheduler.runAfter(
+    cfg.wolfPickerSec * 1000,
+    internal.night.wolfPickerTimeoutTick,
+    { gameId, expectedEndsAt: endsAt },
+  );
+}
+
+/**
+ * Fires when the wolves' shot clock expires. Defensive bails:
+ *   - phase changed (game ended, transitioned to day)
+ *   - wolves step no longer active (consensus already finalized + advanced)
+ *   - `pendingWolfKill` already locked in (consensus + dwell beat us here)
+ *   - `wolvesPickerEndsAt` changed (a vengeance re-arm superseded ours)
+ *
+ * On a clean fire, tallies wolves' votes:
+ *   - any votes: pick max-count targets; tie → RNG within those
+ *   - zero votes: RNG over alive non-wolf village (minus already-locked
+ *     vengeance victims). The thematic call: a sleepy pack doesn't
+ *     accidentally eat one of its own.
+ *
+ * The resulting target is committed via `pendingWolfKill` with `kind`
+ * 'consensus' for clean majorities and 'rng' for tie/zero-vote rolls;
+ * the latter ships `candidatePlayerIds` so the client can play the
+ * bouncing-highlight animation. `actorPlayerId` is a random alive wolf.
+ */
+export const wolfPickerTimeoutTick = internalMutation({
+  args: {
+    gameId: v.id('games'),
+    expectedEndsAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) return;
+    if (game.phase !== 'night') return;
+    if (!isStepActive(game, 'wolves')) return;
+    if (game.pendingWolfKill) return;
+    if (game.wolvesPickerEndsAt !== args.expectedEndsAt) return;
+
+    const players = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    const alive = players.filter(p => p.alive);
+    const aliveWolves = alive.filter(p => p.role && isWolfTeam(p.role));
+    if (aliveWolves.length === 0) return;
+
+    // Targets already locked by an earlier wolf_kill row tonight (vengeance
+    // kill #1) are off-limits for this round.
+    const existingKills = await getNightActions(
+      ctx,
+      args.gameId,
+      game.nightNumber,
+      'wolf_kill',
+    );
+    const lockedIds = new Set<string>(
+      existingKills
+        .map(k => k.targetPlayerId as Id<'players'> | undefined)
+        .filter((id): id is Id<'players'> => !!id)
+        .map(id => id as unknown as string),
+    );
+
+    // Tally each wolf's current vote (ignore votes for already-locked targets
+    // — wolves can't kill the same player twice in one night).
+    const counts = new Map<string, number>();
+    for (const w of aliveWolves) {
+      const v = w.roleState?.wolfVote as Id<'players'> | undefined;
+      if (!v) continue;
+      const key = v as unknown as string;
+      if (lockedIds.has(key)) continue;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+
+    let kind: 'consensus' | 'rng';
+    let candidates: Id<'players'>[];
+    let target: Id<'players'>;
+    if (counts.size === 0) {
+      // Zero votes — RNG over the alive non-wolf village, minus locked.
+      kind = 'rng';
+      candidates = alive
+        .filter(p => !p.role || !isWolfTeam(p.role))
+        .filter(p => !lockedIds.has(p._id as unknown as string))
+        .map(p => p._id);
+      if (candidates.length === 0) return; // no legal target — bail
+      target = candidates[Math.floor(Math.random() * candidates.length)];
+    } else {
+      let max = 0;
+      for (const c of counts.values()) if (c > max) max = c;
+      const tied: Id<'players'>[] = [];
+      for (const [k, c] of counts) {
+        if (c === max) tied.push(k as unknown as Id<'players'>);
+      }
+      if (tied.length === 1) {
+        kind = 'consensus';
+        candidates = [tied[0]];
+        target = tied[0];
+      } else {
+        kind = 'rng';
+        candidates = tied;
+        target = tied[Math.floor(Math.random() * tied.length)];
+      }
+    }
+
+    const actor = aliveWolves[Math.floor(Math.random() * aliveWolves.length)];
+    const dwellMs =
+      kind === 'rng' ? WOLF_KILL_RNG_DWELL_MS : WOLF_KILL_DWELL_MS;
+    const dwellEndsAt = Date.now() + dwellMs;
+    await ctx.db.patch(args.gameId, {
+      pendingWolfKill: {
+        targetPlayerId: target,
+        actorPlayerId: actor._id,
+        dwellEndsAt,
+        kind,
+        candidatePlayerIds: candidates,
+      },
+      wolvesPickerEndsAt: undefined,
+    });
+    await ctx.scheduler.runAfter(
+      dwellMs,
+      internal.night.finalizePendingWolfKill,
+      { gameId: args.gameId, expectedDwellEndsAt: dwellEndsAt },
+    );
+  },
+});
+
 // ───── Mutations ────────────────────────────────────────────────────────────
 
 export const submitWolfVote = mutation({
@@ -2380,12 +2562,43 @@ export const submitWolfVote = mutation({
     if (game.phase !== 'night' || !isStepActive(game, 'wolves')) {
       throw new Error('Wolves are not currently awake.');
     }
+    // Consensus already reached and the kill is mid-dwell: no more votes
+    // allowed. Mirrors the day-phase rule where the second tap on a target
+    // locks the trial.
+    if (game.pendingWolfKill) {
+      throw new Error("Tonight's kill is already sealing.");
+    }
 
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me) throw new Error('You are not in this game.');
     if (!me.alive) throw new Error('You are eliminated.');
     if (!me.role || !isWolfTeam(me.role)) {
       throw new Error('Only wolves can vote during the wolf phase.');
+    }
+
+    // Tap-same to toggle off. Matches the day-phase nomination tap UX:
+    // tapping a different seat moves the highlight, tapping the same seat
+    // un-tags it. Also clears bot wolves' votes — they were auto-synced
+    // to the caller's pick, and leaving stale bot votes would lie about
+    // the pack's state in the picker UI.
+    if (me.roleState?.wolfVote === args.targetPlayerId) {
+      const myNext = { ...(me.roleState ?? {}) };
+      delete myNext.wolfVote;
+      await ctx.db.patch(me._id, { roleState: myNext });
+      const wolves = await ctx.db
+        .query('players')
+        .withIndex('by_game', q => q.eq('gameId', args.gameId))
+        .collect();
+      for (const w of wolves) {
+        if (w._id === me._id) continue;
+        if (!w.alive || !w.role || !isWolfTeam(w.role)) continue;
+        if (!isBotName(w.name)) continue;
+        if (w.roleState?.wolfVote === undefined) continue;
+        const next = { ...w.roleState };
+        delete next.wolfVote;
+        await ctx.db.patch(w._id, { roleState: next });
+      }
+      return;
     }
 
     const target = await ctx.db.get(args.targetPlayerId);
@@ -2464,36 +2677,112 @@ export const submitWolfVote = mutation({
       votes.length > 0 && votes.every(v => v && v === votes[0]);
 
     if (consensus) {
-      await ctx.db.insert('nightActions', {
-        gameId: args.gameId,
-        nightNumber: game.nightNumber,
-        actorPlayerId: me._id,
-        actionType: 'wolf_kill',
-        targetPlayerId: args.targetPlayerId,
-        resolvedAt: Date.now(),
+      // Stage the kill behind a confirmation dwell instead of inserting
+      // immediately. Mirrors the day-phase `pendingTrial` rhythm: the
+      // picker locks, the target seat plays a red-fill animation, and the
+      // wolf_kill row is written when `finalizePendingWolfKill` fires at
+      // `dwellEndsAt`. The wolf whose vote triggered consensus is stamped
+      // as the eventual actor so attribution survives the indirection.
+      // Also clears the visible shot-clock deadline so the countdown
+      // disappears for every wolf at the moment the pack locks in.
+      const dwellEndsAt = Date.now() + WOLF_KILL_DWELL_MS;
+      await ctx.db.patch(args.gameId, {
+        pendingWolfKill: {
+          targetPlayerId: args.targetPlayerId,
+          actorPlayerId: me._id,
+          dwellEndsAt,
+          kind: 'consensus' as const,
+          candidatePlayerIds: [args.targetPlayerId],
+        },
+        wolvesPickerEndsAt: undefined,
       });
-      // Wolf Cub vengeance: if more kills are still required, reset every
-      // wolf's wolfVote so the picker re-prompts for the next target. Do
-      // NOT advance the step. Otherwise (required kills satisfied), gate
-      // the advance on a guaranteed reveal window so ghosts can see the
-      // wolf_kill row before the step transitions.
-      const required = computeRequiredKills(
-        game,
-        refreshed.filter(p => p.alive),
+      await ctx.scheduler.runAfter(
+        WOLF_KILL_DWELL_MS,
+        internal.night.finalizePendingWolfKill,
+        { gameId: args.gameId, expectedDwellEndsAt: dwellEndsAt },
       );
-      const killsNow = existingKills.length + 1;
-      if (killsNow < required) {
-        for (const w of wolvesNow) {
-          if (w.roleState && 'wolfVote' in w.roleState) {
-            const next = { ...w.roleState };
-            delete next.wolfVote;
-            await ctx.db.patch(w._id, { roleState: next });
-          }
-        }
-        return;
-      }
-      await ensureReadingWindow(ctx, args.gameId, 'wolves');
     }
+  },
+});
+
+/**
+ * Inserts the staged `wolf_kill` row after the consensus dwell. Defensive
+ * against stale schedules: bails out if the game ended, the phase changed,
+ * the pendingWolfKill was cleared, or a newer pending kill superseded ours
+ * (dwellEndsAt mismatch). On Wolf Cub vengeance kill #1 (more kills still
+ * required after this insert) we reset every wolf's `wolfVote` so the
+ * picker re-prompts for kill #2 — and do NOT advance the step. On the
+ * final kill we extend the wolves step via `ensureReadingWindow` so ghosts
+ * can observe the new row before the step transitions.
+ */
+export const finalizePendingWolfKill = internalMutation({
+  args: {
+    gameId: v.id('games'),
+    expectedDwellEndsAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) return;
+    if (game.phase !== 'night') return;
+    const pending = game.pendingWolfKill;
+    if (!pending) return;
+    if (pending.dwellEndsAt !== args.expectedDwellEndsAt) return;
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: pending.actorPlayerId,
+      actionType: 'wolf_kill',
+      targetPlayerId: pending.targetPlayerId,
+      resolvedAt: Date.now(),
+    });
+
+    await ctx.db.patch(args.gameId, { pendingWolfKill: undefined });
+
+    const players = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    const alive = players.filter(p => p.alive);
+    const required = computeRequiredKills(game, alive);
+    const killsSoFar = await getNightActions(
+      ctx,
+      args.gameId,
+      game.nightNumber,
+      'wolf_kill',
+    );
+
+    if (killsSoFar.length < required) {
+      const wolves = alive.filter(p => p.role && isWolfTeam(p.role));
+      for (const w of wolves) {
+        if (w.roleState && 'wolfVote' in w.roleState) {
+          const next = { ...w.roleState };
+          delete next.wolfVote;
+          await ctx.db.patch(w._id, { roleState: next });
+        }
+      }
+      // Vengeance kill #2: fresh shot clock for the new consensus round.
+      await armWolfShotClock(ctx, args.gameId);
+      return;
+    }
+
+    // Final kill: the 3s confirmation dwell already gave wolves and ghosts
+    // a window to read the kill (the red-fill animation IS the reveal), so
+    // we don't stack `ensureReadingWindow` on top — that would leave the
+    // wolves staring at a dimmed "Sealing the night…" frame for ~5s
+    // before the screen transitions. Instead, expire the step's dwell now
+    // and run the normal advance path. The night-floor (`nightFloorEndsAt`)
+    // still holds the whole night open until its deadline, so morning
+    // resolution doesn't race ahead.
+    const refreshed = await ctx.db.get(args.gameId);
+    if (!refreshed) return;
+    const active = getActiveStepEntries(refreshed);
+    const idx = active.findIndex(e => e.step === 'wolves');
+    if (idx >= 0) {
+      active[idx] = { step: 'wolves', endsAt: Date.now() };
+      await ctx.db.patch(args.gameId, { nightActiveSteps: active });
+    }
+    await maybeAdvanceStep(ctx, args.gameId, 'wolves');
   },
 });
 
@@ -4847,6 +5136,30 @@ export const nightView = query({
           blocked: boolean;
           requiredKills: number;
           killsSoFar: Array<{ targetId: Id<'players'>; targetName: string }>;
+          /**
+           * Set between "kill is locked in" and "wolf_kill row written".
+           * `kind` is 'consensus' for unanimous picks and 'rng' for
+           * server-rolled dice (vote tie or zero-vote auto-resolve).
+           * `candidatePlayerIds` carries the pool the dice rolled over —
+           * the client uses it to play a bouncing-highlight animation
+           * across those seats before settling on `targetPlayerId` for
+           * the red-fill. For consensus, the list is a singleton (the
+           * target itself).
+           */
+          pendingKill: {
+            targetPlayerId: Id<'players'>;
+            dwellEndsAt: number;
+            kind: 'consensus' | 'rng';
+            candidatePlayerIds: Id<'players'>[];
+          } | null;
+          /**
+           * Wall-clock deadline (ms) for the visible shot clock. Null
+           * once consensus / auto-resolve fires or the step completes.
+           * Clients drive the countdown UI off this; the server's
+           * `wolfPickerTimeoutTick` is the authoritative auto-resolve
+           * trigger at expiry.
+           */
+          pickerEndsAt: number | null;
         }
       | null = null;
     // Set on the caller's view when they're a freshly-flipped Sasquatch — the
@@ -4890,6 +5203,18 @@ export const nightView = query({
         blocked: !!game.wolvesBlockedNextNight,
         requiredKills: required,
         killsSoFar,
+        pendingKill: game.pendingWolfKill
+          ? {
+              targetPlayerId: game.pendingWolfKill.targetPlayerId,
+              dwellEndsAt: game.pendingWolfKill.dwellEndsAt,
+              kind: game.pendingWolfKill.kind ?? 'consensus',
+              candidatePlayerIds:
+                game.pendingWolfKill.candidatePlayerIds ?? [
+                  game.pendingWolfKill.targetPlayerId,
+                ],
+            }
+          : null,
+        pickerEndsAt: game.wolvesPickerEndsAt ?? null,
       };
     }
 

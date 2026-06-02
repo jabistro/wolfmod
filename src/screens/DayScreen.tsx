@@ -82,6 +82,7 @@ type DayGame = {
     defenseSec: number;
     voteTimerSec: number;
     maxNominationsPerDay: number;
+    wolfPickerSec: number;
   };
 };
 
