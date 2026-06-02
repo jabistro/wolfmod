@@ -378,7 +378,86 @@ export const setRoles = mutation({
       }
     }
 
-    await ctx.db.patch(args.gameId, { selectedRoles: args.roles });
+    // If the host changed the build out from under existing dev pins, prune
+    // any pin whose role no longer has a slot in the new build (respecting
+    // multiplicity). Pins for roles still present are preserved.
+    const patch: { selectedRoles: string[]; devRoleAssignments?: Array<{ seatPosition: number; role: string }> } = {
+      selectedRoles: args.roles,
+    };
+    if (game.devRoleAssignments && game.devRoleAssignments.length > 0) {
+      const budget = new Map(counts);
+      const kept: Array<{ seatPosition: number; role: string }> = [];
+      for (const pin of game.devRoleAssignments) {
+        const left = budget.get(pin.role) ?? 0;
+        if (left > 0) {
+          budget.set(pin.role, left - 1);
+          kept.push(pin);
+        }
+      }
+      if (kept.length !== game.devRoleAssignments.length) {
+        patch.devRoleAssignments = kept;
+      }
+    }
+
+    await ctx.db.patch(args.gameId, patch);
+  },
+});
+
+/**
+ * Dev-only: pin specific seats to specific roles before `startGame`. The
+ * caller sends the full desired set of pins (replace semantics, not patch);
+ * to clear, send `[]`. Validates host + lobby phase, unique seat positions
+ * in range, and that the multiset of pinned roles is a subset of the
+ * current `selectedRoles`. The button calling this is gated client-side by
+ * `__DEV__ || EXPO_PUBLIC_ALLOW_BOTS`.
+ */
+export const setDevRoleAssignments = mutation({
+  args: {
+    gameId: v.id('games'),
+    assignments: v.array(
+      v.object({
+        seatPosition: v.number(),
+        role: v.string(),
+      }),
+    ),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'lobby') {
+      throw new Error('Pins are locked once the game has started.');
+    }
+    await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+
+    const seenSeats = new Set<number>();
+    for (const a of args.assignments) {
+      if (
+        !Number.isInteger(a.seatPosition) ||
+        a.seatPosition < 0 ||
+        a.seatPosition >= game.playerCount
+      ) {
+        throw new Error(`Seat ${a.seatPosition} is out of range.`);
+      }
+      if (seenSeats.has(a.seatPosition)) {
+        throw new Error(`Seat ${a.seatPosition + 1} pinned twice.`);
+      }
+      seenSeats.add(a.seatPosition);
+    }
+
+    const budget = new Map<string, number>();
+    for (const r of game.selectedRoles) budget.set(r, (budget.get(r) ?? 0) + 1);
+    for (const a of args.assignments) {
+      const left = budget.get(a.role) ?? 0;
+      if (left <= 0) {
+        throw new Error(
+          `Pinned roles exceed the build: not enough ${a.role} in the selected roles.`,
+        );
+      }
+      budget.set(a.role, left - 1);
+    }
+
+    await ctx.db.patch(args.gameId, { devRoleAssignments: args.assignments });
   },
 });
 
@@ -464,17 +543,39 @@ export const startGame = mutation({
       );
     }
 
-    // Shuffle roles and assign one per seat. Bot players are pre-confirmed
-    // for the reveal step so testing with one real phone + bots can proceed
-    // (real bots can't tap "OK").
-    const shuffled = shuffle(game.selectedRoles);
+    // Build the final seat→role map. Dev pins (if any) land first; the
+    // remaining roles are shuffled into the unpinned seats. With no pins
+    // this collapses to the pure shuffle.
+    const pins = game.devRoleAssignments ?? [];
+    const seatToRole: Record<number, string> = {};
+    const remaining = game.selectedRoles.slice();
+    for (const pin of pins) {
+      // Validate again at start time — selectedRoles could have changed
+      // since the pin was saved (setRoles prunes, but a race is possible).
+      const idx = remaining.indexOf(pin.role);
+      if (idx === -1) {
+        throw new Error(
+          `Dev pin no longer fits the build: ${pin.role} is not in selected roles. Clear or re-pin.`,
+        );
+      }
+      remaining.splice(idx, 1);
+      seatToRole[pin.seatPosition] = pin.role;
+    }
+    const shuffled = shuffle(remaining);
+    let nextLeftover = 0;
+    for (let seat = 0; seat < game.playerCount; seat++) {
+      if (seatToRole[seat] === undefined) {
+        seatToRole[seat] = shuffled[nextLeftover++];
+      }
+    }
+
     const now = Date.now();
     let botDoppelgangerId: Id<'players'> | null = null;
     const seatOrder: Id<'players'>[] = [];
     for (const player of players) {
       const seat = player.seatPosition;
       if (typeof seat !== 'number') continue;
-      const role = shuffled[seat];
+      const role = seatToRole[seat];
       const patch: {
         role: string;
         originalRole: string;
@@ -862,6 +963,7 @@ export const lobbyView = query({
         maxNominationsPerDay:
           game.maxNominationsPerDay ??
           DAY_CONFIG_DEFAULTS.maxNominationsPerDay,
+        devRoleAssignments: game.devRoleAssignments ?? [],
       },
       players: players.map(p => ({
         _id: p._id,

@@ -127,11 +127,14 @@ export default function LobbyScreen() {
   const startGame = useMutation(api.games.startGame);
   const leaveGame = useMutation(api.games.leaveGame);
   const seedTestPlayers = useMutation(api.games.seedTestPlayers);
+  const setDevRoleAssignments = useMutation(api.games.setDevRoleAssignments);
 
   const [seatModalIndex, setSeatModalIndex] = useState<number | null>(null);
   const [rolesModalOpen, setRolesModalOpen] = useState(false);
   const [timersModalOpen, setTimersModalOpen] = useState(false);
   const [browseRolesOpen, setBrowseRolesOpen] = useState(false);
+  const [devAssignOpen, setDevAssignOpen] = useState(false);
+  const [devPickerSeat, setDevPickerSeat] = useState<number | null>(null);
   const [draftCounts, setDraftCounts] = useState<Record<string, number>>({});
   const [roleFilter, setRoleFilter] = useState<RoleCategory>('villagers');
   const rolesPagerRef = useRef<ScrollView | null>(null);
@@ -411,6 +414,38 @@ export default function LobbyScreen() {
     try {
       await seedTestPlayers({
         gameId: game._id,
+        callerDeviceClientId: deviceClientId,
+      });
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // Dev pin write. `role === null` clears the seat's pin; otherwise replaces
+  // it. We compute the full next pin list locally and send it (the mutation
+  // uses replace semantics, so build → send is the whole contract).
+  async function applyDevPin(seatPosition: number, role: string | null) {
+    if (!deviceClientId) return;
+    const current = game.devRoleAssignments ?? [];
+    const next = current.filter(p => p.seatPosition !== seatPosition);
+    if (role !== null) next.push({ seatPosition, role });
+    try {
+      await setDevRoleAssignments({
+        gameId: game._id,
+        assignments: next,
+        callerDeviceClientId: deviceClientId,
+      });
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function clearAllDevPins() {
+    if (!deviceClientId) return;
+    try {
+      await setDevRoleAssignments({
+        gameId: game._id,
+        assignments: [],
         callerDeviceClientId: deviceClientId,
       });
     } catch (e) {
@@ -742,6 +777,25 @@ export default function LobbyScreen() {
             >
               <Text className="text-wolf-accent text-xs font-bold tracking-widest">
                 FILL EMPTY SEATS (DEV)
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {(__DEV__ || process.env.EXPO_PUBLIC_ALLOW_BOTS === 'true') &&
+          isHost &&
+          game.selectedRoles.length > 0 && (
+          <View className="px-6 mt-3">
+            <TouchableOpacity
+              onPress={() => setDevAssignOpen(true)}
+              activeOpacity={0.75}
+              className="bg-wolf-card border border-wolf-accent rounded-xl py-3 items-center"
+            >
+              <Text className="text-wolf-accent text-xs font-bold tracking-widest">
+                ASSIGN ROLES (DEV)
+                {(game.devRoleAssignments?.length ?? 0) > 0
+                  ? ` · ${game.devRoleAssignments?.length} PINNED`
+                  : ''}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1108,6 +1162,223 @@ export default function LobbyScreen() {
         visible={browseRolesOpen}
         onClose={() => setBrowseRolesOpen(false)}
       />
+
+      {/* Dev: pin seats to specific roles before starting. Outer modal lists
+          every seat; tapping a seat opens an inline picker. Pin writes are
+          immediate (no draft state). Hidden in release builds via the
+          `__DEV__ || EXPO_PUBLIC_ALLOW_BOTS` gate on the open button. */}
+      <Modal
+        visible={devAssignOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          setDevAssignOpen(false);
+          setDevPickerSeat(null);
+        }}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <View className="bg-wolf-surface rounded-t-3xl" style={{ height: '85%' }}>
+            <View className="flex-row items-center px-6 py-4 border-b border-wolf-card">
+              <TouchableOpacity
+                onPress={() => {
+                  setDevAssignOpen(false);
+                  setDevPickerSeat(null);
+                }}
+                className="w-16"
+              >
+                <Text className="text-wolf-text">Done</Text>
+              </TouchableOpacity>
+              <Text className="flex-1 text-wolf-text text-base font-bold text-center">
+                Assign Roles (DEV)
+              </Text>
+              <View className="w-16 items-end">
+                {(game.devRoleAssignments?.length ?? 0) > 0 && (
+                  <TouchableOpacity onPress={clearAllDevPins}>
+                    <Text className="text-wolf-red text-xs font-bold tracking-widest">
+                      CLEAR
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+            <Text className="text-wolf-muted text-xs text-center px-6 pt-3">
+              Pinned seats get the chosen role on START. Unpinned seats get the
+              rest randomly.
+            </Text>
+            <ScrollView
+              contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
+            >
+              {(() => {
+                const pinBySeat = new Map<number, string>();
+                for (const p of game.devRoleAssignments ?? []) {
+                  pinBySeat.set(p.seatPosition, p.role);
+                }
+                const rows: React.ReactElement[] = [];
+                for (let seat = 0; seat < game.playerCount; seat++) {
+                  const occupant = seatedByPosition.get(seat);
+                  const pinned = pinBySeat.get(seat);
+                  rows.push(
+                    <TouchableOpacity
+                      key={seat}
+                      onPress={() => setDevPickerSeat(seat)}
+                      activeOpacity={0.75}
+                      className="bg-wolf-card rounded-xl px-4 py-3 mb-2 flex-row items-center"
+                    >
+                      <View className="flex-1">
+                        <Text className="text-wolf-text text-sm font-bold">
+                          Seat {seat + 1}
+                          {occupant ? ` · ${occupant.name}` : ' · (empty)'}
+                        </Text>
+                      </View>
+                      <View
+                        className="rounded-full px-3 py-1"
+                        style={{
+                          backgroundColor: pinned ? '#D4A017' : '#2A2A38',
+                        }}
+                      >
+                        <Text
+                          className="text-xs font-bold tracking-widest"
+                          style={{ color: pinned ? '#0F0F14' : '#8A8590' }}
+                        >
+                          {pinned ?? 'RANDOM'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>,
+                  );
+                }
+                return rows;
+              })()}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Dev: inline role picker for one seat. Sits above the assign modal so
+          tapping a seat row routes here, makes a pick, and bounces back. */}
+      <Modal
+        visible={devPickerSeat !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDevPickerSeat(null)}
+      >
+        <Pressable
+          onPress={() => setDevPickerSeat(null)}
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+          }}
+        >
+          <Pressable
+            onPress={e => e.stopPropagation()}
+            className="bg-wolf-surface rounded-2xl w-full p-6"
+            style={{ maxHeight: '80%' }}
+          >
+            {devPickerSeat !== null &&
+              (() => {
+                const totalByRole = new Map<string, number>();
+                for (const r of game.selectedRoles) {
+                  totalByRole.set(r, (totalByRole.get(r) ?? 0) + 1);
+                }
+                const usedByRole = new Map<string, number>();
+                for (const p of game.devRoleAssignments ?? []) {
+                  if (p.seatPosition === devPickerSeat) continue;
+                  usedByRole.set(p.role, (usedByRole.get(p.role) ?? 0) + 1);
+                }
+                const uniqueRoles: string[] = [];
+                const seen = new Set<string>();
+                for (const r of game.selectedRoles) {
+                  if (!seen.has(r)) {
+                    seen.add(r);
+                    uniqueRoles.push(r);
+                  }
+                }
+                uniqueRoles.sort();
+                const currentPin = (game.devRoleAssignments ?? []).find(
+                  p => p.seatPosition === devPickerSeat,
+                )?.role;
+                const occupant = seatedByPosition.get(devPickerSeat);
+                return (
+                  <>
+                    <Text className="text-wolf-text text-lg font-bold mb-1 text-center">
+                      Seat {devPickerSeat + 1}
+                    </Text>
+                    <Text className="text-wolf-muted text-xs text-center mb-4">
+                      {occupant ? occupant.name : '(empty seat)'}
+                    </Text>
+                    <ScrollView style={{ maxHeight: 360 }}>
+                      <TouchableOpacity
+                        onPress={async () => {
+                          const seat = devPickerSeat;
+                          setDevPickerSeat(null);
+                          if (seat !== null) await applyDevPin(seat, null);
+                        }}
+                        className="bg-wolf-card rounded-xl py-3 mb-2"
+                      >
+                        <Text
+                          className="text-center font-bold tracking-widest"
+                          style={{
+                            color: currentPin === undefined ? '#D4A017' : '#F0EDE8',
+                          }}
+                        >
+                          RANDOM
+                          {currentPin === undefined ? '  ✓' : ''}
+                        </Text>
+                      </TouchableOpacity>
+                      {uniqueRoles.map(role => {
+                        const total = totalByRole.get(role) ?? 0;
+                        const used = usedByRole.get(role) ?? 0;
+                        const remaining = total - used;
+                        const isSelected = currentPin === role;
+                        const disabled = remaining <= 0 && !isSelected;
+                        return (
+                          <TouchableOpacity
+                            key={role}
+                            disabled={disabled}
+                            onPress={async () => {
+                              const seat = devPickerSeat;
+                              setDevPickerSeat(null);
+                              if (seat !== null) await applyDevPin(seat, role);
+                            }}
+                            className="bg-wolf-card rounded-xl px-4 py-3 mb-2 flex-row items-center"
+                            style={{ opacity: disabled ? 0.35 : 1 }}
+                          >
+                            <Text
+                              className="flex-1 text-wolf-text font-bold"
+                              style={{
+                                color: isSelected ? '#D4A017' : '#F0EDE8',
+                              }}
+                            >
+                              {role}
+                              {isSelected ? '  ✓' : ''}
+                            </Text>
+                            <Text className="text-wolf-muted text-xs tracking-widest">
+                              {remaining} / {total} LEFT
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                    <TouchableOpacity
+                      onPress={() => setDevPickerSeat(null)}
+                      className="mt-3 py-2"
+                    >
+                      <Text className="text-wolf-muted text-center">Cancel</Text>
+                    </TouchableOpacity>
+                  </>
+                );
+              })()}
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Timers config modal (host only). Sets day-phase clocks and the
           nomination budget. Mutation rejects non-host callers, so we still

@@ -53,6 +53,21 @@ export default defineSchema({
      */
     nightFloorEndsAt: v.optional(v.number()),
     selectedRoles: v.array(v.string()),
+    /**
+     * Dev-only: pre-game seat→role pins. Set via the lobby's ASSIGN ROLES
+     * (DEV) modal (gated by __DEV__ / EXPO_PUBLIC_ALLOW_BOTS). startGame
+     * honors these first, then shuffles whatever remains in `selectedRoles`
+     * into the unpinned seats. Cleared implicitly when the game leaves the
+     * lobby; pruned by `setRoles` if the build no longer covers the pins.
+     */
+    devRoleAssignments: v.optional(
+      v.array(
+        v.object({
+          seatPosition: v.number(),
+          role: v.string(),
+        }),
+      ),
+    ),
     winner: v.optional(v.union(v.literal('village'), v.literal('wolf'))),
     createdAt: v.number(),
     endedAt: v.optional(v.number()),
