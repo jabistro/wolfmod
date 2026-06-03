@@ -21,6 +21,7 @@ export const V1_ROLES = [
   'Mad Bomber',
   'Leprechaun',
   'Warlock',
+  'Lycan',
   // Wolf
   'Werewolf',
   'Wolf Man',
@@ -89,6 +90,7 @@ const VILLAGE_ROLES = new Set<string>([
   'Mad Bomber',
   'Leprechaun',
   'Warlock',
+  'Lycan',
 ]);
 // No v1 roles are currently TEAM_SOLO. Reviler and Minion both win with the
 // wolves and are wolf-team for grouping (Mentalist reads them as same-team
@@ -106,7 +108,15 @@ export function teamForRole(role: string): Team {
  */
 const SEER_BLIND_ROLES = new Set<string>(['Wolf Man']);
 
+/**
+ * Village-team roles the Seer misreads as 'wolf'. The Lycan is loyal to and
+ * wins with the village (and reads correctly to every other role — Mentalist,
+ * PI, etc.), but the Seer's vision flags them as a wolf.
+ */
+const SEER_WOLF_APPEARING_ROLES = new Set<string>(['Lycan']);
+
 export function seerSees(targetRole: string): 'wolf' | 'villager' {
   if (SEER_BLIND_ROLES.has(targetRole)) return 'villager';
+  if (SEER_WOLF_APPEARING_ROLES.has(targetRole)) return 'wolf';
   return isWolfTeam(targetRole) ? 'wolf' : 'villager';
 }

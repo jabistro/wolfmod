@@ -84,7 +84,7 @@ export const ROLES: Role[] = [
   { name: 'Necromancer',             category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),             thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Witch',                   category: 'villagers', image: require('../../roles_ghibli_medium/witch.jpg'),                   thumb: require('../../roles_ghibli_thumbs/witch.jpg') },
   { name: 'Spellcaster',             category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),             thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
-  { name: 'Lycan',                   category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),                   thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
+  { name: 'Lycan',                   category: 'villagers', image: require('../../roles_ghibli_medium/lycan.jpg'),                   thumb: require('../../roles_ghibli_thumbs/lycan.jpg') },
   { name: 'Hunter',                  category: 'villagers', image: require('../../roles_ghibli_medium/hunter.jpg'),                  thumb: require('../../roles_ghibli_thumbs/hunter.jpg') },
 
   // ── Wolves ─────────────────────────────────────────────────────────────────
