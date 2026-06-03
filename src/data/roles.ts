@@ -112,7 +112,7 @@ export const ROLES: Role[] = [
   { name: 'Dire Wolf',               category: 'wolves', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),               thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Fruit Brute',             category: 'wolves', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),             thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Pet Wolf',                category: 'wolves', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),                thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
-  { name: 'Mama Wolf',               category: 'wolves', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),               thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
+  { name: 'Mama Wolf',               category: 'wolves', image: require('../../roles_ghibli_medium/mama_wolf.jpg'),               thumb: require('../../roles_ghibli_thumbs/mama_wolf.jpg') },
   { name: 'Teenage Werewolf',        category: 'wolves', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),        thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Wolverine',               category: 'wolves', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),               thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
 

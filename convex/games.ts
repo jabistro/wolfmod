@@ -571,7 +571,9 @@ export const startGame = mutation({
 
     const now = Date.now();
     let botDoppelgangerId: Id<'players'> | null = null;
+    const botMamaWolfIds: Id<'players'>[] = [];
     const seatOrder: Id<'players'>[] = [];
+    const roleById = new Map<Id<'players'>, string>();
     for (const player of players) {
       const seat = player.seatPosition;
       if (typeof seat !== 'number') continue;
@@ -584,9 +586,11 @@ export const startGame = mutation({
       if (isBotName(player.name)) {
         patch.revealedAt = now;
         if (role === 'Doppelganger') botDoppelgangerId = player._id;
+        if (role === 'Mama Wolf') botMamaWolfIds.push(player._id);
       }
       await ctx.db.patch(player._id, patch);
       seatOrder.push(player._id);
+      roleById.set(player._id, role);
     }
 
     // If a bot ended up as the Doppelganger, auto-pick a random non-self
@@ -597,6 +601,27 @@ export const startGame = mutation({
         const pick = candidates[Math.floor(Math.random() * candidates.length)];
         await ctx.db.patch(botDoppelgangerId, { doppelgangerTarget: pick });
       }
+    }
+
+    // Bot Mama Wolves auto-mark a random non-wolf so testing doesn't hang on
+    // the host's BEGIN DAY 1 gate. Mirrors `confirmMamaWolfTarget`: stamp the
+    // target's Seer-fooling flag + a pregame history row.
+    for (const mamaId of botMamaWolfIds) {
+      const candidates = seatOrder.filter(
+        id => id !== mamaId && !isWolfTeam(roleById.get(id) ?? ''),
+      );
+      if (candidates.length === 0) continue;
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      await ctx.db.patch(mamaId, { mamaWolfTarget: pick });
+      await ctx.db.patch(pick, { seerAppearsAsWolf: true });
+      await ctx.db.insert('nightActions', {
+        gameId: args.gameId,
+        nightNumber: 0,
+        actorPlayerId: mamaId,
+        actionType: 'mama_wolf_mark',
+        targetPlayerId: pick,
+        resolvedAt: now,
+      });
     }
 
     await ctx.db.patch(args.gameId, { phase: 'reveal' });
@@ -623,6 +648,11 @@ export const confirmRoleReveal = mutation({
     // backstop in case the picker is bypassed.
     if (me.role === 'Doppelganger' && me.doppelgangerTarget === undefined) {
       throw new Error('Pick your Doppelganger target before confirming.');
+    }
+    // Same gate for Mama Wolf — she must mark her Lycan before being ready.
+    // The client routes her through the picker (`confirmMamaWolfTarget`).
+    if (me.role === 'Mama Wolf' && me.mamaWolfTarget === undefined) {
+      throw new Error('Mark a player as a Lycan before confirming.');
     }
 
     await ctx.db.patch(me._id, { revealedAt: Date.now() });
@@ -668,6 +698,59 @@ export const confirmDoppelgangerTarget = mutation({
     await ctx.db.patch(me._id, {
       doppelgangerTarget: args.targetPlayerId,
       revealedAt: Date.now(),
+    });
+  },
+});
+
+/**
+ * Mama Wolf seat-picker submission. Atomically marks her Lycan, flags the
+ * target so the Seer reads them as a wolf, and marks Mama Wolf ready (so the
+ * host's "X of Y ready" counter only ticks once the mark is in). She may not
+ * mark herself or any actual wolf — they already read as wolves. The target
+ * is never told and their real role is untouched. Records a pregame
+ * `mama_wolf_mark` history row (nightNumber 0) for end-game review.
+ */
+export const confirmMamaWolfTarget = mutation({
+  args: {
+    gameId: v.id('games'),
+    targetPlayerId: v.id('players'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'reveal') throw new Error('Not in reveal phase.');
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me) throw new Error('You are not in this game.');
+    if (me.role !== 'Mama Wolf') {
+      throw new Error('Only Mama Wolf marks a Lycan here.');
+    }
+    if (me.revealedAt !== undefined) return;
+
+    const target = await ctx.db.get(args.targetPlayerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new Error('Invalid target.');
+    }
+    if (target._id === me._id) {
+      throw new Error("You can't mark yourself.");
+    }
+    if (target.role && isWolfTeam(target.role)) {
+      throw new Error('That player is already a wolf.');
+    }
+
+    await ctx.db.patch(me._id, {
+      mamaWolfTarget: args.targetPlayerId,
+      revealedAt: Date.now(),
+    });
+    await ctx.db.patch(target._id, { seerAppearsAsWolf: true });
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: 0,
+      actorPlayerId: me._id,
+      actionType: 'mama_wolf_mark',
+      targetPlayerId: args.targetPlayerId,
+      resolvedAt: Date.now(),
     });
   },
 });
@@ -758,6 +841,21 @@ export const revealView = query({
             )
         : [];
 
+    // Mama Wolf mark roster: every player who is NOT already a wolf (herself
+    // and the rest of the pack read as wolves anyway, so marking them is a
+    // no-op). Minion/Reviler ARE eligible — they read as villagers.
+    const mamaWolfCandidates =
+      me.role === 'Mama Wolf' && me.revealedAt === undefined
+        ? players
+            .filter(p => p._id !== me._id && !(p.role && isWolfTeam(p.role)))
+            .map(p => ({
+              _id: p._id,
+              name: p.name,
+              seatPosition: p.seatPosition,
+            }))
+            .sort((a, b) => (a.seatPosition ?? 0) - (b.seatPosition ?? 0))
+        : [];
+
     return {
       game: {
         _id: game._id,
@@ -773,9 +871,11 @@ export const revealView = query({
         isHost: me.isHost,
         alive: me.alive,
         doppelgangerTarget: me.doppelgangerTarget,
+        mamaWolfTarget: me.mamaWolfTarget,
       },
       visibleTeammates,
       doppelgangerCandidates,
+      mamaWolfCandidates,
       confirmedCount,
       totalPlayers: players.length,
       allConfirmed: confirmedCount === players.length,

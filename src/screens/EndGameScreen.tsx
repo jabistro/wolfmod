@@ -343,6 +343,15 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
         </Text>
       );
     }
+    case 'mama_wolf_mark':
+      return (
+        <Text className="text-wolf-text text-sm">
+          Marked {t} as a{' '}
+          <Text className="font-bold" style={{ color: '#D4A017' }}>
+            LYCAN
+          </Text>
+        </Text>
+      );
     case 'doppelganger_conversion_reveal':
     case 'cursed_conversion':
     case 'sasquatch_conversion': {

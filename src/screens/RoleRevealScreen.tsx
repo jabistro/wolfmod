@@ -43,6 +43,7 @@ export default function RoleRevealScreen() {
   );
   const confirmReveal = useMutation(api.games.confirmRoleReveal);
   const confirmDoppelganger = useMutation(api.games.confirmDoppelgangerTarget);
+  const confirmMamaWolf = useMutation(api.games.confirmMamaWolfTarget);
   const beginDayFromReveal = useMutation(api.games.beginDayFromReveal);
   const [beginningDay, setBeginningDay] = useState(false);
 
@@ -52,6 +53,8 @@ export default function RoleRevealScreen() {
   const [confirming, setConfirming] = useState(false);
   const [pickingDoppelganger, setPickingDoppelganger] = useState(false);
   const [doppelgangerPick, setDoppelgangerPick] = useState<Id<'players'> | null>(null);
+  const [pickingMamaWolf, setPickingMamaWolf] = useState(false);
+  const [mamaWolfPick, setMamaWolfPick] = useState<Id<'players'> | null>(null);
   const [submittingPick, setSubmittingPick] = useState(false);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -123,8 +126,9 @@ export default function RoleRevealScreen() {
     );
   }
 
-  const { game, me, visibleTeammates, confirmedCount, totalPlayers, allConfirmed, doppelgangerCandidates } = reveal;
+  const { game, me, visibleTeammates, confirmedCount, totalPlayers, allConfirmed, doppelgangerCandidates, mamaWolfCandidates } = reveal;
   const isDoppelganger = me.role === 'Doppelganger';
+  const isMamaWolf = me.role === 'Mama Wolf';
 
   if (game.phase !== 'reveal' && game.phase !== 'lobby') {
     return (
@@ -180,6 +184,12 @@ export default function RoleRevealScreen() {
       setPickingDoppelganger(true);
       return;
     }
+    // Mama Wolf marks her Lycan before being counted ready — same routing as
+    // the Doppelganger; her picker's submit handler calls the server.
+    if (isMamaWolf) {
+      setPickingMamaWolf(true);
+      return;
+    }
     setConfirming(true);
     try {
       await confirmReveal({
@@ -200,6 +210,22 @@ export default function RoleRevealScreen() {
       await confirmDoppelganger({
         gameId: game._id,
         targetPlayerId: doppelgangerPick,
+        callerDeviceClientId: deviceClientId,
+      });
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmittingPick(false);
+    }
+  }
+
+  async function submitMamaWolfPick() {
+    if (!deviceClientId || mamaWolfPick === null) return;
+    setSubmittingPick(true);
+    try {
+      await confirmMamaWolf({
+        gameId: game._id,
+        targetPlayerId: mamaWolfPick,
         callerDeviceClientId: deviceClientId,
       });
     } catch (e) {
@@ -322,6 +348,114 @@ export default function RoleRevealScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={submitDoppelgangerPick}
+                disabled={submittingPick}
+                style={{ opacity: submittingPick ? 0.4 : 1 }}
+                className="bg-wolf-accent rounded-xl py-4 px-10"
+              >
+                {submittingPick ? (
+                  <ActivityIndicator color="#0F0F14" />
+                ) : (
+                  <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                    YES
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  // Mama Wolf mark-picker: shown after she's seen her role + pack but before
+  // `confirmMamaWolfTarget` lands. Same SeatingCircle + confirm-overlay pattern
+  // as the Doppelganger. Candidates exclude the whole pack (server-filtered).
+  if (pickingMamaWolf && !isConfirmed) {
+    const pickedCandidate =
+      mamaWolfPick !== null
+        ? mamaWolfCandidates.find(c => c._id === mamaWolfPick) ?? null
+        : null;
+    const seatingPlayers: SeatingPlayer[] = [
+      ...mamaWolfCandidates.map(c => ({
+        _id: c._id,
+        name: c.name,
+        seatPosition: c.seatPosition,
+      })),
+      {
+        _id: me._id,
+        name: me.name,
+        seatPosition: me.seatPosition,
+      },
+    ];
+    const selectableIds = new Set(
+      mamaWolfCandidates.map(c => c._id as unknown as string),
+    );
+    return (
+      <SafeAreaView className="flex-1 bg-wolf-bg">
+        <InGameLeaveButton onPress={confirmLeave} />
+        <View className="flex-row items-center px-4 pt-10 pb-3">
+          <View className="w-16" />
+          <Text className="flex-1 text-wolf-text text-xl font-bold text-center">
+            Mark a Lycan
+          </Text>
+          <View className="w-16" />
+        </View>
+        <Text className="text-wolf-muted text-sm text-center px-8 mb-4">
+          The Seer will see this player as a wolf. They won't know.
+        </Text>
+        <ScrollView
+          contentContainerStyle={{
+            paddingHorizontal: 24,
+            paddingBottom: 24,
+            alignItems: 'center',
+          }}
+          style={{ flex: 1 }}
+        >
+          <SeatingCircle
+            totalSeats={game.playerCount}
+            players={seatingPlayers}
+            meId={me._id}
+            viewerSeatIndex={me.seatPosition}
+            selectableIds={selectableIds}
+            onPress={p => setMamaWolfPick(p._id)}
+          />
+        </ScrollView>
+        {pickedCandidate && (
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0,0,0,0.92)',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 32,
+            }}
+          >
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
+              MARK A LYCAN
+            </Text>
+            <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
+              {pickedCandidate.name.toUpperCase()}
+            </Text>
+            <Text className="text-wolf-muted text-sm text-center mb-10">
+              The Seer will read them as a wolf. They'll never know.
+            </Text>
+            <View className="flex-row" style={{ gap: 14 }}>
+              <TouchableOpacity
+                onPress={() => setMamaWolfPick(null)}
+                disabled={submittingPick}
+                className="bg-wolf-card rounded-xl py-4 px-10"
+                style={{ borderWidth: 1, borderColor: '#3A3A48' }}
+              >
+                <Text className="text-wolf-text text-base font-extrabold tracking-widest">
+                  NO
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={submitMamaWolfPick}
                 disabled={submittingPick}
                 style={{ opacity: submittingPick ? 0.4 : 1 }}
                 className="bg-wolf-accent rounded-xl py-4 px-10"

@@ -447,6 +447,17 @@ function pickRandom<T>(items: readonly T[]): T | undefined {
  * the three are wolf-team (Wolf Man IS detected by PI, unlike the Seer's
  * blind spot). Dead neighbors still count toward the trio per house rules.
  */
+/**
+ * What the Seer reads when checking `target`. Role-based (Lycan/Wolf Man/wolf
+ * team via `seerSees`) PLUS the per-player `seerAppearsAsWolf` override that
+ * Mama Wolf stamps on her marked Lycan at pregame. The override never touches
+ * the target's real role — only this read. PI/Mentalist are unaffected.
+ */
+function seerReads(target: Player): 'wolf' | 'villager' {
+  if (target.seerAppearsAsWolf) return 'wolf';
+  return seerSees(target.role || '');
+}
+
 function piTrioResult(
   target: Player,
   allPlayers: Player[],
@@ -561,7 +572,7 @@ async function autoResolveStep(
         const candidates = alivePlayers.filter(p => p._id !== seer._id);
         const target = pickRandom(candidates);
         if (!target) continue;
-        const team = seerSees(target.role || '');
+        const team = seerReads(target);
         await ctx.db.insert('nightActions', {
           gameId,
           nightNumber,
@@ -2811,7 +2822,7 @@ export const submitSeerCheck = mutation({
     if (target._id === me._id) throw new Error('Cannot check yourself.');
     if (!target.alive) throw new Error('Target is eliminated.');
 
-    const team = seerSees(target.role || '');
+    const team = seerReads(target);
 
     await ctx.db.insert('nightActions', {
       gameId: args.gameId,

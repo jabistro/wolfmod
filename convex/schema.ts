@@ -332,6 +332,20 @@ export default defineSchema({
      * conversion fires (or stays set forever if Doppelganger dies first).
      */
     doppelgangerTarget: v.optional(v.id('players')),
+    /**
+     * Set by Mama Wolf at first-night seat selection — the player she marks
+     * as a Lycan. Stored on Mama Wolf for the ready-gate, bot auto-pick, and
+     * end-game history. The actual Seer-fooling effect lives on the target's
+     * `seerAppearsAsWolf` flag below (so it survives Mama Wolf dying).
+     */
+    mamaWolfTarget: v.optional(v.id('players')),
+    /**
+     * True when this player has been marked (by Mama Wolf) to read as a wolf
+     * to the Seer, despite their real role. Top-level (not in roleState) so a
+     * later Doppelganger/Cursed/Sasquatch role-patch can't wipe it. Never
+     * changes the player's actual role — only what the Seer's check returns.
+     */
+    seerAppearsAsWolf: v.optional(v.boolean()),
     alive: v.boolean(),
     isHost: v.boolean(),
     deviceClientId: v.string(),
