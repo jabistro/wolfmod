@@ -167,24 +167,23 @@ export async function initializeDayClock(
 
 /**
  * Returns the winning team if the game is over given current player state,
- * else null. House-rule parity: actual wolves vs (alive players minus Minion
- * minus Reviler). Minion/Reviler win with the wolves but don't count for
- * parity in either direction.
+ * else null. Parity is measured between actual wolves and *everyone else*
+ * who is still alive — including wolf-team non-wolves (Minion, Reviler).
+ *
+ * Those roles win alongside the wolves, but their living body still blocks
+ * parity: the wolves must reduce the table until they meet-or-exceed every
+ * remaining non-wolf. e.g. {1 Werewolf, 1 Reviler, 1 Villager} is NOT a wolf
+ * win (1 wolf vs 2 others) — the wolves must first kill one of the other two.
+ * Once all actual wolves are dead the village wins (Minion/Reviler lose).
  */
 export function checkWinCondition(
   players: Doc<'players'>[],
 ): 'village' | 'wolf' | null {
   const alive = players.filter(p => p.alive);
   const aliveActualWolves = alive.filter(p => p.role && isWolfTeam(p.role));
-  const aliveCounted = alive.filter(
-    p =>
-      p.role &&
-      !isWolfTeam(p.role) &&
-      p.role !== 'Minion' &&
-      p.role !== 'Reviler',
-  );
+  const aliveNonWolves = alive.filter(p => !(p.role && isWolfTeam(p.role)));
   if (aliveActualWolves.length === 0) return 'village';
-  if (aliveActualWolves.length >= aliveCounted.length) return 'wolf';
+  if (aliveActualWolves.length >= aliveNonWolves.length) return 'wolf';
   return null;
 }
 

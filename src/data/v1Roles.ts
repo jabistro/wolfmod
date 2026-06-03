@@ -94,7 +94,9 @@ const VILLAGE_ROLES = new Set<string>([
 ]);
 // No v1 roles are currently TEAM_SOLO. Reviler and Minion both win with the
 // wolves and are wolf-team for grouping (Mentalist reads them as same-team
-// as actual wolves). They're still excluded from parity in `checkWinCondition`.
+// as actual wolves). For parity, though, they count as non-wolf bodies the
+// wolves must still clear (see `checkWinCondition`) — they win alongside the
+// wolves but only an actual wolf advances parity.
 // TEAM_SOLO stays defined for future v2 roles (Tanner, Cult Leader, etc.).
 
 export function teamForRole(role: string): Team {
