@@ -593,6 +593,7 @@ export default function RoleRevealScreen() {
             {visibleTeammates.length > 0 && (
               <View
                 style={{
+                  width: cardWidth,
                   marginTop: packTopMargin,
                   alignItems: 'center',
                   borderWidth: 3,
@@ -618,7 +619,7 @@ export default function RoleRevealScreen() {
                   <Text
                     key={t.name}
                     className="text-wolf-text font-bold"
-                    style={packTextStyle}
+                    style={{ ...packTextStyle, width: '100%', textAlign: 'center' }}
                   >
                     {t.name}
                     {!isMason && (
