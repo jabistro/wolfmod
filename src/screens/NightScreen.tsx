@@ -29,6 +29,7 @@ import { showAlert } from '../components/ThemedAlert';
 import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
+import { MasonRevealModal } from '../components/MasonRevealModal';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Night'>;
 type Route = RouteProp<RootStackParamList, 'Night'>;
@@ -53,6 +54,8 @@ export default function NightScreen() {
 
   const forceAdvance = useMutation(api.night.forceAdvanceStep);
   const refreshStep = useMutation(api.night.refreshStep);
+  const submitMasonAck = useMutation(api.night.submitMasonAck);
+  const [ackingMason, setAckingMason] = useState(false);
 
   // Local clock used to surface the host's "skip ahead" override without
   // needing a server roundtrip — the server returns `skipEligibleAt` and the
@@ -135,11 +138,24 @@ export default function NightScreen() {
     revilerState,
     cursedConversionState,
     doppelgangerRevealState,
+    masonRevealState,
     nightmareWolfState,
     nightmaredBlocking,
     targetables,
     nightLog,
   } = view;
+
+  async function handleMasonAck() {
+    if (!deviceClientId) return;
+    setAckingMason(true);
+    try {
+      await submitMasonAck({ gameId: params.gameId as Id<'games'>, callerDeviceClientId: deviceClientId });
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setAckingMason(false);
+    }
+  }
 
   // Defensive: if phase has already moved on, the effect above will navigate.
   if (game.phase !== 'night') {
@@ -418,6 +434,12 @@ export default function NightScreen() {
       <SasquatchRevealOverlay
         visible={sasquatchOverlayOpen && sasquatchReveal === true}
         wolves={wolfState?.wolves ?? []}
+      />
+
+      <MasonRevealModal
+        state={masonRevealState ?? null}
+        onAck={handleMasonAck}
+        submitting={ackingMason}
       />
 
       {(() => {

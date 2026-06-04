@@ -19,6 +19,7 @@ import { showAlert } from '../components/ThemedAlert';
 import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
+import { MasonRevealModal } from '../components/MasonRevealModal';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Morning'>;
 type Route = RouteProp<RootStackParamList, 'Morning'>;
@@ -37,7 +38,9 @@ export default function MorningScreen() {
   );
 
   const beginDay = useMutation(api.night.beginDay);
+  const submitMasonAck = useMutation(api.night.submitMasonAck);
   const [submitting, setSubmitting] = useState(false);
+  const [ackingMason, setAckingMason] = useState(false);
 
   // Fade-in for the announcement so it doesn't snap into view.
   const fade = useState(new Animated.Value(0))[0];
@@ -89,8 +92,20 @@ export default function MorningScreen() {
     );
   }
 
-  const { game, me, deaths } = view;
+  const { game, me, deaths, masonRevealState } = view;
   const gameOver = !!game.winner;
+
+  async function handleMasonAck() {
+    if (!deviceClientId) return;
+    setAckingMason(true);
+    try {
+      await submitMasonAck({ gameId: game._id, callerDeviceClientId: deviceClientId });
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setAckingMason(false);
+    }
+  }
 
   async function handleBeginDay() {
     if (!deviceClientId) return;
@@ -109,6 +124,11 @@ export default function MorningScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">
+      <MasonRevealModal
+        state={masonRevealState ?? null}
+        onAck={handleMasonAck}
+        submitting={ackingMason}
+      />
       <InGameLeaveButton onPress={confirmLeave} />
       <View className="px-4 pt-10 pb-3 items-center">
         <Text className="text-wolf-muted text-xs tracking-widest">

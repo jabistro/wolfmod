@@ -1954,6 +1954,27 @@ async function stampDoppelgangerRevealMarkers(
       result: { step },
       resolvedAt: now,
     });
+
+    // A Doppelganger who inherited MASON joins the secret society. Stamp a
+    // persistent, self-acked reveal flag on the new Mason and on every
+    // existing living Mason so neither side can miss the induction by
+    // looking away — the flag survives the reveal step's dwell and is
+    // cleared only by `submitMasonAck` (or the next-night safety sweep). It
+    // does NOT gate the step; the night auto-advances regardless.
+    if (pending.toRole === 'Mason') {
+      await ctx.db.patch(p._id, {
+        roleState: { ...(p.roleState ?? {}), pendingMasonReveal: { kind: 'became' } },
+      });
+      for (const m of players) {
+        if (!m.alive || m._id === p._id || m.role !== 'Mason') continue;
+        await ctx.db.patch(m._id, {
+          roleState: {
+            ...(m.roleState ?? {}),
+            pendingMasonReveal: { kind: 'joined', joinedName: p.name },
+          },
+        });
+      }
+    }
   }
 }
 
@@ -2115,6 +2136,22 @@ export async function beginNightWaves(
   await ctx.scheduler.runAfter(floorMs, internal.night.nightFloorTick, {
     gameId,
   });
+
+  // Safety sweep: clear any stale Mason induction reveal left unacked from a
+  // prior night so it can't re-show forever. This runs before steps activate,
+  // and this night's own dawn-step stamps happen inside the call below — so
+  // nothing this night is clobbered.
+  const sweepPlayers = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  for (const p of sweepPlayers) {
+    if (!p.roleState?.pendingMasonReveal) continue;
+    const { pendingMasonReveal, ...rest } = p.roleState;
+    void pendingMasonReveal;
+    await ctx.db.patch(p._id, { roleState: rest });
+  }
+
   await tryActivateUnblockedSteps(ctx, gameId);
 }
 
@@ -3658,6 +3695,31 @@ export const submitCursedAck = mutation({
     });
 
     await maybeAdvanceStep(ctx, args.gameId, 'cursed_conversion');
+  },
+});
+
+// Tapping OK on the Mason induction overlay clears the caller's persistent
+// `pendingMasonReveal` flag. Unlike the Cursed ack, this NEVER gates a step —
+// Masons have no night action, so there's no reason for the rest of the table
+// to wait on them. The overlay just persists (on the night AND morning
+// screens) until the player taps OK, so a brief look-away can't lose it.
+// Idempotent and valid in both the night and morning phases.
+export const submitMasonAck = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me) throw new Error('You are not in this game.');
+    if (!me.roleState?.pendingMasonReveal) return;
+
+    const { pendingMasonReveal, ...rest } = me.roleState;
+    void pendingMasonReveal;
+    await ctx.db.patch(me._id, { roleState: rest });
   },
 });
 
@@ -5828,7 +5890,14 @@ export const nightView = query({
         }));
         const mine = convertedPlayers.find(p => p._id === me._id);
         const isMine = !!mine;
-        if (isMine || !me.alive) {
+        // A living Doppelganger who became a MASON is revealed through the
+        // separate, non-blocking `masonRevealState` ack overlay below (which
+        // persists until they tap OK), NOT this dwell-bound modal — so omit
+        // them here. Ghosts still see the generic conversions list, which
+        // names Mason conversions like any other.
+        const mineToRole = mine?.roleState?.pendingDoppelgangerReveal?.toRole;
+        const suppressForMason = isMine && mineToRole === 'Mason';
+        if ((isMine && !suppressForMason) || !me.alive) {
           const pending = mine?.roleState?.pendingDoppelgangerReveal;
           doppelgangerRevealState = {
             isMine,
@@ -5837,6 +5906,31 @@ export const nightView = query({
             conversions,
           };
         }
+      }
+    }
+
+    // Mason induction reveal — non-blocking, persistent, self-acked. Set on
+    // the new Mason (a Doppelganger who inherited Mason) and on each existing
+    // living Mason when a member joins, stamped at the dawn/dusk reveal step
+    // but surfaced here regardless of which step is active so it survives the
+    // step's dwell. Cleared only by `submitMasonAck` (or the next beginNight
+    // safety sweep), so a brief look-away can't make a player miss it. It
+    // never gates the night — the reveal steps still auto-advance on dwell.
+    let masonRevealState:
+      | { kind: 'became'; allies: Array<{ name: string }> }
+      | { kind: 'joined'; joinedName: string }
+      | null = null;
+    if (me.alive) {
+      const mason = me.roleState?.pendingMasonReveal;
+      if (mason?.kind === 'became') {
+        masonRevealState = {
+          kind: 'became',
+          allies: players
+            .filter(p => p.alive && p.role === 'Mason' && p._id !== me._id)
+            .map(p => ({ name: p.name })),
+        };
+      } else if (mason?.kind === 'joined') {
+        masonRevealState = { kind: 'joined', joinedName: mason.joinedName };
       }
     }
 
@@ -6125,6 +6219,7 @@ export const nightView = query({
       revilerState,
       cursedConversionState,
       doppelgangerRevealState,
+      masonRevealState,
       nightmareWolfState,
       nightmaredBlocking,
       targetables,
@@ -6176,6 +6271,27 @@ export const morningView = query({
       }));
     const triggersPending = (game.pendingDeathTriggers?.length ?? 0) > 0;
 
+    // A Mason induction revealed at the dusk (end-of-night) step persists into
+    // the morning so a player who looked away during the brief night window
+    // still catches it. Same shape + ack path as the night-screen overlay.
+    let masonRevealState:
+      | { kind: 'became'; allies: Array<{ name: string }> }
+      | { kind: 'joined'; joinedName: string }
+      | null = null;
+    if (me.alive) {
+      const mason = me.roleState?.pendingMasonReveal;
+      if (mason?.kind === 'became') {
+        masonRevealState = {
+          kind: 'became',
+          allies: players
+            .filter(p => p.alive && p.role === 'Mason' && p._id !== me._id)
+            .map(p => ({ name: p.name })),
+        };
+      } else if (mason?.kind === 'joined') {
+        masonRevealState = { kind: 'joined', joinedName: mason.joinedName };
+      }
+    }
+
     return {
       game: {
         _id: game._id,
@@ -6193,6 +6309,7 @@ export const morningView = query({
       },
       deaths,
       triggersPending,
+      masonRevealState,
       hostMissing: !players.some(p => p.isHost),
     };
   },

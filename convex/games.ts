@@ -819,6 +819,18 @@ export const revealView = query({
           role: p.role!,
           seatPosition: p.seatPosition,
         }));
+    } else if (me.role === 'Mason') {
+      // Masons form a secret society — each one learns the others at reveal,
+      // exactly like the wolf pack. A lone Mason simply sees an empty list.
+      // Doppelgangers who later inherit Mason aren't dealt the role yet, so
+      // they don't show here; they're inducted at the night reveal step.
+      visibleTeammates = players
+        .filter(p => p._id !== me._id && p.role === 'Mason')
+        .map(p => ({
+          name: p.name,
+          role: p.role!,
+          seatPosition: p.seatPosition,
+        }));
     }
 
     const confirmedCount = players.filter(p => p.revealedAt !== undefined).length;

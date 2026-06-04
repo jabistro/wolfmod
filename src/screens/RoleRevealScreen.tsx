@@ -575,7 +575,11 @@ export default function RoleRevealScreen() {
                   className="text-wolf-muted text-xs font-bold tracking-widest mb-1"
                   numberOfLines={1}
                 >
-                  {me.role === 'Minion' ? 'THE WOLVES' : 'YOUR PACK'}
+                  {me.role === 'Minion'
+                    ? 'THE WOLVES'
+                    : me.role === 'Mason'
+                      ? 'FELLOW MASONS'
+                      : 'YOUR PACK'}
                 </Text>
                 {visibleTeammates.map(t => (
                   <Text

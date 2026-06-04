@@ -44,7 +44,7 @@ export const ROLES: Role[] = [
   { name: "Frankenstein's Monster",  category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'), thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Mystic Seer',             category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),             thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Gemini',                  category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),                  thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
-  { name: 'Mason',                   category: 'villagers', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),                   thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
+  { name: 'Mason',                   category: 'villagers', image: require('../../roles_ghibli_medium/mason.jpg'),                          thumb: require('../../roles_ghibli_thumbs/mason.jpg') },
   { name: 'Villager',                category: 'villagers', image: require('../../roles_ghibli_medium/villager.jpg'),                thumb: require('../../roles_ghibli_thumbs/villager.jpg') },
   { name: 'Mentalist',               category: 'villagers', image: require('../../roles_ghibli_medium/mentalist.jpg'),               thumb: require('../../roles_ghibli_thumbs/mentalist.jpg') },
   { name: 'Warlock',                 category: 'villagers', image: require('../../roles_ghibli_medium/warlock.jpg'),                 thumb: require('../../roles_ghibli_thumbs/warlock.jpg') },
