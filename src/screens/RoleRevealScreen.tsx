@@ -149,15 +149,32 @@ export default function RoleRevealScreen() {
   const isConfirmed = me.revealedAt !== undefined;
 
   // Tiered shrink so the card + pack list always fit between the headers and
-  // the HOLD button without scrolling. Widest case in Ultimate Werewolf is
-  // ~6 wolves + a Minion = 6 visible teammates.
+  // the HOLD button without scrolling — the pack list must NEVER be hidden
+  // behind the button. Widest case in Ultimate Werewolf is ~6 wolves + a
+  // Minion = 6 visible teammates.
+  //
+  // When the player HAS teammates (wolves / Minion / Mason), the pack list is
+  // the thing they must not miss. Rather than narrowing the card (which only
+  // makes the description bleed downward into more lines), we keep it WIDE and
+  // cap the portrait height via compact mode — so the card stays short and the
+  // teammate text gets big. The more teammates, the shorter the card.
   const packCount = visibleTeammates.length;
-  const cardWidth = packCount >= 4 ? 200 : 240;
+  const hasPack = packCount > 0;
+  const cardWidth = hasPack ? 270 : 240;
+  const cardImageHeight =
+    packCount >= 5 ? 140 : packCount >= 3 ? 170 : 200;
   const packTextStyle =
-    packCount >= 4
-      ? { fontSize: 12, lineHeight: 16 }
-      : { fontSize: 14, lineHeight: 20 };
+    packCount >= 5
+      ? { fontSize: 15, lineHeight: 21 }
+      : packCount >= 4
+        ? { fontSize: 17, lineHeight: 24 }
+        : { fontSize: 22, lineHeight: 32 };
   const packTopMargin = packCount >= 4 ? 12 : 16;
+  // Masons are village — gold border, not the wolf-team red. Header + frame
+  // share the accent so the block reads as "your allies" at a glance.
+  const isMason = me.role === 'Mason';
+  const packAccent = isMason ? '#D4A017' : '#FF3B30';
+  const packTint = isMason ? 'rgba(212,160,23,0.08)' : 'rgba(255,59,48,0.08)';
 
   function onPressIn() {
     setIsPressed(true);
@@ -568,11 +585,27 @@ export default function RoleRevealScreen() {
       <View className="flex-1 items-center justify-center px-6">
         {revealed ? (
           <Animated.View style={{ alignItems: 'center', opacity: fadeAnim }}>
-            <RoleCard role={me.role} width={cardWidth} />
+            <RoleCard
+              role={me.role}
+              width={cardWidth}
+              {...(hasPack ? { imageHeight: cardImageHeight } : {})}
+            />
             {visibleTeammates.length > 0 && (
-              <View style={{ marginTop: packTopMargin, alignItems: 'center' }}>
+              <View
+                style={{
+                  marginTop: packTopMargin,
+                  alignItems: 'center',
+                  borderWidth: 3,
+                  borderColor: packAccent,
+                  borderRadius: 14,
+                  paddingVertical: 14,
+                  paddingHorizontal: 22,
+                  backgroundColor: packTint,
+                }}
+              >
                 <Text
-                  className="text-wolf-muted text-xs font-bold tracking-widest mb-1"
+                  className="font-bold tracking-widest mb-2"
+                  style={{ color: packAccent, fontSize: 13 }}
                   numberOfLines={1}
                 >
                   {me.role === 'Minion'
@@ -584,10 +617,13 @@ export default function RoleRevealScreen() {
                 {visibleTeammates.map(t => (
                   <Text
                     key={t.name}
-                    className="text-wolf-text"
+                    className="text-wolf-text font-bold"
                     style={packTextStyle}
                   >
-                    {t.name} <Text className="text-wolf-muted">({t.role})</Text>
+                    {t.name}
+                    {!isMason && (
+                      <Text className="text-wolf-muted font-normal"> ({t.role})</Text>
+                    )}
                   </Text>
                 ))}
               </View>

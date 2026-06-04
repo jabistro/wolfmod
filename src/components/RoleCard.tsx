@@ -14,9 +14,15 @@ function getTeamColor(role: Role): string {
 type Props = {
   role: string;
   width?: number;
+  // When set, the card renders in compact mode: the portrait is capped at this
+  // height (keeping its 3:4 aspect) and centered in a dark matte frame, with a
+  // smaller value badge and description text. The card stays wide so the
+  // description wraps in fewer lines — this keeps the overall card SHORT.
+  // Used on RoleReveal so a long teammate list isn't pushed off-screen.
+  imageHeight?: number;
 };
 
-export default function RoleCard({ role, width = 280 }: Props) {
+export default function RoleCard({ role, width = 280, imageHeight: imageHeightProp }: Props) {
   const { theme } = useTheme();
   const roleData = ROLES.find(r => r.name === role);
   if (!roleData) return null;
@@ -25,11 +31,23 @@ export default function RoleCard({ role, width = 280 }: Props) {
   const teamColor = getTeamColor(roleData);
   const description = getRoleDescription(role);
   const valueText = value > 0 ? `+${value}` : `${value}`;
-  const imageHeight = width * (4 / 3);
-  // Narrow cards (used on RoleReveal when the player has many teammates) need
-  // a smaller name font so single-word roles like "WEREWOLF" fit on one line.
-  // Multi-word names wrap to two lines naturally at the space; single-word
-  // names get locked to one line with auto-shrink so a long name like
+
+  const compact = imageHeightProp !== undefined;
+  const imageHeight = imageHeightProp ?? width * (4 / 3);
+  // In compact mode the portrait keeps its native 3:4 aspect at the capped
+  // height; the card is wider than the art so a dark matte fills the sides.
+  const imageWidth = compact ? Math.round(imageHeight * (3 / 4)) : width;
+
+  // Shrink the value badge + description alongside the card.
+  const badgeSize = compact ? 28 : 36;
+  const badgeFont = compact ? 12 : 14;
+  const descFontSize = compact ? 12 : 13;
+  const descLineHeight = compact ? 16 : 18;
+  const descPadV = compact ? 8 : 10;
+
+  // Narrow cards need a smaller name font so single-word roles like "WEREWOLF"
+  // fit on one line. Multi-word names wrap to two lines naturally at the space;
+  // single-word names lock to one line with auto-shrink so a long name like
   // "DOPPELGANGER" doesn't break mid-word in the header.
   const isNarrow = width < 220;
   const nameFontSize = isNarrow ? 14 : 16;
@@ -39,8 +57,13 @@ export default function RoleCard({ role, width = 280 }: Props) {
   return (
     <View style={[styles.card, { width }]}>
       <View style={styles.header}>
-        <View style={[styles.valueBadge, { backgroundColor: teamColor }]}>
-          <Text style={styles.valueText}>{valueText}</Text>
+        <View
+          style={[
+            styles.valueBadge,
+            { backgroundColor: teamColor, width: badgeSize, height: badgeSize, borderRadius: badgeSize / 2 },
+          ]}
+        >
+          <Text style={[styles.valueText, { fontSize: badgeFont }]}>{valueText}</Text>
         </View>
         <Text
           numberOfLines={isMultiWord ? 2 : 1}
@@ -53,16 +76,36 @@ export default function RoleCard({ role, width = 280 }: Props) {
         >
           {role.toUpperCase()}
         </Text>
-        <View style={styles.headerSpacer} />
+        <View style={{ width: badgeSize }} />
       </View>
-      <Image
-        source={getDisplayArt(role, theme).image}
-        style={{ width, height: imageHeight }}
-        resizeMode="cover"
-      />
+      {compact ? (
+        <View
+          style={{
+            width,
+            height: imageHeight,
+            backgroundColor: '#0F0F14',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Image
+            source={getDisplayArt(role, theme).image}
+            style={{ width: imageWidth, height: imageHeight }}
+            resizeMode="cover"
+          />
+        </View>
+      ) : (
+        <Image
+          source={getDisplayArt(role, theme).image}
+          style={{ width, height: imageHeight }}
+          resizeMode="cover"
+        />
+      )}
       {description.length > 0 && (
-        <View style={styles.descPanel}>
-          <Text style={styles.descText}>{description}</Text>
+        <View style={[styles.descPanel, { paddingVertical: descPadV }]}>
+          <Text style={[styles.descText, { fontSize: descFontSize, lineHeight: descLineHeight }]}>
+            {description}
+          </Text>
         </View>
       )}
     </View>
@@ -104,9 +147,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1,
     textAlign: 'center',
-  },
-  headerSpacer: {
-    width: 36,
   },
   descPanel: {
     paddingHorizontal: 12,
