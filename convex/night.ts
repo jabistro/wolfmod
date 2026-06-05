@@ -2851,6 +2851,9 @@ export const submitSeerCheck = mutation({
     if (!me?.alive || me.role !== 'Seer') {
       throw new Error('Only the Seer can check.');
     }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
+    }
 
     const target = await ctx.db.get(args.targetPlayerId);
     if (!target || target.gameId !== args.gameId) {
@@ -2904,6 +2907,9 @@ export const submitPICheck = mutation({
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me?.alive || me.role !== 'Paranormal Investigator') {
       throw new Error('Only the PI can investigate.');
+    }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
     }
     if (me.roleState?.piUsed) {
       throw new Error('You have already used your investigation.');
@@ -2964,6 +2970,9 @@ export const submitPISkip = mutation({
     if (!me?.alive || me.role !== 'Paranormal Investigator') {
       throw new Error('Only the PI can pass tonight.');
     }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
+    }
     if (
       await findMyAction(ctx, args.gameId, game.nightNumber, me._id, 'pi_check') ||
       await findMyAction(ctx, args.gameId, game.nightNumber, me._id, 'pi_skip')
@@ -3011,6 +3020,9 @@ export const submitMentalistCheck = mutation({
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me?.alive || me.role !== 'Mentalist') {
       throw new Error('Only the mentalist can compare.');
+    }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
     }
 
     if (args.firstPlayerId === args.secondPlayerId) {
@@ -3097,6 +3109,9 @@ export const submitBGProtect = mutation({
     if (!me?.alive || me.role !== 'Bodyguard') {
       throw new Error('Only the bodyguard can protect.');
     }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
+    }
 
     const target = await ctx.db.get(args.targetPlayerId);
     if (!target || target.gameId !== args.gameId) {
@@ -3169,6 +3184,9 @@ export const submitHuntressShot = mutation({
     if (!me?.alive || me.role !== 'Huntress') {
       throw new Error('Only the huntress can shoot.');
     }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
+    }
     if (me.roleState?.huntressUsed) {
       throw new Error('You have already used your shot.');
     }
@@ -3231,6 +3249,9 @@ export const submitHuntressSkip = mutation({
     if (!me?.alive || me.role !== 'Huntress') {
       throw new Error('Only the huntress can pass tonight.');
     }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
+    }
     if (
       await findMyAction(
         ctx,
@@ -3284,6 +3305,9 @@ export const submitRevealerShot = mutation({
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me?.alive || me.role !== 'Revealer') {
       throw new Error('Only the revealer can shoot.');
+    }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
     }
     if (
       await findMyAction(
@@ -3343,6 +3367,9 @@ export const submitRevealerSkip = mutation({
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me?.alive || me.role !== 'Revealer') {
       throw new Error('Only the revealer can pass tonight.');
+    }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
     }
     if (
       await findMyAction(
@@ -3405,6 +3432,9 @@ export const submitRevilerShot = mutation({
     if (!me?.alive || me.role !== 'Reviler') {
       throw new Error('Only the reviler can shoot.');
     }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
+    }
     if (
       await findMyAction(
         ctx,
@@ -3463,6 +3493,9 @@ export const submitRevilerSkip = mutation({
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me?.alive || me.role !== 'Reviler') {
       throw new Error('Only the reviler can pass tonight.');
+    }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
     }
     if (
       await findMyAction(
@@ -3769,6 +3802,9 @@ export const submitWitchSave = mutation({
     if (!me?.alive || me.role !== 'Witch') {
       throw new Error('Only the witch can use the save potion.');
     }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
+    }
     if (me.roleState?.witchSaveUsed) {
       throw new Error('Save potion already used.');
     }
@@ -3831,6 +3867,9 @@ export const submitWitchPoison = mutation({
     if (!me?.alive || me.role !== 'Witch') {
       throw new Error('Only the witch can use the poison potion.');
     }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
+    }
     if (me.roleState?.witchPoisonUsed) {
       throw new Error('Poison potion already used.');
     }
@@ -3878,6 +3917,9 @@ export const submitWitchDone = mutation({
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me?.alive || me.role !== 'Witch') {
       throw new Error('Only the witch can finish their turn.');
+    }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
     }
     if (
       await findMyAction(ctx, args.gameId, game.nightNumber, me._id, 'witch_done')
@@ -3938,6 +3980,15 @@ export const submitLeprechaunMove = mutation({
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me?.alive || me.role !== 'Leprechaun') {
       throw new Error('Only the leprechaun can act.');
+    }
+    // A nightmared Leprechaun is filtered out of this step's actor list and
+    // the client shows a "put to sleep" overlay in place of the picker. But
+    // nightView is reactive: the wolf_kill and nightmare_put_to_sleep rows can
+    // land in different ticks, so a stale/early client render (or a replayed
+    // call) could submit a move while asleep — which would spend a move-off on
+    // a night the Leprechaun should be doing nothing. Reject it server-side.
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
     }
     if (
       await findMyAction(
@@ -4010,6 +4061,29 @@ export const submitLeprechaunMove = mutation({
     // Move-off path. Check lifetime per-target limit on the ORIGINAL target.
     const movedOff = (game.leprechaunMovedOff ?? []) as Id<'players'>[];
     if (movedOff.includes(originalTargetId)) {
+      throw new Error(
+        'Already used your move on that target — only LEAVE is available.',
+      );
+    }
+
+    // Belt-and-suspenders: `game.leprechaunMovedOff` is a denormalized cache.
+    // The immutable source of truth is the leprechaun_redirect action rows
+    // written every night. Re-derive the lifetime limit straight from history
+    // so that even if the cache were ever cleared or desynced (a future code
+    // path, a partial write, a botched migration), a kill still can't be moved
+    // off the same original target twice. A prefix query on the by_game_night
+    // index returns every night's rows for this game.
+    const allRedirects = await ctx.db
+      .query('nightActions')
+      .withIndex('by_game_night', q => q.eq('gameId', args.gameId))
+      .filter(q => q.eq(q.field('actionType'), 'leprechaun_redirect'))
+      .collect();
+    const movedOffInHistory = allRedirects.some(a => {
+      const dir = a.result?.direction;
+      const orig = a.result?.originalTargetId as Id<'players'> | undefined;
+      return (dir === 'L' || dir === 'R') && orig === originalTargetId;
+    });
+    if (movedOffInHistory) {
       throw new Error(
         'Already used your move on that target — only LEAVE is available.',
       );
@@ -4094,6 +4168,9 @@ export const submitWarlockKill = mutation({
     if (!me?.alive || me.role !== 'Warlock') {
       throw new Error('Only the warlock can act.');
     }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
+    }
     if (me.roleState?.warlockSpent) {
       throw new Error('You have already used your power.');
     }
@@ -4158,6 +4235,9 @@ export const submitWarlockPass = mutation({
     const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
     if (!me?.alive || me.role !== 'Warlock') {
       throw new Error('Only the warlock can pass tonight.');
+    }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
     }
     if (me.roleState?.warlockSpent) {
       throw new Error('You have already used your power.');
