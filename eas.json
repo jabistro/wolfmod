@@ -6,8 +6,8 @@
     "preview": {
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_CONVEX_URL": "https://bright-coyote-299.convex.cloud",
-        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://bright-coyote-299.convex.site"
+        "EXPO_PUBLIC_CONVEX_URL": "https://spotted-salamander-482.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://spotted-salamander-482.convex.site"
       },
       "android": {
         "buildType": "apk"
@@ -16,8 +16,8 @@
     "production": {
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_CONVEX_URL": "https://bright-coyote-299.convex.cloud",
-        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://bright-coyote-299.convex.site"
+        "EXPO_PUBLIC_CONVEX_URL": "https://spotted-salamander-482.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://spotted-salamander-482.convex.site"
       },
       "android": {
         "buildType": "app-bundle"
