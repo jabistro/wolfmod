@@ -42,3 +42,6 @@ yarn-error.*
 
 # convex
 convex/_generated/ai/
+
+# Claude Code local state (memory lives in ~/.claude, never in the repo)
+.claude/
