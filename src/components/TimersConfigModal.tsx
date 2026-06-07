@@ -12,6 +12,7 @@ import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { showAlert } from './ThemedAlert';
+import TimerSteppers, { type TimerConfigValues } from './TimerSteppers';
 
 type PassHostCandidate = { _id: Id<'players'>; name: string };
 
@@ -46,36 +47,6 @@ type Props = {
   canEndGame?: boolean;
 };
 
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-}
-
-type StepperConfig = {
-  key:
-    | 'dayDurationSec'
-    | 'accusationSec'
-    | 'defenseSec'
-    | 'voteTimerSec'
-    | 'maxNominationsPerDay'
-    | 'wolfPickerSec';
-  label: string;
-  step: number;
-  min: number;
-  max?: number;
-  isTime: boolean;
-};
-
-const STEPPERS: StepperConfig[] = [
-  { key: 'dayDurationSec', label: 'LENGTH OF DAY', step: 30, min: 30, isTime: true },
-  { key: 'accusationSec', label: 'ACCUSATION', step: 10, min: 10, isTime: true },
-  { key: 'defenseSec', label: 'DEFENSE', step: 10, min: 10, isTime: true },
-  { key: 'voteTimerSec', label: 'VOTE', step: 1, min: 1, isTime: false },
-  { key: 'maxNominationsPerDay', label: 'NOMINATIONS', step: 1, min: 1, isTime: false },
-  { key: 'wolfPickerSec', label: 'WOLF DECISION', step: 10, min: 10, max: 60, isTime: true },
-];
-
 export default function TimersConfigModal({
   visible,
   onClose,
@@ -104,7 +75,7 @@ export default function TimersConfigModal({
     }
   }, [visible, initial]);
 
-  function update(key: StepperConfig['key'], next: number) {
+  function update(key: keyof TimerConfigValues, next: number) {
     setValues(v => ({ ...v, [key]: next }));
   }
 
@@ -291,59 +262,7 @@ export default function TimersConfigModal({
                   <Text className="text-wolf-muted">›</Text>
                 </TouchableOpacity>
               )}
-              {STEPPERS.map(({ key, label, step, min, max, isTime }) => {
-                const value = values[key];
-                const atMax = max !== undefined && value >= max;
-                return (
-                  <View
-                    key={key}
-                    className="flex-row items-center justify-between"
-                  >
-                    <Text
-                      className="text-wolf-muted"
-                      style={{ fontSize: 11, fontWeight: '700', letterSpacing: 1.5 }}
-                    >
-                      {label}
-                    </Text>
-                    <View className="flex-row items-center" style={{ gap: 14 }}>
-                      <TouchableOpacity
-                        onPress={() => update(key, Math.max(min, value - step))}
-                        disabled={value <= min}
-                        style={{ opacity: value <= min ? 0.3 : 1 }}
-                        className="w-9 h-9 bg-wolf-card rounded-full items-center justify-center"
-                      >
-                        <Text className="text-wolf-text text-xl">−</Text>
-                      </TouchableOpacity>
-                      <Text
-                        className="text-wolf-text text-center"
-                        style={{
-                          fontSize: 22,
-                          fontWeight: '600',
-                          minWidth: 80,
-                          fontVariant: ['tabular-nums'],
-                        }}
-                      >
-                        {isTime ? formatTime(value) : String(value)}
-                      </Text>
-                      <TouchableOpacity
-                        onPress={() =>
-                          update(
-                            key,
-                            max !== undefined
-                              ? Math.min(max, value + step)
-                              : value + step,
-                          )
-                        }
-                        disabled={atMax}
-                        style={{ opacity: atMax ? 0.3 : 1 }}
-                        className="w-9 h-9 bg-wolf-card rounded-full items-center justify-center"
-                      >
-                        <Text className="text-wolf-text text-xl">+</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                );
-              })}
+              <TimerSteppers values={values} onChange={update} />
               {canEndGame && (
                 <TouchableOpacity
                   onPress={handleEndGame}

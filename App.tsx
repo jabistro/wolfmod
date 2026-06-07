@@ -15,6 +15,7 @@ import HomeScreen from './src/screens/HomeScreen';
 import RolesScreen from './src/screens/RolesScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import ThemesScreen from './src/screens/ThemesScreen';
+import TimerDefaultsScreen from './src/screens/TimerDefaultsScreen';
 import ClockSetupScreen from './src/screens/ClockSetupScreen';
 import ClockScreen from './src/screens/ClockScreen';
 import SplashScreen from './src/screens/SplashScreen';
@@ -30,6 +31,9 @@ import DayScreen from './src/screens/DayScreen';
 import EndGameScreen from './src/screens/EndGameScreen';
 import { AlertHost } from './src/components/ThemedAlert';
 import { ThemeProvider } from './src/contexts/ThemeContext';
+import { TimerDefaultsProvider } from './src/contexts/TimerDefaultsContext';
+import { PlayerNameProvider } from './src/contexts/PlayerNameContext';
+import { DevModeProvider } from './src/contexts/DevModeContext';
 import type { RootStackParamList } from './src/navigation/types';
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -55,6 +59,9 @@ export default function App() {
   return (
     <ConvexProvider client={convex}>
       <ThemeProvider>
+      <TimerDefaultsProvider>
+      <PlayerNameProvider>
+      <DevModeProvider>
       <SafeAreaProvider>
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0F0F14' }}>
           <NavigationContainer theme={AppTheme}>
@@ -69,6 +76,7 @@ export default function App() {
               <Stack.Screen name="Roles" component={RolesScreen} options={{ gestureEnabled: false }} />
               <Stack.Screen name="Settings" component={SettingsScreen} />
               <Stack.Screen name="Themes" component={ThemesScreen} />
+              <Stack.Screen name="TimerDefaults" component={TimerDefaultsScreen} />
               <Stack.Screen name="ClockSetup" component={ClockSetupScreen} />
               <Stack.Screen name="Clock" component={ClockScreen} options={{ gestureEnabled: false, animation: 'none' }} />
               <Stack.Screen name="PlayMenu" component={PlayMenuScreen} />
@@ -88,6 +96,9 @@ export default function App() {
           <AlertHost />
         </GestureHandlerRootView>
       </SafeAreaProvider>
+      </DevModeProvider>
+      </PlayerNameProvider>
+      </TimerDefaultsProvider>
       </ThemeProvider>
     </ConvexProvider>
   );

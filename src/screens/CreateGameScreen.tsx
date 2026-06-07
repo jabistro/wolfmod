@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,8 @@ import { api } from '../../convex/_generated/api';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { showAlert } from '../components/ThemedAlert';
+import { useTimerDefaults } from '../contexts/TimerDefaultsContext';
+import { usePlayerName } from '../contexts/PlayerNameContext';
 
 type Nav = StackNavigationProp<RootStackParamList, 'CreateGame'>;
 
@@ -26,10 +28,21 @@ export default function CreateGameScreen() {
   const navigation = useNavigation<Nav>();
   const deviceClientId = useDeviceId();
   const createGame = useMutation(api.games.createGame);
+  const { timerDefaults } = useTimerDefaults();
+  const { playerName, setPlayerName } = usePlayerName();
 
   const [name, setName] = useState('');
   const [playerCount, setPlayerCount] = useState(9);
   const [submitting, setSubmitting] = useState(false);
+
+  // Seed once from the saved name when it loads, without clobbering edits.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && playerName) {
+      setName(playerName);
+      seeded.current = true;
+    }
+  }, [playerName]);
 
   async function handleCreate() {
     if (!deviceClientId) return;
@@ -43,7 +56,9 @@ export default function CreateGameScreen() {
         playerCount,
         hostName: name.trim(),
         deviceClientId,
+        ...timerDefaults,
       });
+      setPlayerName(name.trim());
       navigation.replace('Lobby', { gameId: result.gameId });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

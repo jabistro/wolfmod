@@ -69,6 +69,15 @@ export const createGame = mutation({
     playerCount: v.number(),
     hostName: v.string(),
     deviceClientId: v.string(),
+    // Per-host timer defaults, persisted locally on the host's device and passed
+    // in at create time. Omitted fields fall back to DAY_CONFIG_DEFAULTS via
+    // dayConfigOf, so this is purely a seed — the host can still retune in-game.
+    dayDurationSec: v.optional(v.number()),
+    accusationSec: v.optional(v.number()),
+    defenseSec: v.optional(v.number()),
+    voteTimerSec: v.optional(v.number()),
+    maxNominationsPerDay: v.optional(v.number()),
+    wolfPickerSec: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     if (args.playerCount < MIN_PLAYERS || args.playerCount > MAX_PLAYERS) {
@@ -80,6 +89,22 @@ export const createGame = mutation({
     const roomCode = await allocateRoomCode(ctx);
     const now = Date.now();
 
+    // Only persist timer fields the client actually sent; let dayConfigOf supply
+    // defaults for the rest. Clamp to the same floors setDayConfig enforces.
+    const timerSeed: Record<string, number> = {};
+    if (args.dayDurationSec !== undefined)
+      timerSeed.dayDurationSec = Math.max(30, args.dayDurationSec);
+    if (args.accusationSec !== undefined)
+      timerSeed.accusationSec = Math.max(5, args.accusationSec);
+    if (args.defenseSec !== undefined)
+      timerSeed.defenseSec = Math.max(5, args.defenseSec);
+    if (args.voteTimerSec !== undefined)
+      timerSeed.voteTimerSec = Math.max(1, args.voteTimerSec);
+    if (args.maxNominationsPerDay !== undefined)
+      timerSeed.maxNominationsPerDay = Math.max(1, args.maxNominationsPerDay);
+    if (args.wolfPickerSec !== undefined)
+      timerSeed.wolfPickerSec = Math.min(60, Math.max(10, args.wolfPickerSec));
+
     const gameId = await ctx.db.insert('games', {
       roomCode,
       playerCount: args.playerCount,
@@ -88,6 +113,7 @@ export const createGame = mutation({
       dayNumber: 0,
       selectedRoles: [],
       createdAt: now,
+      ...timerSeed,
     });
 
     const playerId = await ctx.db.insert('players', {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { ConvexError } from 'convex/values';
 import { api } from '../../convex/_generated/api';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
+import { usePlayerName } from '../contexts/PlayerNameContext';
 
 type Nav = StackNavigationProp<RootStackParamList, 'JoinGame'>;
 
@@ -34,11 +35,21 @@ export default function JoinGameScreen() {
   const navigation = useNavigation<Nav>();
   const deviceClientId = useDeviceId();
   const joinGame = useMutation(api.games.joinGame);
+  const { playerName, setPlayerName } = usePlayerName();
 
   const [roomCode, setRoomCode] = useState('');
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Seed once from the saved name when it loads, without clobbering edits.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seeded.current && playerName) {
+      setName(playerName);
+      seeded.current = true;
+    }
+  }, [playerName]);
 
   async function handleJoin() {
     if (!deviceClientId) return;
@@ -59,6 +70,7 @@ export default function JoinGameScreen() {
         name: name.trim(),
         deviceClientId,
       });
+      setPlayerName(name.trim());
       navigation.replace('Lobby', { gameId: result.gameId });
     } catch (e) {
       setErrorMsg(cleanJoinError(e));

@@ -1,9 +1,12 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, TextInput, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../navigation/types';
+import { usePlayerName } from '../contexts/PlayerNameContext';
+import { useDevMode } from '../contexts/DevModeContext';
+import { DEV_FEATURES_AVAILABLE } from '../config/devFlags';
 
 type NavProp = StackNavigationProp<RootStackParamList, 'Settings'>;
 
@@ -15,9 +18,12 @@ type Row = {
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NavProp>();
+  const { playerName, setPlayerName } = usePlayerName();
+  const { devModeEnabled, setDevModeEnabled } = useDevMode();
 
   const rows: Row[] = [
     { label: 'THEMES', onPress: () => navigation.navigate('Themes'), enabled: true },
+    { label: 'TIMERS', onPress: () => navigation.navigate('TimerDefaults'), enabled: true },
   ];
 
   return (
@@ -31,6 +37,45 @@ export default function SettingsScreen() {
             SETTINGS
           </Text>
         </View>
+
+        <View style={{ gap: 8 }} className="mb-2">
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest">YOUR NAME</Text>
+          <TextInput
+            value={playerName}
+            onChangeText={setPlayerName}
+            placeholder="Enter your name"
+            placeholderTextColor="#5A5560"
+            autoCapitalize="words"
+            autoCorrect={false}
+            maxLength={20}
+            className="bg-wolf-card text-wolf-text rounded-xl px-4 py-4 text-lg"
+          />
+          <Text className="text-wolf-muted text-xs px-1">
+            Pre-fills your name when you create or join a game.
+          </Text>
+        </View>
+
+        {/* Only meaningful in builds that expose lobby dev tools; hidden in
+            real release builds where DEV_FEATURES_AVAILABLE is false. */}
+        {DEV_FEATURES_AVAILABLE && (
+          <View className="bg-wolf-card border border-wolf-surface rounded-2xl px-5 py-4 mb-3 mt-4 flex-row items-center justify-between">
+            <View className="flex-1 pr-4">
+              <Text className="text-wolf-text text-lg font-semibold tracking-wider">
+                DEVELOPER MODE
+              </Text>
+              <Text className="text-wolf-muted text-xs mt-1">
+                Show FILL SEATS / ASSIGN ROLES in the lobby. Turn off to play a real game.
+              </Text>
+            </View>
+            <Switch
+              value={devModeEnabled}
+              onValueChange={setDevModeEnabled}
+              trackColor={{ false: '#1A1A24', true: '#D4A017' }}
+              thumbColor="#F0EDE8"
+              ios_backgroundColor="#1A1A24"
+            />
+          </View>
+        )}
 
         <ScrollView className="flex-1" contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', paddingBottom: '25%' }}>
           {rows.map(row => (

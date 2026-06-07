@@ -24,6 +24,8 @@ import TimersConfigModal from '../components/TimersConfigModal';
 import RolesBrowserModal from '../components/RolesBrowserModal';
 import { showAlert } from '../components/ThemedAlert';
 import { useAndroidBack } from '../hooks/useAndroidBack';
+import { DEV_FEATURES_AVAILABLE } from '../config/devFlags';
+import { useDevMode } from '../contexts/DevModeContext';
 
 // Build the category map for v1 roles once. The role selection modal uses
 // this to power its team tabs (Villagers / Wolves / Team Wolf / Solo) so
@@ -110,6 +112,9 @@ export default function LobbyScreen() {
   const { params } = useRoute<Route>();
   const deviceClientId = useDeviceId();
   const insets = useSafeAreaInsets();
+  const { devModeEnabled } = useDevMode();
+  // Lobby dev tools require both an opted-in build and the host's toggle being on.
+  const showDevTools = DEV_FEATURES_AVAILABLE && devModeEnabled;
 
   const lobby = useQuery(
     api.games.lobbyView,
@@ -765,8 +770,9 @@ export default function LobbyScreen() {
         </View>
 
         {/* Visible in local dev (__DEV__) or playtest builds that opt in via
-            EXPO_PUBLIC_ALLOW_BOTS. Unset that EAS env var before real release. */}
-        {(__DEV__ || process.env.EXPO_PUBLIC_ALLOW_BOTS === 'true') &&
+            EXPO_PUBLIC_ALLOW_BOTS, and only while the host's Developer mode
+            toggle (Settings) is on. Unset that EAS env var before real release. */}
+        {showDevTools &&
           isHost &&
           players.length < game.playerCount && (
           <View className="px-6 mt-6">
@@ -782,7 +788,7 @@ export default function LobbyScreen() {
           </View>
         )}
 
-        {(__DEV__ || process.env.EXPO_PUBLIC_ALLOW_BOTS === 'true') &&
+        {showDevTools &&
           isHost &&
           game.selectedRoles.length > 0 && (
           <View className="px-6 mt-3">
