@@ -1234,6 +1234,14 @@ export const endGameView = query({
     // attack — wolf_kill on that target should render DEATH DELAYED.
     const deathKey = (night: number, id: Id<'players'>) => `${night}:${id}`;
     const deaths = new Set<string>();
+    // Night-source deaths only (excludes day lynches). A day lynch is stamped
+    // with the CURRENT game.nightNumber — and during day N, nightNumber is
+    // N-1 — so a lynch on day N+1 collides in deathKey space with night N's
+    // kill rows. Night-step outcome checks (wolf / huntress / revealer /
+    // reviler / warlock KILLED-vs-SAVED) must consult THIS set, not `deaths`,
+    // or a target the BG cleanly saved at night and the village then lynched
+    // the next day gets mislabeled KILLED on the killer's log row.
+    const nightDeaths = new Set<string>();
     const delayedWounds = new Set<string>();
     // Per-player death info, used for the elimination label ("n3" / "d2")
     // and for filtering wolf-team attribution to nights the wolf was alive
@@ -1251,10 +1259,13 @@ export const endGameView = query({
     const cursedConversionByPlayer = new Map<Id<'players'>, number>();
     for (const a of actions) {
       if (a.actionType === 'death' && a.targetPlayerId) {
+        const r = (a.result ?? {}) as { phase?: string; dayNumber?: number };
+        const phase: 'day' | 'night' = r.phase === 'day' ? 'day' : 'night';
         deaths.add(deathKey(a.nightNumber, a.targetPlayerId));
+        if (phase !== 'day') {
+          nightDeaths.add(deathKey(a.nightNumber, a.targetPlayerId));
+        }
         if (!deathByPlayer.has(a.targetPlayerId)) {
-          const r = (a.result ?? {}) as { phase?: string; dayNumber?: number };
-          const phase: 'day' | 'night' = r.phase === 'day' ? 'day' : 'night';
           deathByPlayer.set(a.targetPlayerId, {
             nightNumber: a.nightNumber,
             phase,
@@ -1560,7 +1571,7 @@ export const endGameView = query({
           delayedWounds.has(deathKey(a.nightNumber, effectiveId));
         const killed =
           effectiveId &&
-          deaths.has(deathKey(a.nightNumber, effectiveId));
+          nightDeaths.has(deathKey(a.nightNumber, effectiveId));
         baseEntry.outcome = converted
           ? 'converted'
           : delayed
@@ -1632,7 +1643,7 @@ export const endGameView = query({
       if (a.actionType === 'huntress_shot') {
         const killed =
           a.targetPlayerId &&
-          deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+          nightDeaths.has(deathKey(a.nightNumber, a.targetPlayerId));
         baseEntry.outcome = killed ? 'killed' : 'saved';
       }
 
@@ -1648,7 +1659,7 @@ export const endGameView = query({
         if (targetIsWolf) {
           const killed =
             a.targetPlayerId &&
-            deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+            nightDeaths.has(deathKey(a.nightNumber, a.targetPlayerId));
           baseEntry.outcome = killed ? 'killed' : 'saved';
         } else {
           baseEntry.outcome = 'missed';
@@ -1668,7 +1679,7 @@ export const endGameView = query({
         if (targetIsSpecial) {
           const killed =
             a.targetPlayerId &&
-            deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+            nightDeaths.has(deathKey(a.nightNumber, a.targetPlayerId));
           baseEntry.outcome = killed ? 'killed' : 'saved';
         } else {
           baseEntry.outcome = 'missed';
@@ -1724,7 +1735,7 @@ export const endGameView = query({
       if (a.actionType === 'warlock_redirect') {
         const killed =
           !!a.targetPlayerId &&
-          deaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+          nightDeaths.has(deathKey(a.nightNumber, a.targetPlayerId));
         baseEntry.outcome = killed ? 'killed' : 'saved';
       }
 
