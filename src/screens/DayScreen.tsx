@@ -31,7 +31,7 @@ type Route = RouteProp<RootStackParamList, 'Day'>;
 
 type Nomination = {
   nominee: { _id: Id<'players'>; name: string } | null;
-  subPhase: 'accusation' | 'defense' | 'vote' | 'results';
+  subPhase: 'accusation' | 'defense' | 'prevote' | 'vote' | 'results';
   subPhaseEndsAt: number;
   subPhasePausedRemainingMs: number | null;
   resultsRevealed: boolean;
@@ -63,6 +63,7 @@ type PendingTrial = {
 type DayGame = {
   _id: Id<'games'>;
   roomCode: string;
+  mode: string;
   phase: string;
   dayNumber: number;
   nightNumber: number;
@@ -81,8 +82,10 @@ type DayGame = {
     accusationSec: number;
     defenseSec: number;
     voteTimerSec: number;
+    preVoteSec: number;
     maxNominationsPerDay: number;
     wolfPickerSec: number;
+    nightActionSec: number;
   };
 };
 
@@ -317,6 +320,40 @@ export default function DayScreen() {
 
   if (currentNomination) {
     const sp = currentNomination.subPhase;
+    // Remote autopilot: the chat owns the trial. Vote shows the LIVES/DIES
+    // buttons (chat auto-collapses); every other step is a minimal screen with
+    // the trial running in the docked chat.
+    if (game.mode === 'remote') {
+      if (sp === 'vote') {
+        return (
+          <>
+            <VoteView
+              game={game}
+              deviceClientId={deviceClientId}
+              meAlive={me.alive}
+              isHost={isHost}
+              nomination={currentNomination}
+              onLeavePress={confirmLeave}
+              hostMissing={hostMissing}
+              passHostCandidates={passHostCandidates}
+            />
+            {passPicker}
+          </>
+        );
+      }
+      return (
+        <>
+          <RemoteTrialScreen
+            game={game}
+            nomination={currentNomination}
+            onLeavePress={confirmLeave}
+            hostMissing={hostMissing}
+            deviceClientId={deviceClientId}
+          />
+          {passPicker}
+        </>
+      );
+    }
     if (sp === 'results' || currentNomination.resultsRevealed) {
       return (
         <>
@@ -335,7 +372,7 @@ export default function DayScreen() {
         </>
       );
     }
-    if (sp === 'vote') {
+    if (sp === 'vote' || sp === 'prevote') {
       return (
         <>
           <VoteView
@@ -573,6 +610,7 @@ function DayCogRow({
   nomArmed,
   onNomToggle,
   nomDisabled,
+  onBeginNight,
 }: {
   onPress: () => void;
   /** If set, render a NOM toggle next to the cog (host-only override that
@@ -581,6 +619,9 @@ function DayCogRow({
   nomArmed?: boolean;
   /** Disable the NOM toggle visually (e.g. day over / noms exhausted). */
   nomDisabled?: boolean;
+  /** If set, render a BEGIN NIGHT pill pushed to the right of this row
+   *  (host-only, discussion view). Same height as the NOM toggle. */
+  onBeginNight?: () => void;
 }) {
   return (
     <View
@@ -617,6 +658,31 @@ function DayCogRow({
           </Text>
         </TouchableOpacity>
       )}
+      {onBeginNight && (
+        <TouchableOpacity
+          onPress={onBeginNight}
+          activeOpacity={0.75}
+          hitSlop={6}
+          style={{
+            marginLeft: 'auto',
+            paddingHorizontal: 16,
+            paddingVertical: 6,
+            borderRadius: 8,
+            backgroundColor: '#D4A017',
+          }}
+        >
+          <Text
+            style={{
+              color: '#0F0F14',
+              fontSize: 14,
+              fontWeight: '800',
+              letterSpacing: 2,
+            }}
+          >
+            BEGIN NIGHT
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -642,11 +708,23 @@ function DayClockBar({
 
   const paused = game.dayPausedRemainingMs !== null;
   const remaining = dayRemainingMs(game, now);
+  const remainingSec = Math.max(0, Math.ceil(remaining / 1000));
+  // Countdown urgency, one color swap per whole second (see
+  // [[wolfmod_feedback_countdown_flash_pacing]]):
+  //   >20s  → solid white
+  //   11–20 → alternate yellow / white
+  //   ≤10   → alternate red / white, landing on red at 0
   const color = dayOver
     ? '#B03A2E'
-    : remaining <= 10000
-      ? '#D4A017'
-      : '#F0EDE8';
+    : remainingSec <= 10
+      ? remainingSec % 2 === 0
+        ? '#B03A2E'
+        : '#F0EDE8'
+      : remainingSec <= 20
+        ? remainingSec % 2 === 0
+          ? '#D4A017'
+          : '#F0EDE8'
+        : '#F0EDE8';
 
   async function toggle() {
     if (dayOver) return;
@@ -859,7 +937,11 @@ function DiscussionView({
   // the viewer can act. Dead spectators can normally not tap — but when
   // the (possibly-dead) host has the NOM override armed, the ring opens
   // up for them too.
-  const canTap = !dayOver && !pending && (meAlive || (isHost && nomArmed));
+  // Host paused the discussion clock → freeze nominations (the seat ring shows
+  // PAUSED). In remote, chat also flips everyone to the break room.
+  const dayPaused = game.dayPausedRemainingMs !== null;
+  const canTap =
+    !dayOver && !pending && !dayPaused && (meAlive || (isHost && nomArmed));
   const selectableIds: ReadonlySet<string> | undefined = canTap
     ? new Set(
         alive
@@ -917,6 +999,7 @@ function DiscussionView({
           nomArmed={nomArmed}
           nomDisabled={dayOver || pending}
           onNomToggle={() => setNomArmed(a => !a)}
+          onBeginNight={pending ? undefined : onBeginNight}
         />
       )}
 
@@ -942,6 +1025,16 @@ function DiscussionView({
           // dependent ms here causes the effect to re-fire every tick →
           // setValue(0) flashes mid-fill.
           pendingTrialDwellEndsAt={pendingTrial?.dwellEndsAt ?? null}
+          centerOverlay={
+            dayPaused ? (
+              <Text
+                className="text-wolf-muted font-extrabold tracking-widest"
+                style={{ fontSize: 22 }}
+              >
+                PAUSED
+              </Text>
+            ) : undefined
+          }
           onPress={canTap ? handleSeatPress : undefined}
         />
         {pendingTrial ? (
@@ -993,25 +1086,6 @@ function DiscussionView({
           </Text>
         )}
       </ScrollView>
-
-      {isHost && !pending && (
-        <View
-          style={{
-            paddingHorizontal: 24,
-            paddingBottom: Math.max(insets.bottom, 16) + 16,
-          }}
-        >
-          <TouchableOpacity
-            onPress={onBeginNight}
-            className="bg-wolf-accent rounded-xl py-4 items-center"
-            activeOpacity={0.75}
-          >
-            <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-              BEGIN NIGHT
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
 
       {!isHost && !pending && (
         <View
@@ -1352,6 +1426,55 @@ function TrialView({
 
 // ───── Vote view ───────────────────────────────────────────────────────────
 
+// Remote autopilot: minimal trial screen for accusation / defense / prevote /
+// results. The chat (docked + tall) owns the experience — the accusation,
+// defense, countdown, and result all live there — so this screen is just a
+// slim "who's on trial" header above the chat.
+function RemoteTrialScreen({
+  game,
+  nomination,
+  onLeavePress,
+  hostMissing,
+  deviceClientId,
+}: {
+  game: DayGame;
+  nomination: Nomination;
+  onLeavePress: () => void;
+  hostMissing: boolean;
+  deviceClientId: string;
+}) {
+  const sp = nomination.subPhase;
+  const mode =
+    sp === 'accusation'
+      ? 'ACCUSATION'
+      : sp === 'defense'
+        ? 'DEFENSE'
+        : sp === 'prevote'
+          ? 'GET READY TO VOTE'
+          : 'VOTE RESULT';
+  return (
+    <SafeAreaView className="flex-1 bg-wolf-bg">
+      <DayHeader
+        dayNumber={game.dayNumber}
+        mode={mode}
+        roomCode={game.roomCode}
+        onLeavePress={onLeavePress}
+      />
+      {hostMissing && (
+        <HostMissingBanner gameId={game._id} deviceClientId={deviceClientId} />
+      )}
+      <View className="flex-1 items-center justify-center px-6">
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+          ON TRIAL
+        </Text>
+        <Text className="text-wolf-text text-3xl font-extrabold tracking-widest mt-1 text-center">
+          {nomination.nominee?.name?.toUpperCase() ?? '—'}
+        </Text>
+      </View>
+    </SafeAreaView>
+  );
+}
+
 function VoteView({
   game,
   deviceClientId,
@@ -1385,6 +1508,9 @@ function VoteView({
   const remaining = trialRemainingMs(nomination, game, now);
   const paused = nomination.subPhasePausedRemainingMs !== null;
   const notStartedYet = paused && remaining === game.config.voteTimerSec * 1000;
+  // Remote autopilot pre-vote buffer: same screen chrome, but the ballot
+  // isn't open yet — show a "get ready" state with the countdown.
+  const isPreVote = nomination.subPhase === 'prevote';
 
   async function handleVote(vote: 'lives' | 'dies') {
     if (!meAlive) return;
@@ -1446,7 +1572,7 @@ function VoteView({
     <SafeAreaView className="flex-1 bg-wolf-bg">
       <DayHeader
         dayNumber={game.dayNumber}
-        mode="TIME TO VOTE"
+        mode={isPreVote ? 'GET READY TO VOTE' : 'TIME TO VOTE'}
         roomCode={game.roomCode}
         onLeavePress={onLeavePress}
       />
@@ -1467,7 +1593,16 @@ function VoteView({
       <DayActionRow showBuild onBuildPress={() => setBuildOpen(true)} />
       {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
 
-      <View className="flex-1 px-6 items-center justify-center">
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={{
+          flexGrow: 1,
+          paddingHorizontal: 24,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
           VOTE ON
         </Text>
@@ -1489,13 +1624,15 @@ function VoteView({
             {Math.ceil(remaining / 1000)}
           </Text>
           <Text className="text-wolf-muted text-xs tracking-widest mt-1">
-            {paused
-              ? notStartedYet
-                ? 'SECONDS'
-                : isHost
-                  ? 'TAP TO RESUME'
-                  : 'WAITING FOR HOST'
-              : 'SECONDS'}
+            {isPreVote
+              ? 'UNTIL VOTING'
+              : paused
+                ? notStartedYet
+                  ? 'SECONDS'
+                  : isHost
+                    ? 'TAP TO RESUME'
+                    : 'WAITING FOR HOST'
+                : 'SECONDS'}
           </Text>
         </Pressable>
 
@@ -1526,11 +1663,24 @@ function VoteView({
           </View>
         )}
 
-        <Text className="text-wolf-muted text-xs tracking-widest mb-2">
-          {nomination.votedCount} / {nomination.eligibleCount} VOTED
-        </Text>
+        {!isPreVote && (
+          <Text className="text-wolf-muted text-xs tracking-widest mb-2">
+            {nomination.votedCount} / {nomination.eligibleCount} VOTED
+          </Text>
+        )}
 
-        {nomination.iAmNominee ? (
+        {isPreVote ? (
+          <View className="mt-4 items-center px-4">
+            <Text className="text-wolf-text text-base text-center">
+              Read the defense. Voting opens when the timer ends.
+            </Text>
+            <Text className="text-wolf-muted text-sm text-center mt-3">
+              <Text className="text-wolf-text font-bold">LIVES</Text> to spare
+              them · <Text className="text-wolf-text font-bold">DIES</Text> to
+              eliminate them.
+            </Text>
+          </View>
+        ) : nomination.iAmNominee ? (
           <View className="mt-8 items-center">
             <View
               className="rounded-2xl px-6 py-4"
@@ -1598,40 +1748,42 @@ function VoteView({
             You are out of the game — spectating.
           </Text>
         )}
-      </View>
+      </ScrollView>
 
-      <View
-        style={{
-          paddingHorizontal: 24,
-          paddingBottom: Math.max(insets.bottom, 16) + 16,
-          alignItems: isHost && notStartedYet ? 'stretch' : 'center',
-        }}
-      >
-        {isHost && notStartedYet ? (
-          <TouchableOpacity
-            onPress={toggleClock}
-            disabled={busy !== null}
-            style={{ opacity: busy === 'toggle' ? 0.4 : 1 }}
-            className="bg-wolf-accent rounded-xl py-5 items-center"
-          >
-            {busy === 'toggle' ? (
-              <ActivityIndicator color="#0F0F14" />
-            ) : (
-              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-                BEGIN VOTE
-              </Text>
-            )}
-          </TouchableOpacity>
-        ) : (
-          <Text className="text-wolf-muted text-xs tracking-widest">
-            {paused
-              ? 'WAITING FOR HOST'
-              : isHost
-                ? 'RESULTS POST WHEN TIMER ENDS'
-                : 'WAITING FOR TIMER'}
-          </Text>
-        )}
-      </View>
+      {!isPreVote && game.mode !== 'remote' && (
+        <View
+          style={{
+            paddingHorizontal: 24,
+            paddingBottom: Math.max(insets.bottom, 16) + 16,
+            alignItems: isHost && notStartedYet ? 'stretch' : 'center',
+          }}
+        >
+          {isHost && notStartedYet ? (
+            <TouchableOpacity
+              onPress={toggleClock}
+              disabled={busy !== null}
+              style={{ opacity: busy === 'toggle' ? 0.4 : 1 }}
+              className="bg-wolf-accent rounded-xl py-5 items-center"
+            >
+              {busy === 'toggle' ? (
+                <ActivityIndicator color="#0F0F14" />
+              ) : (
+                <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                  BEGIN VOTE
+                </Text>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <Text className="text-wolf-muted text-xs tracking-widest">
+              {paused
+                ? 'WAITING FOR HOST'
+                : isHost
+                  ? 'RESULTS POST WHEN TIMER ENDS'
+                  : 'WAITING FOR TIMER'}
+            </Text>
+          )}
+        </View>
+      )}
 
       <TimersConfigModal
         visible={cogOpen}

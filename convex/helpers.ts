@@ -1,5 +1,6 @@
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
+import { internal } from './_generated/api';
 import { isWolfTeam } from '../src/data/v1Roles';
 
 /**
@@ -119,7 +120,15 @@ export type DayConfig = {
   defenseSec: number;
   voteTimerSec: number;
   maxNominationsPerDay: number;
+  // Wolves' group kill-decision shot clock.
   wolfPickerSec: number;
+  // Per-actor decision timer for every OTHER night role (Seer, Bodyguard,
+  // Witch, …, including Nightmare Wolf). On expiry the engine auto-resolves
+  // (random for can't-skip roles, skip for one-time/optional powers).
+  nightActionSec: number;
+  // Buffer between the defense ending and the vote opening (remote autopilot):
+  // gives the village a beat to read the defense before LIVES/DIES appear.
+  preVoteSec: number;
 };
 
 export const DAY_CONFIG_DEFAULTS: DayConfig = {
@@ -128,7 +137,9 @@ export const DAY_CONFIG_DEFAULTS: DayConfig = {
   defenseSec: 30,
   voteTimerSec: 5,
   maxNominationsPerDay: 3,
-  wolfPickerSec: 30,
+  wolfPickerSec: 60,
+  nightActionSec: 30,
+  preVoteSec: 15,
 };
 
 export function dayConfigOf(game: Doc<'games'>): DayConfig {
@@ -140,6 +151,9 @@ export function dayConfigOf(game: Doc<'games'>): DayConfig {
     maxNominationsPerDay:
       game.maxNominationsPerDay ?? DAY_CONFIG_DEFAULTS.maxNominationsPerDay,
     wolfPickerSec: game.wolfPickerSec ?? DAY_CONFIG_DEFAULTS.wolfPickerSec,
+    nightActionSec:
+      game.nightActionSec ?? DAY_CONFIG_DEFAULTS.nightActionSec,
+    preVoteSec: game.preVoteSec ?? DAY_CONFIG_DEFAULTS.preVoteSec,
   };
 }
 
@@ -150,6 +164,28 @@ export function dayConfigOf(game: Doc<'games'>): DayConfig {
  * phase (initial day 1 begin, beginDay from morning, finalizeTriggerPhase
  * Case B).
  */
+/**
+ * Remote-only: post the big WIN banner to the village chat the moment a win
+ * condition is met. The caller sets `game.winner` first (applyWinIfReached /
+ * recordWinIfReached) and re-reads the game before calling this.
+ */
+export async function postWinBanner(
+  ctx: MutationCtx,
+  game: Doc<'games'>,
+): Promise<void> {
+  if (game.mode !== 'remote' || !game.winner) return;
+  await ctx.db.insert('messages', {
+    gameId: game._id,
+    channel: 'village',
+    authorName: 'MODERATOR',
+    body: '',
+    phaseLabel: 'Game over',
+    sentAt: Date.now(),
+    system: true,
+    winBanner: { winner: game.winner },
+  });
+}
+
 export async function initializeDayClock(
   ctx: MutationCtx,
   gameId: Id<'games'>,
@@ -157,12 +193,23 @@ export async function initializeDayClock(
   const game = await ctx.db.get(gameId);
   if (!game) return;
   const cfg = dayConfigOf(game);
+  const dayMs = cfg.dayDurationSec * 1000;
+  const endsAt = Date.now() + dayMs;
   await ctx.db.patch(gameId, {
-    dayEndsAt: Date.now() + cfg.dayDurationSec * 1000,
+    dayEndsAt: endsAt,
     dayPausedRemainingMs: undefined,
     nominationsThisDay: 0,
     currentNomination: undefined,
+    nightFallsAt: undefined,
   });
+  // Remote autopilot: when the day clock runs out with no trial in flight,
+  // auto-warn + go to night (see day.ts dayClockExpiryTick).
+  if (game.mode === 'remote') {
+    await ctx.scheduler.runAfter(dayMs, internal.day.dayClockExpiryTick, {
+      gameId,
+      expectedEndsAt: endsAt,
+    });
+  }
 }
 
 /**

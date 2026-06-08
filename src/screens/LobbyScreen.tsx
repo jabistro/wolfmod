@@ -1400,8 +1400,10 @@ export default function LobbyScreen() {
             accusationSec: game.accusationSec,
             defenseSec: game.defenseSec,
             voteTimerSec: game.voteTimerSec,
+            preVoteSec: game.preVoteSec,
             maxNominationsPerDay: game.maxNominationsPerDay,
             wolfPickerSec: game.wolfPickerSec,
+            nightActionSec: game.nightActionSec,
           }}
           passHostCandidates={
             isHost

@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as chat from "../chat.js";
 import type * as day from "../day.js";
 import type * as games from "../games.js";
 import type * as helpers from "../helpers.js";
@@ -21,6 +22,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  chat: typeof chat;
   day: typeof day;
   games: typeof games;
   helpers: typeof helpers;

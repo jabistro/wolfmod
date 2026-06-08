@@ -14,6 +14,7 @@ import {
   isBotName,
   recordWinIfReached,
   applyWinIfReached,
+  postWinBanner,
   initializeDayClock,
   flagCubDeathIfApplicable,
   wipeNomTapsForDay,
@@ -66,6 +67,10 @@ const STEP_DWELL_MAX_MS = 12000;
 // advances. Only bumps the deadline when it would otherwise be sooner — fast
 // actors still get the full original dwell, preserving cloak variance.
 const REVEAL_WINDOW_MS = 5000;
+
+// Remote autopilot: how long the dawn night report sits before morning
+// auto-advances to the next day (no host BEGIN DAY tap).
+const MORNING_READ_MS = 5000;
 
 // How long past the dwell deadline the host has to wait before the
 // "Skip Ahead" override becomes available.
@@ -586,20 +591,14 @@ async function autoResolveStep(
       return;
     }
     case 'pi': {
-      // Bot PI uses their power on a random target so we exercise the result
-      // pipeline in tests. Result is computed but not displayed (no UI for
-      // bots) — it's still recorded for spectator history later.
+      // PI is a one-time power and is never forced — auto-resolve = skip, so a
+      // player who doesn't decide in time keeps their single use.
       for (const pi of actors) {
-        const target = pickRandom(alivePlayers);
-        if (!target) continue;
-        const result = piTrioResult(target, alivePlayers, alivePlayers.length);
         await ctx.db.insert('nightActions', {
           gameId,
           nightNumber,
           actorPlayerId: pi._id,
-          actionType: 'pi_check',
-          targetPlayerId: target._id,
-          result: { team: result },
+          actionType: 'pi_skip',
           resolvedAt: now,
         });
       }
@@ -1274,6 +1273,14 @@ async function resolveMorning(
       nightFloorEndsAt: undefined,
     });
     await recordWinIfReached(ctx, gameId);
+    await postDawnReport(ctx, gameId);
+    // If the night's deaths ended the game, post the WIN banner and jump
+    // straight to the end-game screen (behind the chat) — no morning dwell.
+    const afterWin = await ctx.db.get(gameId);
+    if (afterWin?.winner && afterWin.mode === 'remote') {
+      await postWinBanner(ctx, afterWin);
+      await ctx.db.patch(gameId, { phase: 'ended', endedAt: Date.now() });
+    }
     return;
   }
   await ctx.db.patch(gameId, {
@@ -1286,8 +1293,56 @@ async function resolveMorning(
     triggersFollowUp: 'day',
   });
   await enqueueTriggersForDeaths(ctx, gameId, hunterDeaths);
+  await postDawnReport(ctx, gameId);
   // Don't recordWinIfReached yet — the triggers may shift the count
   // (Hunter cascade) before the game is officially over.
+}
+
+/**
+ * Remote-mode only: post the dawn "night report" as a system message to the
+ * village chat, so the moderator-style announcement lands in the room rather
+ * than (only) on the morning reveal screen. Mirrors morningView's death source
+ * — the night's `death` rows mapped to player names — so the phrasing stays
+ * cloak-consistent (names only, no role identities). No-op for local games.
+ */
+async function postDawnReport(ctx: MutationCtx, gameId: Id<'games'>) {
+  const game = await ctx.db.get(gameId);
+  if (!game || game.mode !== 'remote') return;
+
+  const deathActions = await ctx.db
+    .query('nightActions')
+    .withIndex('by_game_night', q =>
+      q.eq('gameId', gameId).eq('nightNumber', game.nightNumber),
+    )
+    .filter(q => q.eq(q.field('actionType'), 'death'))
+    .collect();
+
+  const eliminated: { name: string; id: string }[] = [];
+  for (const a of deathActions) {
+    if (!a.targetPlayerId) continue;
+    const p = await ctx.db.get(a.targetPlayerId);
+    if (p) eliminated.push({ name: p.name, id: p._id });
+  }
+
+  const dayLabel = game.dayNumber + 1;
+  await ctx.db.insert('messages', {
+    gameId,
+    channel: 'village',
+    authorName: 'MODERATOR',
+    body: '',
+    phaseLabel: `Day ${dayLabel}`,
+    sentAt: Date.now(),
+    system: true,
+    dawnReport: { dayLabel, eliminated },
+  });
+
+  // Remote autopilot: let the report sit for a few seconds, then auto-advance
+  // out of morning (no host BEGIN DAY tap).
+  await ctx.scheduler.runAfter(
+    MORNING_READ_MS,
+    internal.night.autoBeginDay,
+    { gameId },
+  );
 }
 
 /**
@@ -2065,12 +2120,47 @@ function randomNightFloorMs(): number {
 
 function getActiveStepEntries(
   game: Doc<'games'>,
-): { step: NightStep; endsAt: number }[] {
-  const out: { step: NightStep; endsAt: number }[] = [];
+): { step: NightStep; endsAt: number; decisionEndsAt?: number }[] {
+  const out: { step: NightStep; endsAt: number; decisionEndsAt?: number }[] = [];
   for (const e of game.nightActiveSteps ?? []) {
-    if (isNightStep(e.step)) out.push({ step: e.step, endsAt: e.endsAt });
+    if (isNightStep(e.step))
+      out.push({ step: e.step, endsAt: e.endsAt, decisionEndsAt: e.decisionEndsAt });
   }
   return out;
+}
+
+/**
+ * The pending NIGHT ACTIONS decision deadline for `player`, or null if they
+ * have no active picker step awaiting their decision (or already acted).
+ * Used by chat.ts to show the night decision countdown in the chat header.
+ */
+export async function playerNightDecisionEndsAt(
+  ctx: QueryCtx | MutationCtx,
+  game: Doc<'games'>,
+  player: Doc<'players'>,
+): Promise<number | null> {
+  if (game.phase !== 'night') return null;
+  const active = getActiveStepEntries(game).filter(
+    e => e.decisionEndsAt != null,
+  );
+  if (active.length === 0) return null;
+  const myActions = await ctx.db
+    .query('nightActions')
+    .withIndex('by_game_night', q =>
+      q.eq('gameId', game._id).eq('nightNumber', game.nightNumber),
+    )
+    .collect();
+  if (myActions.some(a => a.actorPlayerId === player._id)) return null; // acted
+  const allPlayers = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', game._id))
+    .collect();
+  const alive = allPlayers.filter(p => p.alive);
+  for (const e of active) {
+    const actors = activePlayersForStep(e.step, alive, game.nightNumber);
+    if (actors.some(a => a._id === player._id)) return e.decisionEndsAt ?? null;
+  }
+  return null;
 }
 
 function getCompletedStepSet(game: Doc<'games'>): Set<NightStep> {
@@ -2186,7 +2276,21 @@ export async function enterStep(
   if (isStepActive(game, step)) return;
   if (getCompletedStepSet(game).has(step)) return;
 
-  const dwellMs = randomDwellMs();
+  let dwellMs = randomDwellMs();
+  // Reveal-only conversion steps exist to give a converted player a beat to
+  // read their reveal. If the role that drives them isn't even in this game,
+  // there's nothing to reveal and nobody to cloak — skip the dwell so the
+  // night doesn't stall on a "village awaits dawn" screen that concerns no
+  // one (e.g. straight to the wolves at nightfall).
+  if (
+    (step === 'doppelganger_dawn' || step === 'doppelganger_dusk') &&
+    !game.selectedRoles.includes('Doppelganger')
+  ) {
+    dwellMs = 0;
+  }
+  if (step === 'cursed_conversion' && !game.selectedRoles.includes('Cursed')) {
+    dwellMs = 0;
+  }
   const endsAt = Date.now() + dwellMs;
   const active = getActiveStepEntries(game);
   active.push({ step, endsAt });
@@ -2284,6 +2388,30 @@ export async function enterStep(
     gameId,
     expectedStep: step,
   });
+
+  // Anti-hang decision timer for human actors. Wolves run their own shot clock
+  // (armWolfShotClock); every other step gets the NIGHT ACTIONS timer, after
+  // which `nightActionTimeout` auto-resolves anyone who hasn't decided (random
+  // for can't-skip roles, skip for one-time/optional powers — see
+  // autoResolveStep). Replaces the old host SKIP AHEAD.
+  if (step !== 'wolves' && actors.some(a => !isBotName(a.name))) {
+    const cfg = dayConfigOf(game);
+    const decisionMs = cfg.nightActionSec * 1000;
+    const decisionEndsAt = Date.now() + decisionMs;
+    // Stamp the deadline on the step so the actor sees a visible countdown.
+    const fresh = await ctx.db.get(gameId);
+    if (fresh) {
+      const updated = getActiveStepEntries(fresh).map(e =>
+        e.step === step ? { ...e, decisionEndsAt } : e,
+      );
+      await ctx.db.patch(gameId, { nightActiveSteps: updated });
+    }
+    await ctx.scheduler.runAfter(
+      decisionMs,
+      internal.night.nightActionTimeout,
+      { gameId, expectedStep: step, nightNumber: game.nightNumber },
+    );
+  }
 }
 
 async function completeStep(
@@ -2343,6 +2471,54 @@ async function maybeAdvanceStep(
   await completeStep(ctx, gameId, step);
 }
 
+// Anti-hang: when the NIGHT ACTIONS timer expires for a step, auto-resolve any
+// human actor who hasn't decided (via autoResolveStep — random for can't-skip
+// roles, skip for one-time/optional powers), then advance. Replaces SKIP AHEAD.
+export const nightActionTimeout = internalMutation({
+  args: {
+    gameId: v.id('games'),
+    expectedStep: v.string(),
+    nightNumber: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game || game.phase !== 'night') return;
+    if (game.nightNumber !== args.nightNumber) return;
+    if (!isNightStep(args.expectedStep)) return;
+    const step = args.expectedStep;
+    if (!isStepActive(game, step)) return; // already completed
+
+    const players = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+    const alive = players.filter(p => p.alive);
+    const actors = activePlayersForStep(step, alive, game.nightNumber);
+
+    // Human actors with no recorded action this night = laggards. (Each non-
+    // wolf actor records exactly one row under their own actorPlayerId.)
+    const nightActions = await ctx.db
+      .query('nightActions')
+      .withIndex('by_game_night', q =>
+        q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
+      )
+      .collect();
+    const acted = new Set(
+      nightActions.map(a => a.actorPlayerId).filter(Boolean) as Id<'players'>[],
+    );
+    const laggards = actors.filter(
+      a => !isBotName(a.name) && !acted.has(a._id),
+    );
+    if (laggards.length > 0) {
+      await autoResolveStep(ctx, args.gameId, step, laggards, alive, game.nightNumber);
+    }
+    // Try to advance — completes now if the dwell has elapsed, otherwise the
+    // existing dwell tick finishes it (preserving any acting player's reading
+    // window).
+    await maybeAdvanceStep(ctx, args.gameId, step);
+  },
+});
+
 /**
  * Removes `pendingDoppelgangerReveal` from every alive player whose phase
  * matches the just-completed reveal step. Called from completeStep when
@@ -2393,7 +2569,7 @@ async function ensureReadingWindow(
   if (idx < 0) return; // not currently active
   const minEndsAt = Date.now() + REVEAL_WINDOW_MS;
   if (active[idx].endsAt >= minEndsAt) return;
-  active[idx] = { step, endsAt: minEndsAt };
+  active[idx] = { ...active[idx], endsAt: minEndsAt };
   await ctx.db.patch(gameId, { nightActiveSteps: active });
   await ctx.scheduler.runAfter(REVEAL_WINDOW_MS, internal.night.dwellTick, {
     gameId,
@@ -4501,7 +4677,7 @@ export const refreshStep = mutation({
     const dwellMs = randomDwellMs();
     const newEndsAt = Date.now() + dwellMs;
     const freshActive = getActiveStepEntries(game).map(e =>
-      e.step === step ? { step, endsAt: newEndsAt } : e,
+      e.step === step ? { ...e, endsAt: newEndsAt } : e,
     );
     await ctx.db.patch(args.gameId, { nightActiveSteps: freshActive });
 
@@ -4610,31 +4786,38 @@ export const beginDay = mutation({
     if (game.phase !== 'morning') throw new Error('Not currently in morning.');
 
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
+    await applyBeginDay(ctx, args.gameId);
+  },
+});
 
-    // If a winner was recorded during morning resolution, jump to the
-    // end-game screen instead of starting the next day.
-    if (game.winner) {
-      await ctx.db.patch(args.gameId, {
-        phase: 'ended',
-        endedAt: Date.now(),
-      });
-      return;
-    }
+// Morning → next phase. Shared by the host's BEGIN DAY and the remote
+// autopilot (autoBeginDay). Game-over → ended; pending Hunter/HW triggers →
+// triggers phase; otherwise → next day.
+async function applyBeginDay(ctx: MutationCtx, gameId: Id<'games'>) {
+  const game = await ctx.db.get(gameId);
+  if (!game || game.phase !== 'morning') return;
 
-    // Case B from resolveMorning: morning was shown, but death-trigger
-    // queue is still pending. Route through the 'triggers' phase first.
-    // Day starts when the queue empties (see finalizeTriggerPhase).
-    if ((game.pendingDeathTriggers?.length ?? 0) > 0) {
-      await ctx.db.patch(args.gameId, { phase: 'triggers' });
-      await processTriggerQueue(ctx, args.gameId);
-      return;
-    }
+  if (game.winner) {
+    await ctx.db.patch(gameId, { phase: 'ended', endedAt: Date.now() });
+    return;
+  }
+  if ((game.pendingDeathTriggers?.length ?? 0) > 0) {
+    await ctx.db.patch(gameId, { phase: 'triggers' });
+    await processTriggerQueue(ctx, gameId);
+    return;
+  }
+  await ctx.db.patch(gameId, { phase: 'day', dayNumber: game.dayNumber + 1 });
+  await initializeDayClock(ctx, gameId);
+}
 
-    await ctx.db.patch(args.gameId, {
-      phase: 'day',
-      dayNumber: game.dayNumber + 1,
-    });
-    await initializeDayClock(ctx, args.gameId);
+// Remote autopilot: morning auto-advances ~5s after the night report posts
+// (scheduled in postDawnReport) — no host BEGIN DAY tap needed.
+export const autoBeginDay = internalMutation({
+  args: { gameId: v.id('games') },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game || game.mode !== 'remote' || game.phase !== 'morning') return;
+    await applyBeginDay(ctx, args.gameId);
   },
 });
 
@@ -6251,6 +6434,8 @@ export const nightView = query({
       step: e.step,
       endsAt: e.endsAt,
       skipEligibleAt: e.endsAt + SKIP_STALL_THRESHOLD_MS,
+      // NIGHT ACTIONS decision deadline (null on wolves / no-human steps).
+      decisionEndsAt: e.decisionEndsAt ?? null,
     }));
 
     // Header label: only meaningful when exactly one step is active (the
@@ -6283,6 +6468,9 @@ export const nightView = query({
         seatPosition: me.seatPosition,
       },
       myActivePickerStep,
+      // NIGHT ACTIONS decision deadline for this viewer (null once they've
+      // acted or if they have nothing pending) → visible picker countdown.
+      myDecisionEndsAt: await playerNightDecisionEndsAt(ctx, game, me),
       isMyStep,
       stepLabel,
       wolfState,
@@ -6376,6 +6564,7 @@ export const morningView = query({
       game: {
         _id: game._id,
         phase: game.phase,
+        mode: game.mode ?? 'local',
         nightNumber: game.nightNumber,
         dayNumber: game.dayNumber,
         winner: game.winner ?? null,

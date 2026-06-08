@@ -94,6 +94,10 @@ export default function MorningScreen() {
 
   const { game, me, deaths, masonRevealState } = view;
   const gameOver = !!game.winner;
+  // Remote games surface the night report in the village chat (docked below),
+  // so the dedicated reveal is replaced by a pointer to it. Local games keep
+  // the big reveal for the host to read aloud.
+  const isRemote = game.mode === 'remote';
 
   async function handleMasonAck() {
     if (!deviceClientId) return;
@@ -146,76 +150,85 @@ export default function MorningScreen() {
         />
       )}
 
-      <Animated.View
-        style={{ flex: 1, opacity: fade }}
-        className="px-6 items-center justify-center"
-      >
-        {deaths.length === 0 ? (
-          <View className="items-center">
-            <Text className="text-wolf-text text-2xl font-bold tracking-widest text-center">
-              NO ONE HAS DIED
-            </Text>
-            <Text className="text-wolf-muted text-sm text-center mt-3">
-              The village wakes safe — for now.
-            </Text>
-          </View>
-        ) : (
-          <View className="items-center" style={{ gap: 18 }}>
-            {deaths.map(d => (
-              <Text
-                key={d._id}
-                className="text-wolf-text text-2xl font-bold tracking-widest text-center"
-              >
-                {d.name.toUpperCase()} HAS BEEN ELIMINATED
-              </Text>
-            ))}
-          </View>
-        )}
+      {isRemote ? (
+        // Remote: the docked chat carries the night report, and its header bar
+        // hosts the BEGIN DAY / waiting control — so nothing renders here but a
+        // spacer that lets the chat (80% tall at morning) own the screen.
+        <View style={{ flex: 1 }} />
+      ) : (
+        <>
+          <Animated.View
+            style={{ flex: 1, opacity: fade }}
+            className="px-6 items-center justify-center"
+          >
+            {deaths.length === 0 ? (
+              <View className="items-center">
+                <Text className="text-wolf-text text-2xl font-bold tracking-widest text-center">
+                  NO ONE HAS DIED
+                </Text>
+                <Text className="text-wolf-muted text-sm text-center mt-3">
+                  The village wakes safe — for now.
+                </Text>
+              </View>
+            ) : (
+              <View className="items-center" style={{ gap: 18 }}>
+                {deaths.map(d => (
+                  <Text
+                    key={d._id}
+                    className="text-wolf-text text-2xl font-bold tracking-widest text-center"
+                  >
+                    {d.name.toUpperCase()} HAS BEEN ELIMINATED
+                  </Text>
+                ))}
+              </View>
+            )}
 
-        {gameOver && (
+            {gameOver && (
+              <View
+                className="rounded-2xl px-6 py-3 mt-12"
+                style={{
+                  backgroundColor:
+                    game.winner === 'wolf' ? '#8B1818' : '#1F4E80',
+                }}
+              >
+                <Text className="text-wolf-text text-base font-extrabold tracking-widest text-center">
+                  {game.winner === 'wolf' ? 'WOLVES WIN' : 'VILLAGE WINS'}
+                </Text>
+              </View>
+            )}
+          </Animated.View>
+
           <View
-            className="rounded-2xl px-6 py-3 mt-12"
             style={{
-              backgroundColor:
-                game.winner === 'wolf' ? '#8B1818' : '#1F4E80',
+              paddingHorizontal: 24,
+              paddingBottom: Math.max(insets.bottom, 16) + 16,
             }}
           >
-            <Text className="text-wolf-text text-base font-extrabold tracking-widest text-center">
-              {game.winner === 'wolf' ? 'WOLVES WIN' : 'VILLAGE WINS'}
-            </Text>
-          </View>
-        )}
-      </Animated.View>
-
-      <View
-        style={{
-          paddingHorizontal: 24,
-          paddingBottom: Math.max(insets.bottom, 16) + 16,
-        }}
-      >
-        {me.isHost ? (
-          <TouchableOpacity
-            onPress={handleBeginDay}
-            disabled={submitting}
-            style={{ opacity: submitting ? 0.4 : 1 }}
-            className="bg-wolf-accent rounded-xl py-5 items-center"
-          >
-            {submitting ? (
-              <ActivityIndicator color="#0F0F14" />
+            {me.isHost ? (
+              <TouchableOpacity
+                onPress={handleBeginDay}
+                disabled={submitting}
+                style={{ opacity: submitting ? 0.4 : 1 }}
+                className="bg-wolf-accent rounded-xl py-5 items-center"
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#0F0F14" />
+                ) : (
+                  <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                    {gameOver ? 'VIEW RESULTS' : 'BEGIN DAY'}
+                  </Text>
+                )}
+              </TouchableOpacity>
             ) : (
-              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-                {gameOver ? 'VIEW RESULTS' : 'BEGIN DAY'}
+              <Text className="text-wolf-muted text-xs tracking-widest text-center">
+                {gameOver
+                  ? 'WAITING FOR HOST TO REVEAL'
+                  : 'WAITING FOR HOST TO BEGIN DAY'}
               </Text>
             )}
-          </TouchableOpacity>
-        ) : (
-          <Text className="text-wolf-muted text-xs tracking-widest text-center">
-            {gameOver
-              ? 'WAITING FOR HOST TO REVEAL'
-              : 'WAITING FOR HOST TO BEGIN DAY'}
-          </Text>
-        )}
-      </View>
+          </View>
+        </>
+      )}
     </SafeAreaView>
   );
 }

@@ -7,7 +7,6 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useQuery } from 'convex/react';
@@ -388,7 +387,6 @@ export default function EndGameScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
   const deviceClientId = useDeviceId();
-  const insets = useSafeAreaInsets();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const toggleExpanded = (id: string) =>
     setExpandedIds(prev => {
@@ -633,23 +631,6 @@ export default function EndGameScreen() {
           })}
         </View>
       </ScrollView>
-
-      <View
-        style={{
-          paddingHorizontal: 24,
-          paddingBottom: Math.max(insets.bottom, 16) + 16,
-        }}
-      >
-        <TouchableOpacity
-          onPress={() => navigation.popToTop()}
-          className="bg-wolf-accent rounded-xl py-5 items-center"
-          activeOpacity={0.75}
-        >
-          <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-            HOME
-          </Text>
-        </TouchableOpacity>
-      </View>
     </SafeAreaView>
   );
 }

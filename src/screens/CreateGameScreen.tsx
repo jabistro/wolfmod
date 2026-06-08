@@ -33,6 +33,7 @@ export default function CreateGameScreen() {
 
   const [name, setName] = useState('');
   const [playerCount, setPlayerCount] = useState(9);
+  const [mode, setMode] = useState<'local' | 'remote'>('local');
   const [submitting, setSubmitting] = useState(false);
 
   // Seed once from the saved name when it loads, without clobbering edits.
@@ -56,6 +57,7 @@ export default function CreateGameScreen() {
         playerCount,
         hostName: name.trim(),
         deviceClientId,
+        mode,
         ...timerDefaults,
       });
       setPlayerName(name.trim());
@@ -124,6 +126,57 @@ export default function CreateGameScreen() {
               >
                 <Text className="text-wolf-text text-3xl">+</Text>
               </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={{ gap: 12 }}>
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center">
+              HOW ARE YOU PLAYING?
+            </Text>
+            <View className="flex-row" style={{ gap: 12 }}>
+              {(
+                [
+                  {
+                    key: 'local' as const,
+                    title: 'LOCAL TABLE',
+                    sub: 'Same room',
+                  },
+                  {
+                    key: 'remote' as const,
+                    title: 'REMOTE GAME',
+                    sub: 'Online + chat',
+                  },
+                ]
+              ).map(opt => {
+                const selected = mode === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    onPress={() => setMode(opt.key)}
+                    activeOpacity={0.8}
+                    className={`flex-1 items-center rounded-xl py-4 border ${
+                      selected
+                        ? 'bg-wolf-accent border-wolf-accent'
+                        : 'bg-wolf-card border-wolf-surface'
+                    }`}
+                  >
+                    <Text
+                      className={`text-sm font-extrabold tracking-widest ${
+                        selected ? 'text-wolf-bg' : 'text-wolf-text'
+                      }`}
+                    >
+                      {opt.title}
+                    </Text>
+                    <Text
+                      className={`text-[11px] mt-1 tracking-wide ${
+                        selected ? 'text-wolf-bg/70' : 'text-wolf-muted'
+                      }`}
+                    >
+                      {opt.sub}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 

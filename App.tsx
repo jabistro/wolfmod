@@ -1,12 +1,12 @@
 import './global.css';
-import { useState } from 'react';
+import { useState, type ComponentType } from 'react';
 import { LogBox } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme, useRoute } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ConvexProvider, ConvexReactClient } from 'convex/react';
+import { ConvexProvider, ConvexReactClient, useQuery } from 'convex/react';
 
 // Convex's client always logs mutation/query failures via console.error, which surfaces
 // as a dev-only LogBox toast even when the screen has already handled the error inline.
@@ -30,6 +30,10 @@ import MorningScreen from './src/screens/MorningScreen';
 import DayScreen from './src/screens/DayScreen';
 import EndGameScreen from './src/screens/EndGameScreen';
 import { AlertHost } from './src/components/ThemedAlert';
+import RemoteGameLayout from './src/components/RemoteGameLayout';
+import { useDeviceId } from './src/hooks/useDeviceId';
+import { api } from './convex/_generated/api';
+import type { Id } from './convex/_generated/dataModel';
 import { ThemeProvider } from './src/contexts/ThemeContext';
 import { TimerDefaultsProvider } from './src/contexts/TimerDefaultsContext';
 import { PlayerNameProvider } from './src/contexts/PlayerNameContext';
@@ -37,6 +41,44 @@ import { DevModeProvider } from './src/contexts/DevModeContext';
 import type { RootStackParamList } from './src/navigation/types';
 
 const Stack = createStackNavigator<RootStackParamList>();
+
+/**
+ * Navigation-level wrapper: for any in-game screen whose route carries a
+ * `gameId`, dock the remote chat pane below it (a no-op for local games —
+ * see RemoteGameLayout). Wrapping here keeps the individual screens, with
+ * their many early-return branches, completely untouched.
+ */
+function withRemoteChat<P extends object>(
+  Screen: ComponentType<P>,
+): ComponentType<P> {
+  return function RemoteChatWrapped(props: P) {
+    const route = useRoute();
+    const gameId = (route.params as { gameId?: string } | undefined)?.gameId as
+      | Id<'games'>
+      | undefined;
+    const deviceClientId = useDeviceId();
+    const mode = useQuery(api.games.gameMode, gameId ? { gameId } : 'skip');
+    if (!gameId) return <Screen {...props} />;
+    return (
+      <RemoteGameLayout
+        gameId={gameId}
+        deviceClientId={deviceClientId}
+        mode={mode ?? undefined}
+      >
+        <Screen {...props} />
+      </RemoteGameLayout>
+    );
+  };
+}
+
+// Wrapped once at module scope so the component identity is stable across
+// renders (inline wrapping would remount the screen every render).
+const LobbyWithChat = withRemoteChat(LobbyScreen);
+const NightWithChat = withRemoteChat(NightScreen);
+const TriggersWithChat = withRemoteChat(TriggersScreen);
+const MorningWithChat = withRemoteChat(MorningScreen);
+const DayWithChat = withRemoteChat(DayScreen);
+const EndGameWithChat = withRemoteChat(EndGameScreen);
 
 const AppTheme = {
   ...DefaultTheme,
@@ -82,13 +124,13 @@ export default function App() {
               <Stack.Screen name="PlayMenu" component={PlayMenuScreen} />
               <Stack.Screen name="CreateGame" component={CreateGameScreen} />
               <Stack.Screen name="JoinGame" component={JoinGameScreen} />
-              <Stack.Screen name="Lobby" component={LobbyScreen} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Lobby" component={LobbyWithChat} options={{ gestureEnabled: false }} />
               <Stack.Screen name="RoleReveal" component={RoleRevealScreen} options={{ gestureEnabled: false }} />
-              <Stack.Screen name="Night" component={NightScreen} options={{ gestureEnabled: false }} />
-              <Stack.Screen name="Triggers" component={TriggersScreen} options={{ gestureEnabled: false }} />
-              <Stack.Screen name="Morning" component={MorningScreen} options={{ gestureEnabled: false }} />
-              <Stack.Screen name="Day" component={DayScreen} options={{ gestureEnabled: false }} />
-              <Stack.Screen name="EndGame" component={EndGameScreen} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Night" component={NightWithChat} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Triggers" component={TriggersWithChat} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Morning" component={MorningWithChat} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Day" component={DayWithChat} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="EndGame" component={EndGameWithChat} options={{ gestureEnabled: false }} />
             </Stack.Navigator>
             <StatusBar style="light" />
           </NavigationContainer>

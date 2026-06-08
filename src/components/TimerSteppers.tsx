@@ -6,8 +6,10 @@ export type TimerConfigValues = {
   accusationSec: number;
   defenseSec: number;
   voteTimerSec: number;
+  preVoteSec: number;
   maxNominationsPerDay: number;
   wolfPickerSec: number;
+  nightActionSec: number;
 };
 
 // Keep in sync with DAY_CONFIG_DEFAULTS in convex/helpers.ts — these are the
@@ -17,8 +19,10 @@ export const TIMER_DEFAULTS: TimerConfigValues = {
   accusationSec: 30,
   defenseSec: 30,
   voteTimerSec: 5,
+  preVoteSec: 15,
   maxNominationsPerDay: 3,
-  wolfPickerSec: 30,
+  wolfPickerSec: 60,
+  nightActionSec: 30,
 };
 
 type StepperConfig = {
@@ -35,8 +39,10 @@ export const TIMER_STEPPERS: StepperConfig[] = [
   { key: 'accusationSec', label: 'ACCUSATION', step: 10, min: 10, isTime: true },
   { key: 'defenseSec', label: 'DEFENSE', step: 10, min: 10, isTime: true },
   { key: 'voteTimerSec', label: 'VOTE', step: 1, min: 1, isTime: false },
+  { key: 'preVoteSec', label: 'PRE-VOTE (REMOTE)', step: 5, min: 5, isTime: true },
   { key: 'maxNominationsPerDay', label: 'NOMINATIONS', step: 1, min: 1, isTime: false },
-  { key: 'wolfPickerSec', label: 'WOLF DECISION', step: 10, min: 10, max: 60, isTime: true },
+  { key: 'wolfPickerSec', label: 'WOLF DECISION', step: 10, min: 10, max: 180, isTime: true },
+  { key: 'nightActionSec', label: 'NIGHT ACTIONS', step: 10, min: 10, max: 180, isTime: true },
 ];
 
 export function formatTimerValue(seconds: number): string {

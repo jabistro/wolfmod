@@ -69,6 +69,9 @@ export const createGame = mutation({
     playerCount: v.number(),
     hostName: v.string(),
     deviceClientId: v.string(),
+    // 'local' (in-room, default) or 'remote' (players apart, in-app chat).
+    // Chosen on the Play menu; falls back to 'local' if omitted.
+    mode: v.optional(v.union(v.literal('local'), v.literal('remote'))),
     // Per-host timer defaults, persisted locally on the host's device and passed
     // in at create time. Omitted fields fall back to DAY_CONFIG_DEFAULTS via
     // dayConfigOf, so this is purely a seed — the host can still retune in-game.
@@ -76,8 +79,10 @@ export const createGame = mutation({
     accusationSec: v.optional(v.number()),
     defenseSec: v.optional(v.number()),
     voteTimerSec: v.optional(v.number()),
+    preVoteSec: v.optional(v.number()),
     maxNominationsPerDay: v.optional(v.number()),
     wolfPickerSec: v.optional(v.number()),
+    nightActionSec: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     if (args.playerCount < MIN_PLAYERS || args.playerCount > MAX_PLAYERS) {
@@ -100,13 +105,18 @@ export const createGame = mutation({
       timerSeed.defenseSec = Math.max(5, args.defenseSec);
     if (args.voteTimerSec !== undefined)
       timerSeed.voteTimerSec = Math.max(1, args.voteTimerSec);
+    if (args.preVoteSec !== undefined)
+      timerSeed.preVoteSec = Math.max(5, args.preVoteSec);
     if (args.maxNominationsPerDay !== undefined)
       timerSeed.maxNominationsPerDay = Math.max(1, args.maxNominationsPerDay);
     if (args.wolfPickerSec !== undefined)
-      timerSeed.wolfPickerSec = Math.min(60, Math.max(10, args.wolfPickerSec));
+      timerSeed.wolfPickerSec = Math.min(180, Math.max(10, args.wolfPickerSec));
+    if (args.nightActionSec !== undefined)
+      timerSeed.nightActionSec = Math.min(180, Math.max(10, args.nightActionSec));
 
     const gameId = await ctx.db.insert('games', {
       roomCode,
+      mode: args.mode ?? 'local',
       playerCount: args.playerCount,
       phase: 'lobby',
       nightNumber: 0,
@@ -650,6 +660,19 @@ export const startGame = mutation({
       });
     }
 
+    // Wipe pre-game lobby chatter so it doesn't clutter the in-game village
+    // log. Batched delete (Convex mutations have read/write limits); lobby
+    // message counts are tiny, but loop defensively.
+    for (;;) {
+      const batch = await ctx.db
+        .query('messages')
+        .withIndex('by_game_channel', q => q.eq('gameId', args.gameId))
+        .take(100);
+      if (batch.length === 0) break;
+      for (const m of batch) await ctx.db.delete(m._id);
+      if (batch.length < 100) break;
+    }
+
     await ctx.db.patch(args.gameId, { phase: 'reveal' });
   },
 });
@@ -682,11 +705,22 @@ export const confirmRoleReveal = mutation({
     }
 
     await ctx.db.patch(me._id, { revealedAt: Date.now() });
-    // Phase advances to 'day' only when the host explicitly taps BEGIN DAY 1
-    // (see `beginDayFromReveal`). Auto-transitioning would start the day
-    // clock — and possibly night actions later — before everyone has put
-    // their phones face-down. Host-gating gives the table a clean "ready?"
-    // beat.
+
+    // Local games host-gate the reveal → day transition (the host taps BEGIN
+    // DAY 1 once everyone's phone is face-down). Remote games have no such
+    // concern, so the moment the last player acks, Day 1 auto-starts.
+    if ((game.mode ?? 'local') === 'remote') {
+      const players = await ctx.db
+        .query('players')
+        .withIndex('by_game', q => q.eq('gameId', args.gameId))
+        .collect();
+      const allReady = players.every(p =>
+        p._id === me._id ? true : p.revealedAt !== undefined,
+      );
+      if (allReady) {
+        await startDayOne(ctx, args.gameId);
+      }
+    }
   },
 });
 
@@ -805,10 +839,30 @@ export const beginDayFromReveal = mutation({
     if (stillPending) {
       throw new Error('Not all players have confirmed their role yet.');
     }
-    await ctx.db.patch(args.gameId, { phase: 'day', dayNumber: 1 });
-    await initializeDayClock(ctx, args.gameId);
+    await startDayOne(ctx, args.gameId);
   },
 });
+
+// Reveal → Day 1 transition. Shared by the host's BEGIN DAY 1 button and the
+// remote auto-start (fired from confirmRoleReveal when the last player acks).
+async function startDayOne(ctx: MutationCtx, gameId: Id<'games'>) {
+  const game = await ctx.db.get(gameId);
+  if (!game || game.phase !== 'reveal') return;
+  await ctx.db.patch(gameId, { phase: 'day', dayNumber: 1 });
+  await initializeDayClock(ctx, gameId);
+  // Remote: kick the game off in chat — the clock is already running.
+  if ((game.mode ?? 'local') === 'remote') {
+    await ctx.db.insert('messages', {
+      gameId,
+      channel: 'village',
+      authorName: 'MODERATOR',
+      body: 'The timer has started. GAME ON!',
+      phaseLabel: 'Day 1',
+      sentAt: Date.now(),
+      system: true,
+    });
+  }
+}
 
 export const revealView = query({
   args: {
@@ -898,6 +952,7 @@ export const revealView = query({
       game: {
         _id: game._id,
         phase: game.phase,
+        mode: game.mode ?? 'local',
         playerCount: game.playerCount,
       },
       me: {
@@ -1098,11 +1153,14 @@ export const lobbyView = query({
         defenseSec: game.defenseSec ?? DAY_CONFIG_DEFAULTS.defenseSec,
         voteTimerSec:
           game.voteTimerSec ?? DAY_CONFIG_DEFAULTS.voteTimerSec,
+        preVoteSec: game.preVoteSec ?? DAY_CONFIG_DEFAULTS.preVoteSec,
         maxNominationsPerDay:
           game.maxNominationsPerDay ??
           DAY_CONFIG_DEFAULTS.maxNominationsPerDay,
         wolfPickerSec:
           game.wolfPickerSec ?? DAY_CONFIG_DEFAULTS.wolfPickerSec,
+        nightActionSec:
+          game.nightActionSec ?? DAY_CONFIG_DEFAULTS.nightActionSec,
         devRoleAssignments: game.devRoleAssignments ?? [],
       },
       players: players.map(p => ({
@@ -1728,6 +1786,21 @@ export const endGameView = query({
           eliminationLabel: labelFor(deathByPlayer.get(p._id)),
         })),
     };
+  },
+});
+
+/**
+ * Lightweight play-mode lookup. Used by the navigation-level remote-chat
+ * wrapper to decide whether to dock the chat pane, without pulling a whole
+ * phase-specific game view. Returns 'local' when the field is absent (legacy
+ * games) and null if the game is gone.
+ */
+export const gameMode = query({
+  args: { gameId: v.id('games') },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) return null;
+    return game.mode ?? 'local';
   },
 });
 

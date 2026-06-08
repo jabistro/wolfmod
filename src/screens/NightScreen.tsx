@@ -52,8 +52,6 @@ export default function NightScreen() {
       : 'skip',
   );
 
-  const forceAdvance = useMutation(api.night.forceAdvanceStep);
-  const refreshStep = useMutation(api.night.refreshStep);
   const submitMasonAck = useMutation(api.night.submitMasonAck);
   const [ackingMason, setAckingMason] = useState(false);
 
@@ -124,6 +122,7 @@ export default function NightScreen() {
     isMyStep,
     stepLabel,
     myActivePickerStep,
+    myDecisionEndsAt,
     wolfState,
     sasquatchReveal,
     seerHistory,
@@ -415,6 +414,9 @@ export default function NightScreen() {
           <NightmareBlockedView />
         ) : (
           <>
+            {myDecisionEndsAt != null && (
+              <NightDecisionCountdown endsAt={myDecisionEndsAt} />
+            )}
             {pickerTree}
             {!isMyStep && !cursedConversionState && !doppelgangerRevealState && (
               <WaitingView role={me.role} />
@@ -442,106 +444,7 @@ export default function NightScreen() {
         submitting={ackingMason}
       />
 
-      {(() => {
-        if (!me.alive || !me.isHost) return null;
-        const stalled = game.activeSteps.filter(s => now > s.skipEligibleAt);
-        if (stalled.length === 0) return null;
-        return (
-          <HostStallOverride
-            onRefresh={async () => {
-              for (const s of stalled) {
-                try {
-                  await refreshStep({
-                    gameId: game._id,
-                    callerDeviceClientId: deviceClientId,
-                    expectedStep: s.step,
-                  });
-                } catch (e) {
-                  showAlert(
-                    'Could not refresh',
-                    e instanceof Error ? e.message : String(e),
-                  );
-                  return;
-                }
-              }
-            }}
-            onSkip={async () => {
-              for (const s of stalled) {
-                try {
-                  await forceAdvance({
-                    gameId: game._id,
-                    callerDeviceClientId: deviceClientId,
-                    expectedStep: s.step,
-                  });
-                } catch (e) {
-                  showAlert(
-                    'Could not skip',
-                    e instanceof Error ? e.message : String(e),
-                  );
-                  return;
-                }
-              }
-            }}
-          />
-        );
-      })()}
     </SafeAreaView>
-  );
-}
-
-// ───── Host stall override ─────────────────────────────────────────────────
-//
-// Surfaces only to the host, only after the current step has stalled past
-// `skipEligibleAt`. Two paths: REFRESH wipes the step's recorded actions and
-// resets the dwell so the stuck actor gets a clean second chance; SKIP just
-// advances without taking any action on anyone's behalf. Intentionally
-// generic — never mentions the role or player holding things up, so a host
-// who is also a player can't infer who has which role.
-
-function HostStallOverride({
-  onRefresh,
-  onSkip,
-}: {
-  onRefresh: () => void;
-  onSkip: () => void;
-}) {
-  const insets = useSafeAreaInsets();
-  return (
-    <View
-      style={{
-        position: 'absolute',
-        left: 16,
-        right: 16,
-        bottom: Math.max(insets.bottom, 12) + 12,
-      }}
-    >
-      <View className="bg-wolf-card rounded-xl px-4 py-3 mb-2">
-        <Text className="text-wolf-muted text-xs text-center">
-          This step is taking longer than usual.
-        </Text>
-      </View>
-      <View className="flex-row" style={{ gap: 10 }}>
-        <TouchableOpacity
-          onPress={onRefresh}
-          activeOpacity={0.75}
-          className="bg-wolf-card rounded-xl py-4 items-center flex-1"
-          style={{ borderWidth: 1, borderColor: '#D4A017' }}
-        >
-          <Text className="text-wolf-accent text-base font-extrabold tracking-widest">
-            REFRESH
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onSkip}
-          activeOpacity={0.75}
-          className="bg-wolf-accent rounded-xl py-4 items-center flex-1"
-        >
-          <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-            SKIP AHEAD
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </View>
   );
 }
 
@@ -1159,9 +1062,23 @@ function WolvesPicker({
           </View>
         )}
 
-        <Text className="text-wolf-text text-base text-center mt-2 mb-4">
+        <Text className="text-wolf-text text-base text-center mt-2 mb-3">
           {statusText}
         </Text>
+
+        {/* Shot clock — kept in this top region (not the ring center) so it
+            stays visible when the remote chat is expanded over the picker. */}
+        {showCountdown && (
+          <View
+            className="flex-row items-center justify-center mb-4"
+            style={{ gap: 10 }}
+          >
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+              TIME LEFT
+            </Text>
+            <WolfShotClock endsAt={pickerEndsAt!} size={32} />
+          </View>
+        )}
 
         {/* Wolf-pack awareness panel */}
         <View className="bg-wolf-card rounded-xl px-4 py-3 mb-5">
@@ -1215,9 +1132,6 @@ function WolvesPicker({
             pendingTrialDwellEndsAt={
               showPendingFill ? pendingKill!.dwellEndsAt : null
             }
-            centerOverlay={
-              showCountdown ? <WolfShotClock endsAt={pickerEndsAt!} /> : null
-            }
             onPress={
               !submitting && !consensus && !allKillsLocked && !pendingKill
                 ? p => handleVote(p._id)
@@ -1230,13 +1144,13 @@ function WolvesPicker({
   );
 }
 
-// Big countdown in the center of the seating circle. >10 s: solid white.
-// 1–10 s: red on even seconds (10, 8, 6, 4, 2) and white on odd seconds
-// (9, 7, 5, 3, 1) — one swap per whole second, paced with the digit.
-// 0 s: solid red (the server's `wolfPickerTimeoutTick` is firing right
-// then; pendingKill will land on the next query tick and the overlay
-// disappears).
-function WolfShotClock({ endsAt }: { endsAt: number }) {
+// Wolves' shot-clock countdown. >10 s: solid white. 1–10 s: red on even
+// seconds (10, 8, 6, 4, 2) and white on odd seconds (9, 7, 5, 3, 1) — one
+// swap per whole second, paced with the digit. 0 s: solid red (the server's
+// `wolfPickerTimeoutTick` is firing right then; pendingKill lands on the next
+// query tick and the clock disappears). Rendered in the top region (not the
+// ring center) so it stays visible when the remote chat covers the picker.
+function WolfShotClock({ endsAt, size = 56 }: { endsAt: number; size?: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 150);
@@ -1251,7 +1165,7 @@ function WolfShotClock({ endsAt }: { endsAt: number }) {
     <Text
       style={{
         color,
-        fontSize: 56,
+        fontSize: size,
         fontWeight: '800',
         fontVariant: ['tabular-nums'],
       }}
@@ -4292,6 +4206,35 @@ const NIGHT_WHISPERS = [
   "DON'T PEEK. IT WILL BE WORSE IF YOU DO.",
   'EVERY SHADOW HIDES A SECRET.',
 ];
+
+// Visible NIGHT ACTIONS decision countdown shown above the active picker, so
+// the acting player knows their clock. White > 10s; flashes red/white per
+// second in the final 10s; lands on red at 0 (then the engine auto-resolves).
+function NightDecisionCountdown({ endsAt }: { endsAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, []);
+  const sec = Math.max(0, Math.ceil((endsAt - now) / 1000));
+  const low = sec <= 10;
+  const color =
+    sec === 0 || (low && sec % 2 === 0) ? '#B03A2E' : low ? '#F0EDE8' : '#8A8590';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return (
+    <View className="flex-row items-center justify-center" style={{ gap: 8, marginTop: 4, marginBottom: 2 }}>
+      <Text className="text-wolf-muted text-[11px] font-bold tracking-widest">
+        TIME TO DECIDE
+      </Text>
+      <Text
+        style={{ color, fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] }}
+      >
+        {m}:{String(s).padStart(2, '0')}
+      </Text>
+    </View>
+  );
+}
 
 function WaitingView({ role }: { role?: string }) {
   const [lineIndex, setLineIndex] = useState(() =>

@@ -59,20 +59,33 @@ export default function RoleRevealScreen() {
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
+  // Remote games have no prying eyes, so the press-and-hold gesture is
+  // pointless: auto-reveal the card with a gentle fade and let the player just
+  // tap the ack button. Local games keep HOLD TO REVEAL.
+  const isRemoteReveal = reveal?.game.mode === 'remote';
+  useEffect(() => {
+    if (isRemoteReveal && !revealed) {
+      setRevealed(true);
+      setHasSeenRole(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRemoteReveal]);
+
   // Fade the role card in every time `revealed` flips true (not just the first
   // mount). Resetting to 0 first guarantees the fade actually plays on repeat
   // reveals — without the explicit setValue, the Animated.Value would already
   // be at 1 from the previous reveal and the second reveal would pop in.
+  // Slower in remote for a deliberate "card emerging" moment.
   useEffect(() => {
     if (revealed) {
       fadeAnim.setValue(0);
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 320,
+        duration: isRemoteReveal ? 1400 : 320,
         useNativeDriver: true,
       }).start();
     }
-  }, [revealed, fadeAnim]);
+  }, [revealed, fadeAnim, isRemoteReveal]);
 
   useEffect(() => {
     return () => {
@@ -639,36 +652,40 @@ export default function RoleRevealScreen() {
               <Text className="text-wolf-muted text-5xl">?</Text>
             </View>
             <Text className="text-wolf-muted text-sm text-center mt-6">
-              {hasSeenRole
-                ? 'Press and hold again to view.\nTap OK below when ready.'
-                : 'Press and hold the button below\nto reveal your role.'}
+              {isRemoteReveal
+                ? 'Revealing your role…'
+                : hasSeenRole
+                  ? 'Press and hold again to view.\nTap OK below when ready.'
+                  : 'Press and hold the button below\nto reveal your role.'}
             </Text>
           </View>
         )}
       </View>
 
-      <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
-        <Pressable
-          onPressIn={onPressIn}
-          onPressOut={onPressOut}
-          style={{
-            backgroundColor: isPressed ? '#2A2A38' : '#22222F',
-            borderRadius: 16,
-            paddingVertical: 22,
-            alignItems: 'center',
-            borderWidth: 2,
-            borderColor: isPressed ? '#D4A017' : '#5A5560',
-          }}
-        >
-          <Text className="text-wolf-text text-base font-bold tracking-widest">
-            {revealed
-              ? 'HOLDING…'
-              : isPressed
-                ? 'KEEP HOLDING…'
-                : 'HOLD TO REVEAL'}
-          </Text>
-        </Pressable>
-      </View>
+      {!isRemoteReveal && (
+        <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
+          <Pressable
+            onPressIn={onPressIn}
+            onPressOut={onPressOut}
+            style={{
+              backgroundColor: isPressed ? '#2A2A38' : '#22222F',
+              borderRadius: 16,
+              paddingVertical: 22,
+              alignItems: 'center',
+              borderWidth: 2,
+              borderColor: isPressed ? '#D4A017' : '#5A5560',
+            }}
+          >
+            <Text className="text-wolf-text text-base font-bold tracking-widest">
+              {revealed
+                ? 'HOLDING…'
+                : isPressed
+                  ? 'KEEP HOLDING…'
+                  : 'HOLD TO REVEAL'}
+            </Text>
+          </Pressable>
+        </View>
+      )}
 
       <View
         style={{

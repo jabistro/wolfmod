@@ -12,6 +12,7 @@ import {
   isBotName,
   isTriggerRole,
   applyWinIfReached,
+  postWinBanner,
   initializeDayClock,
   flagCubDeathIfApplicable,
   type TriggerRole,
@@ -327,14 +328,22 @@ async function finalizeTriggerPhase(
     // If the trigger cascade sealed a win, end the game directly rather
     // than starting a day that no one's going to play.
     const won = await applyWinIfReached(ctx, gameId);
-    if (won) return;
+    if (won) {
+      const ended = await ctx.db.get(gameId);
+      if (ended) await postWinBanner(ctx, ended);
+      return;
+    }
     await ctx.db.patch(gameId, { phase: 'day', dayNumber: game.dayNumber + 1 });
     await initializeDayClock(ctx, gameId);
     return;
   }
   // followUp === 'night': post-lynch trigger flow. End the day → next night.
   const won = await applyWinIfReached(ctx, gameId);
-  if (won) return;
+  if (won) {
+    const ended = await ctx.db.get(gameId);
+    if (ended) await postWinBanner(ctx, ended);
+    return;
+  }
   await ctx.db.patch(gameId, {
     phase: 'night',
     nightNumber: game.nightNumber + 1,

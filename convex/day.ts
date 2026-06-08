@@ -11,6 +11,7 @@ import {
   findCaller,
   requireHost,
   applyWinIfReached,
+  postWinBanner,
   isBotName,
   isTriggerRole,
   TRIGGER_ROLES,
@@ -46,6 +47,72 @@ const VOTE_GRACE_MS = 1500;
 // clock is paused for the duration, so the dwell doesn't eat day time.
 const TRIAL_CONFIRM_DWELL_MS = 3000;
 
+// Remote autopilot: how long the moderator "night is falling" message sits in
+// chat before the engine actually enters night, so the move never feels abrupt.
+const NIGHTFALL_WARNING_MS = 7000;
+
+// Remote autopilot: beat after the vote tally posts before the engine resolves
+// (resume day / warn nightfall) — lets the village read the result count.
+const RESULT_READ_MS = 4000;
+
+const isRemote = (game: Doc<'games'>) => game.mode === 'remote';
+
+/**
+ * Post a moderator (system) announcement to the village chat. Used by the
+ * remote autopilot to narrate each beat (trial steps, vote results, nightfall)
+ * the way a human moderator would. No-op for local games (no chat).
+ */
+async function postModeratorMessage(
+  ctx: MutationCtx,
+  game: Doc<'games'>,
+  body: string,
+  mentions?: { name: string; id: string }[],
+  headline?: string,
+) {
+  if (!isRemote(game)) return;
+  await ctx.db.insert('messages', {
+    gameId: game._id,
+    channel: 'village',
+    authorName: 'MODERATOR',
+    body,
+    phaseLabel: `Day ${game.dayNumber}`,
+    sentAt: Date.now(),
+    system: true,
+    ...(mentions && mentions.length ? { mentions } : {}),
+    ...(headline ? { headline } : {}),
+  });
+}
+
+/**
+ * Dev convenience: alive bots auto-vote DIES the moment the vote opens (they
+ * can't tap), excluding the nominee. Shared by the local host path
+ * (`endDefense`) and the remote autopilot (`autoAdvanceTrial`).
+ */
+async function seedBotVotes(
+  ctx: MutationCtx,
+  game: Doc<'games'>,
+  nom: NonNullable<Doc<'games'>['currentNomination']>,
+) {
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', game._id))
+    .collect();
+  const aliveBots = players.filter(
+    p => p.alive && isBotName(p.name) && p._id !== nom.nominatedPlayerId,
+  );
+  const now = Date.now();
+  for (const bot of aliveBots) {
+    await ctx.db.insert('nominationVotes', {
+      gameId: game._id,
+      dayNumber: game.dayNumber,
+      nominationIndex: nom.nominationIndex,
+      voterPlayerId: bot._id,
+      vote: 'dies',
+      votedAt: now,
+    });
+  }
+}
+
 // ───── Config mutation ─────────────────────────────────────────────────────
 //
 // Sets any subset of the day-phase config. Callable in lobby (initial
@@ -63,8 +130,10 @@ export const setDayConfig = mutation({
     accusationSec: v.optional(v.number()),
     defenseSec: v.optional(v.number()),
     voteTimerSec: v.optional(v.number()),
+    preVoteSec: v.optional(v.number()),
     maxNominationsPerDay: v.optional(v.number()),
     wolfPickerSec: v.optional(v.number()),
+    nightActionSec: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
@@ -91,21 +160,34 @@ export const setDayConfig = mutation({
       if (args.voteTimerSec < 1) throw new Error('Vote too short.');
       patch.voteTimerSec = args.voteTimerSec;
     }
+    if (args.preVoteSec !== undefined) {
+      if (args.preVoteSec < 5) throw new Error('Pre-vote too short.');
+      patch.preVoteSec = args.preVoteSec;
+    }
     if (args.maxNominationsPerDay !== undefined) {
       if (args.maxNominationsPerDay < 1) throw new Error('Need at least 1 nom.');
       patch.maxNominationsPerDay = args.maxNominationsPerDay;
     }
     if (args.wolfPickerSec !== undefined) {
-      // Settings UI constrains to 10–60 in 10 s increments; backend
+      // Settings UI constrains to 10–180 in 10 s increments; backend
       // enforces the same so a stale client can't smuggle an out-of-band
       // value through.
-      if (args.wolfPickerSec < 10 || args.wolfPickerSec > 60) {
-        throw new Error('Wolf picker must be 10–60 s.');
+      if (args.wolfPickerSec < 10 || args.wolfPickerSec > 180) {
+        throw new Error('Wolf decision must be 10–180 s.');
       }
       if (args.wolfPickerSec % 10 !== 0) {
-        throw new Error('Wolf picker must step in 10 s increments.');
+        throw new Error('Wolf decision must step in 10 s increments.');
       }
       patch.wolfPickerSec = args.wolfPickerSec;
+    }
+    if (args.nightActionSec !== undefined) {
+      if (args.nightActionSec < 10 || args.nightActionSec > 180) {
+        throw new Error('Night actions must be 10–180 s.');
+      }
+      if (args.nightActionSec % 10 !== 0) {
+        throw new Error('Night actions must step in 10 s increments.');
+      }
+      patch.nightActionSec = args.nightActionSec;
     }
 
     const now = Date.now();
@@ -209,6 +291,7 @@ export const resumeDayClock = mutation({
       dayEndsAt: Date.now() + paused,
       dayPausedRemainingMs: undefined,
     });
+    await scheduleDayExpiry(ctx, args.gameId);
   },
 });
 
@@ -426,6 +509,8 @@ export const finalizePendingTrial = internalMutation({
     const nominationsUsed = game.nominationsThisDay ?? 0;
     const nominationIndex = nominationsUsed;
     const now = Date.now();
+    const remote = isRemote(game);
+    const endsAt = now + accusationMs;
 
     await ctx.db.patch(args.gameId, {
       pendingTrial: undefined,
@@ -433,17 +518,199 @@ export const finalizePendingTrial = internalMutation({
         nominatedPlayerId: pending.targetPlayerId,
         nominationIndex,
         subPhase: 'accusation' as const,
-        // Trial timer starts PAUSED at full duration. Host taps START to
-        // begin counting down. Matches ModClock UX where each trial sub-
-        // phase has an explicit "start" action.
-        subPhaseEndsAt: now + accusationMs,
-        subPhasePausedRemainingMs: accusationMs,
+        // Remote autopilot starts the accusation clock RUNNING immediately
+        // (no host START tap). Local keeps it PAUSED at full duration so the
+        // host explicitly starts each trial sub-phase.
+        subPhaseEndsAt: endsAt,
+        subPhasePausedRemainingMs: remote ? undefined : accusationMs,
         resultsRevealed: false,
         accuserPlayerId: pending.accuserPlayerId,
         seconderPlayerId: pending.seconderPlayerId,
       },
       nominationsThisDay: nominationIndex + 1,
     });
+
+    if (remote) {
+      const accused = await ctx.db.get(pending.targetPlayerId);
+      const accuser = await ctx.db.get(pending.accuserPlayerId);
+      const seconder = pending.seconderPlayerId
+        ? await ctx.db.get(pending.seconderPlayerId)
+        : null;
+      const accuserName = accuser?.name ?? 'Someone';
+      const secPart =
+        seconder && seconder._id !== accuser?._id
+          ? `, seconded by ${seconder.name}`
+          : '';
+      const cueMentions = [accused, accuser, seconder]
+        .filter((p): p is NonNullable<typeof p> => !!p)
+        .map(p => ({ name: p.name, id: p._id as string }));
+      await postModeratorMessage(
+        ctx,
+        game,
+        `${accused?.name ?? 'A player'} is on trial — accused by ${accuserName}${secPart}.\n\n${accuserName}, make your accusation.`,
+        cueMentions,
+      );
+      await ctx.scheduler.runAfter(accusationMs, internal.day.autoAdvanceTrial, {
+        gameId: args.gameId,
+        fromSubPhase: 'accusation',
+        expectedEndsAt: endsAt,
+      });
+    }
+  },
+});
+
+// ───── Remote autopilot: trial sub-phase auto-advance ──────────────────────
+//
+// Drives accusation → defense → prevote → vote without host taps. Each step
+// schedules the next; the scheduled call self-checks (subPhase, endsAt, pause)
+// and no-ops on stale/superseded/paused schedules — the same defensive pattern
+// as tallyVote. Re-armed on host resume (see startTrialClock).
+export const autoAdvanceTrial = internalMutation({
+  args: {
+    gameId: v.id('games'),
+    fromSubPhase: v.union(
+      v.literal('accusation'),
+      v.literal('defense'),
+      v.literal('prevote'),
+    ),
+    expectedEndsAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game || !isRemote(game) || game.phase !== 'day') return;
+    const nom = game.currentNomination;
+    if (!nom || nom.subPhase !== args.fromSubPhase) return;
+    if (nom.subPhasePausedRemainingMs !== undefined) return; // paused by host
+    if (nom.subPhaseEndsAt !== args.expectedEndsAt) return; // stale/superseded
+    if (Date.now() < nom.subPhaseEndsAt - 100) return; // fired too early
+
+    await applyTrialAdvance(ctx, game, nom);
+  },
+});
+
+// Advance the trial one step (accusation → defense → prevote → vote), posting
+// the moderator cue and scheduling the next auto-advance. Shared by the timer
+// (autoAdvanceTrial) and the speaker's early SEND (submitTrialStatement).
+async function applyTrialAdvance(
+  ctx: MutationCtx,
+  game: Doc<'games'>,
+  nom: NonNullable<Doc<'games'>['currentNomination']>,
+) {
+  const cfg = dayConfigOf(game);
+  const now = Date.now();
+  const accused = await ctx.db.get(nom.nominatedPlayerId);
+  const accusedName = accused?.name ?? 'the accused';
+  const accusedMention = accused
+    ? [{ name: accused.name, id: accused._id as string }]
+    : undefined;
+
+  if (nom.subPhase === 'accusation') {
+    const defenseMs = cfg.defenseSec * 1000;
+    const nextEndsAt = now + defenseMs;
+    await ctx.db.patch(game._id, {
+      currentNomination: {
+        ...nom,
+        subPhase: 'defense' as const,
+        subPhaseEndsAt: nextEndsAt,
+        subPhasePausedRemainingMs: undefined,
+      },
+    });
+    await postModeratorMessage(
+      ctx,
+      game,
+      `${accusedName}, make your defense.`,
+      accusedMention,
+    );
+    await ctx.scheduler.runAfter(defenseMs, internal.day.autoAdvanceTrial, {
+      gameId: game._id,
+      fromSubPhase: 'defense',
+      expectedEndsAt: nextEndsAt,
+    });
+    return;
+  }
+
+  if (nom.subPhase === 'defense') {
+    const preVoteMs = cfg.preVoteSec * 1000;
+    const nextEndsAt = now + preVoteMs;
+    await ctx.db.patch(game._id, {
+      currentNomination: {
+        ...nom,
+        subPhase: 'prevote' as const,
+        subPhaseEndsAt: nextEndsAt,
+        subPhasePausedRemainingMs: undefined,
+      },
+    });
+    await postModeratorMessage(
+      ctx,
+      game,
+      `The vote on ${accusedName} is coming up. Vote LIVES to spare them, DIES to eliminate them.`,
+      accusedMention,
+    );
+    await ctx.scheduler.runAfter(preVoteMs, internal.day.autoAdvanceTrial, {
+      gameId: game._id,
+      fromSubPhase: 'prevote',
+      expectedEndsAt: nextEndsAt,
+    });
+    return;
+  }
+
+  // prevote → vote: open the ballot, seed bot votes, schedule the tally.
+  const voteMs = cfg.voteTimerSec * 1000;
+  const nextEndsAt = now + voteMs;
+  await ctx.db.patch(game._id, {
+    currentNomination: {
+      ...nom,
+      subPhase: 'vote' as const,
+      subPhaseEndsAt: nextEndsAt,
+      subPhasePausedRemainingMs: undefined,
+    },
+  });
+  await seedBotVotes(ctx, game, nom);
+  await ctx.scheduler.runAfter(voteMs + VOTE_GRACE_MS, internal.day.tallyVote, {
+    gameId: game._id,
+    dayNumber: game.dayNumber,
+    nominationIndex: nom.nominationIndex,
+    expectedEndsAt: nextEndsAt,
+  });
+}
+
+// Wave 2: the speaker's SEND during their accusation/defense window posts their
+// statement to the village chat AND ends their turn early (advances the trial).
+// The client also calls this at the timer to auto-send whatever's typed; the
+// server fallback (autoAdvanceTrial) advances even if the client never fires.
+export const submitTrialStatement = mutation({
+  args: {
+    gameId: v.id('games'),
+    deviceClientId: v.string(),
+    body: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game || !isRemote(game) || game.phase !== 'day') return;
+    const nom = game.currentNomination;
+    if (!nom) return;
+    if (nom.subPhasePausedRemainingMs !== undefined) return; // host paused
+    const me = await findCaller(ctx, args.gameId, args.deviceClientId);
+    if (!me) return;
+    const isAccuser =
+      nom.subPhase === 'accusation' && nom.accuserPlayerId === me._id;
+    const isAccused =
+      nom.subPhase === 'defense' && nom.nominatedPlayerId === me._id;
+    if (!isAccuser && !isAccused) return; // not the speaker / not their turn
+
+    const body = args.body.trim();
+    if (body) {
+      await ctx.db.insert('messages', {
+        gameId: args.gameId,
+        channel: 'village',
+        authorPlayerId: me._id,
+        authorName: me.name,
+        body,
+        phaseLabel: `Day ${game.dayNumber}`,
+        sentAt: Date.now(),
+      });
+    }
+    await applyTrialAdvance(ctx, game, nom);
   },
 });
 
@@ -614,6 +881,19 @@ export const startTrialClock = mutation({
           expectedEndsAt: newEndsAt,
         },
       );
+    } else if (
+      isRemote(game) &&
+      (nom.subPhase === 'accusation' ||
+        nom.subPhase === 'defense' ||
+        nom.subPhase === 'prevote')
+    ) {
+      // Remote autopilot: re-arm the sub-phase auto-advance after a host
+      // pause/resume so the trial keeps self-driving.
+      await ctx.scheduler.runAfter(remaining, internal.day.autoAdvanceTrial, {
+        gameId: args.gameId,
+        fromSubPhase: nom.subPhase,
+        expectedEndsAt: newEndsAt,
+      });
     }
   },
 });
@@ -691,6 +971,8 @@ export const endAccusation = mutation({
     if (nom.subPhase !== 'accusation') {
       throw new Error('Not in accusation sub-phase.');
     }
+    // Remote games advance on the autopilot timer — host can't manually end.
+    if (isRemote(game)) return;
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
 
     const cfg = dayConfigOf(game);
@@ -720,6 +1002,8 @@ export const endDefense = mutation({
     if (nom.subPhase !== 'defense') {
       throw new Error('Not in defense sub-phase.');
     }
+    // Remote games advance on the autopilot timer — host can't manually end.
+    if (isRemote(game)) return;
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
 
     const cfg = dayConfigOf(game);
@@ -915,6 +1199,53 @@ export const tallyVote = internalMutation({
       voteDwellEndsAt: dwellNeeded ? Date.now() + TRIGGER_DWELL_MS : undefined,
     });
 
+    // Remote autopilot: post the per-voter tally card (who voted which way,
+    // like the local results screen) and schedule the resolution (resume day
+    // vs. warned nightfall) — no host CONTINUE tap. autoResolveAfterVote waits
+    // out the dwell/triggers before acting, then posts the plain outcome below.
+    if (isRemote(game)) {
+      // Every eligible voter (alive, not the nominee) shows on the card. A
+      // DIES vote lands in the red column; anything else — an explicit LIVES
+      // OR no vote at all — counts as LIVES (matches the lynch math, where
+      // abstentions spare the accused).
+      const diesVoterIds = new Set(
+        votes.filter(v => v.vote === 'dies').map(v => v.voterPlayerId),
+      );
+      const eligible = players.filter(
+        p => p.alive && p._id !== nom.nominatedPlayerId,
+      );
+      const livesVoters = eligible
+        .filter(p => !diesVoterIds.has(p._id))
+        .map(p => p.name);
+      const diesVoters = eligible
+        .filter(p => diesVoterIds.has(p._id))
+        .map(p => p.name);
+      const nameById = new Map(players.map(p => [p._id, p.name]));
+      await ctx.db.insert('messages', {
+        gameId: args.gameId,
+        channel: 'village',
+        authorName: 'MODERATOR',
+        body: '',
+        phaseLabel: `Day ${game.dayNumber}`,
+        sentAt: Date.now(),
+        system: true,
+        voteResult: {
+          nomineeName: nameById.get(nom.nominatedPlayerId) ?? 'the accused',
+          livesVoters,
+          diesVoters,
+        },
+      });
+      await ctx.scheduler.runAfter(
+        RESULT_READ_MS,
+        internal.day.autoResolveAfterVote,
+        {
+          gameId: args.gameId,
+          dayNumber: game.dayNumber,
+          nominationIndex: nom.nominationIndex,
+        },
+      );
+    }
+
     if (!lynch || !target || !targetId) return;
 
     // Apply the lynch death immediately so the trigger actor (if any) can
@@ -987,6 +1318,9 @@ export const continueGameAfterVote = mutation({
     if (!nom) throw new Error('No active nomination.');
     if (!nom.resultsRevealed) throw new Error('Vote has not been tallied yet.');
 
+    // Remote games resolve on the autopilot (autoResolveAfterVote) — the host
+    // CONTINUE tap is a no-op there.
+    if (isRemote(game)) return;
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
 
     // Dwell + trigger locks (existing — preserves trigger-role cloak).
@@ -1055,6 +1389,236 @@ export const continueGameAfterVote = mutation({
         dayPausedRemainingMs: undefined,
       });
     }
+  },
+});
+
+// ───── Remote autopilot: post-vote resolution ─────────────────────────────
+//
+// The remote-mode replacement for the host's CONTINUE GAME tap. Scheduled by
+// tallyVote; waits out the trigger-cloak dwell, any pending Hunter decision,
+// and any shot announcement (rescheduling itself), then either resumes the day
+// (no lynch, time + noms left) or warns the table and queues nightfall.
+export const autoResolveAfterVote = internalMutation({
+  args: {
+    gameId: v.id('games'),
+    dayNumber: v.number(),
+    nominationIndex: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game || !isRemote(game) || game.phase !== 'day') return;
+    const nom = game.currentNomination;
+    if (
+      !nom ||
+      nom.nominationIndex !== args.nominationIndex ||
+      game.dayNumber !== args.dayNumber ||
+      nom.subPhase !== 'results' ||
+      !nom.resultsRevealed
+    ) {
+      return;
+    }
+
+    const now = Date.now();
+    // Hold until the trigger-cloak dwell, any pending Hunter/HW decision, and
+    // any shot announcement have cleared — reschedule ourselves until then.
+    if (game.voteDwellEndsAt && now < game.voteDwellEndsAt) {
+      await ctx.scheduler.runAfter(
+        game.voteDwellEndsAt - now + 50,
+        internal.day.autoResolveAfterVote,
+        args,
+      );
+      return;
+    }
+    if ((game.pendingDeathTriggers?.length ?? 0) > 0) {
+      await ctx.scheduler.runAfter(750, internal.day.autoResolveAfterVote, args);
+      return;
+    }
+    if (game.triggerAnnouncement && now < game.triggerAnnouncement.endsAt) {
+      await ctx.scheduler.runAfter(
+        game.triggerAnnouncement.endsAt - now + 50,
+        internal.day.autoResolveAfterVote,
+        args,
+      );
+      return;
+    }
+
+    const nominee = await ctx.db.get(nom.nominatedPlayerId as Id<'players'>);
+    const wasLynched = !!nominee && !nominee.alive;
+
+    // If this lynch ends the game, skip the "night is falling" beat entirely:
+    // post the WIN banner to chat and jump straight to the end-game screen
+    // (behind the chat). The banner is the proud result; closing chat → logs.
+    if (wasLynched) {
+      const won = await applyWinIfReached(ctx, args.gameId);
+      if (won) {
+        const ended = await ctx.db.get(args.gameId);
+        if (ended) await postWinBanner(ctx, ended);
+        await ctx.db.patch(args.gameId, {
+          currentNomination: undefined,
+          voteDwellEndsAt: undefined,
+          triggersFollowUp: undefined,
+          triggerAnnouncement: undefined,
+          phase: 'ended',
+          endedAt: Date.now(),
+        });
+        return;
+      }
+    }
+
+    const cfg = dayConfigOf(game);
+    const noNomsLeft = (game.nominationsThisDay ?? 0) >= cfg.maxNominationsPerDay;
+    const dayHasTimeLeft = (game.dayPausedRemainingMs ?? 0) > 0;
+    // Day ends → night on: a lynch, the last nomination spent, or the clock
+    // having run out (captured as the paused remaining at trial start).
+    const goNight = wasLynched || noNomsLeft || !dayHasTimeLeft;
+
+    if (goNight) {
+      // Warn first. Keep the nomination in 'results' so the result view stays
+      // up and no new nomination can start during the warning window; the
+      // scheduled enterNightFromDay clears it and transitions.
+      const headline = wasLynched
+        ? `${(nominee?.name ?? 'THE ACCUSED').toUpperCase()} HAS BEEN ELIMINATED`
+        : 'NO ONE WAS ELIMINATED';
+      const detail = wasLynched
+        ? 'Night is falling…'
+        : 'The day is over — night is falling…';
+      const outcomeMentions =
+        wasLynched && nominee
+          ? [{ name: nominee.name, id: nominee._id as string }]
+          : undefined;
+      await postModeratorMessage(ctx, game, detail, outcomeMentions, headline);
+      await ctx.scheduler.runAfter(
+        NIGHTFALL_WARNING_MS,
+        internal.day.enterNightFromDay,
+        {
+          gameId: args.gameId,
+          dayNumber: game.dayNumber,
+          nominationIndex: nom.nominationIndex,
+        },
+      );
+      return;
+    }
+
+    // No lynch, day still has time + nominations — resume discussion.
+    await postModeratorMessage(
+      ctx,
+      game,
+      'Discussion resumes.',
+      undefined,
+      'NO ONE WAS ELIMINATED',
+    );
+    await ctx.db.patch(args.gameId, {
+      currentNomination: undefined,
+      voteDwellEndsAt: undefined,
+      triggersFollowUp: undefined,
+      triggerAnnouncement: undefined,
+      dayEndsAt: now + (game.dayPausedRemainingMs ?? 0),
+      dayPausedRemainingMs: undefined,
+    });
+    await scheduleDayExpiry(ctx, args.gameId);
+  },
+});
+
+// Remote autopilot: (re)schedule the day-clock expiry check for a running
+// clock. Called whenever the day clock starts/resumes. The tick self-validates
+// against the current dayEndsAt, so redundant schedules are harmless.
+async function scheduleDayExpiry(ctx: MutationCtx, gameId: Id<'games'>) {
+  const game = await ctx.db.get(gameId);
+  if (!game || !isRemote(game) || game.phase !== 'day') return;
+  if (game.dayPausedRemainingMs !== undefined) return; // paused
+  if (!game.dayEndsAt) return;
+  await ctx.scheduler.runAfter(
+    Math.max(0, game.dayEndsAt - Date.now()),
+    internal.day.dayClockExpiryTick,
+    { gameId, expectedEndsAt: game.dayEndsAt },
+  );
+}
+
+// Remote autopilot: fires when the discussion clock runs out with no trial in
+// flight. Locks the floor (via nightFallsAt → chat lock) and warns before the
+// engine moves to night.
+export const dayClockExpiryTick = internalMutation({
+  args: { gameId: v.id('games'), expectedEndsAt: v.number() },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game || !isRemote(game) || game.phase !== 'day') return;
+    if (game.currentNomination || game.pendingTrial) return; // trial → clock paused
+    if (game.dayPausedRemainingMs !== undefined) return; // host-paused
+    if (game.dayEndsAt !== args.expectedEndsAt) return; // stale/superseded
+    if (game.nightFallsAt) return; // already warning
+    if (Date.now() < game.dayEndsAt - 100) return; // fired early
+
+    const endsAt = Date.now() + NIGHTFALL_WARNING_MS;
+    await ctx.db.patch(args.gameId, { nightFallsAt: endsAt });
+    await postModeratorMessage(
+      ctx,
+      game,
+      'No one was put on trial. Night is falling…',
+      undefined,
+      'THE DAY IS OVER',
+    );
+    await ctx.scheduler.runAfter(
+      NIGHTFALL_WARNING_MS,
+      internal.day.enterNightFromDayClock,
+      { gameId: args.gameId, expectedNightFallsAt: endsAt },
+    );
+  },
+});
+
+// Remote autopilot: the night transition after a day-clock-expiry warning.
+export const enterNightFromDayClock = internalMutation({
+  args: { gameId: v.id('games'), expectedNightFallsAt: v.number() },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game || game.phase !== 'day') return;
+    if (game.nightFallsAt !== args.expectedNightFallsAt) return;
+    if (game.currentNomination) return; // a trial somehow started — abort
+    await ctx.db.patch(args.gameId, { nightFallsAt: undefined });
+    const won = await applyWinIfReached(ctx, args.gameId);
+    if (won) return;
+    await ctx.db.patch(args.gameId, {
+      phase: 'night',
+      nightNumber: game.nightNumber + 1,
+    });
+    await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
+  },
+});
+
+// Remote autopilot: the actual night entry after the nightfall warning window.
+// Lynch death/cascades were already applied in tallyVote; this just clears the
+// nomination and transitions (or ends the game if the lynch met a win).
+export const enterNightFromDay = internalMutation({
+  args: {
+    gameId: v.id('games'),
+    dayNumber: v.number(),
+    nominationIndex: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game || game.phase !== 'day') return;
+    const nom = game.currentNomination;
+    if (
+      !nom ||
+      nom.nominationIndex !== args.nominationIndex ||
+      game.dayNumber !== args.dayNumber ||
+      nom.subPhase !== 'results'
+    ) {
+      return;
+    }
+
+    await ctx.db.patch(args.gameId, {
+      currentNomination: undefined,
+      voteDwellEndsAt: undefined,
+      triggersFollowUp: undefined,
+      triggerAnnouncement: undefined,
+    });
+    const won = await applyWinIfReached(ctx, args.gameId);
+    if (won) return;
+    await ctx.db.patch(args.gameId, {
+      phase: 'night',
+      nightNumber: game.nightNumber + 1,
+    });
+    await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
   },
 });
 
@@ -1144,7 +1708,7 @@ export const dayView = query({
 
     let nomination: {
       nominee: { _id: Id<'players'>; name: string } | null;
-      subPhase: 'accusation' | 'defense' | 'vote' | 'results';
+      subPhase: 'accusation' | 'defense' | 'prevote' | 'vote' | 'results';
       subPhaseEndsAt: number;
       subPhasePausedRemainingMs: number | null;
       resultsRevealed: boolean;
@@ -1285,6 +1849,7 @@ export const dayView = query({
       game: {
         _id: game._id,
         roomCode: game.roomCode,
+        mode: game.mode ?? 'local',
         phase: game.phase,
         dayNumber: game.dayNumber,
         nightNumber: game.nightNumber,
@@ -1306,8 +1871,10 @@ export const dayView = query({
           accusationSec: cfg.accusationSec,
           defenseSec: cfg.defenseSec,
           voteTimerSec: cfg.voteTimerSec,
+          preVoteSec: cfg.preVoteSec,
           maxNominationsPerDay: cfg.maxNominationsPerDay,
           wolfPickerSec: cfg.wolfPickerSec,
+          nightActionSec: cfg.nightActionSec,
         },
       },
       me: {

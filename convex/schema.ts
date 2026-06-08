@@ -4,6 +4,14 @@ import { v } from 'convex/values';
 export default defineSchema({
   games: defineTable({
     roomCode: v.string(),
+    /**
+     * Play mode. 'local' = everyone in the same room (the app replaces the
+     * moderator's clipboard; players talk out loud). 'remote' = players are
+     * physically apart and coordinate through in-app text chat (see the
+     * `messages` table + convex/chat.ts). Optional so games from older
+     * deploys validate; absent is treated as 'local' everywhere.
+     */
+    mode: v.optional(v.union(v.literal('local'), v.literal('remote'))),
     playerCount: v.number(),
     phase: v.union(
       v.literal('lobby'),
@@ -36,6 +44,13 @@ export default defineSchema({
         v.object({
           step: v.string(),
           endsAt: v.number(),
+          /**
+           * Wall-clock deadline for the step's human actor(s) to decide
+           * (NIGHT ACTIONS timer). Set for non-wolf steps with a human actor;
+           * surfaced to that actor as a visible countdown (picker + chat
+           * header). On expiry `nightActionTimeout` auto-resolves laggards.
+           */
+          decisionEndsAt: v.optional(v.number()),
         }),
       ),
     ),
@@ -78,6 +93,8 @@ export default defineSchema({
     dayDurationSec: v.optional(v.number()),
     accusationSec: v.optional(v.number()),
     defenseSec: v.optional(v.number()),
+    // Remote autopilot pre-vote buffer (seconds). See dayConfigOf default.
+    preVoteSec: v.optional(v.number()),
     maxNominationsPerDay: v.optional(v.number()),
     /**
      * Wall-clock deadline (ms) for the day clock. Set when the day begins
@@ -94,6 +111,14 @@ export default defineSchema({
      */
     dayPausedRemainingMs: v.optional(v.number()),
     /**
+     * Remote autopilot: set when the day clock has run out with no trial in
+     * progress. While set, the village chat is locked and a "night is falling"
+     * moderator message is showing; an internal `enterNightFromDayClock` is
+     * scheduled for this timestamp and transitions to night when it fires.
+     * Cleared on the night transition and when a new day clock initializes.
+     */
+    nightFallsAt: v.optional(v.number()),
+    /**
      * Active nomination state, if any. Walks through accusation → defense →
      * vote → results. Only the vote sub-phase auto-advances on timer
      * expire (schedules tallyVote). Accusation/defense advance on host
@@ -107,6 +132,9 @@ export default defineSchema({
         subPhase: v.union(
           v.literal('accusation'),
           v.literal('defense'),
+          // Remote autopilot buffer between defense and vote — village reads
+          // the defense before LIVES/DIES open. Not used in local (host-driven).
+          v.literal('prevote'),
           v.literal('vote'),
           v.literal('results'),
         ),
@@ -220,6 +248,9 @@ export default defineSchema({
      * settings cog — both call `setDayConfig` to patch this field.
      */
     wolfPickerSec: v.optional(v.number()),
+    // Per-actor night-action decision timer (non-wolf night roles). See
+    // dayConfigOf default; auto-resolves the actor on expiry.
+    nightActionSec: v.optional(v.number()),
 
     /**
      * Carryover from a Diseased death. Flipped on at the morning resolution
@@ -406,4 +437,95 @@ export default defineSchema({
   })
     .index('by_game_day_target', ['gameId', 'dayNumber', 'targetPlayerId'])
     .index('by_game_day_nominator', ['gameId', 'dayNumber', 'nominatorPlayerId']),
+
+  /**
+   * Remote-mode in-app chat. One row per message. Append-only; never deleted
+   * (post-game review reads the whole transcript). `channel` is the routing
+   * tag — read/post permission is NOT stored, it's computed from the live
+   * (player.alive, player.role, game.phase, nomination sub-phase) state in
+   * convex/chat.ts, exactly the way the night engine gates what each phone
+   * sees. So role conversions (Cursed/Sasquatch → wolf) move a player into
+   * the right channel with no extra bookkeeping here.
+   *
+   *   'village' — daytime open forum (gated by nomination speaking rules)
+   *   'wolves'  — wolves' night coordination (real wolves only)
+   *   'dead'    — eliminated players' ghost channel
+   *
+   * `authorName` is denormalized so the message list renders without a join.
+   * `phaseLabel` ("Day 2" / "Night 3") is stamped at send time for dividers.
+   */
+  messages: defineTable({
+    gameId: v.id('games'),
+    channel: v.union(
+      v.literal('village'),
+      v.literal('wolves'),
+      v.literal('dead'),
+      // Off-the-record room, postable by everyone only while the host has the
+      // game paused — keeps pause chatter out of the village gameplay log.
+      v.literal('break'),
+    ),
+    /**
+     * Author of a player message. Omitted on `system` messages (the engine's
+     * "moderator" announcements — e.g. the dawn night report), which have no
+     * human sender.
+     */
+    authorPlayerId: v.optional(v.id('players')),
+    authorName: v.string(),
+    body: v.string(),
+    phaseLabel: v.string(),
+    sentAt: v.number(),
+    /**
+     * True for engine-posted moderator announcements (dawn night report).
+     * Rendered as a centered, bordered callout instead of a chat bubble.
+     */
+    system: v.optional(v.boolean()),
+    /**
+     * Optional big, bold headline for a moderator message (e.g. an elimination
+     * line). Rendered larger than `body`, which becomes the smaller detail
+     * line beneath it. Mentions tint names in both.
+     */
+    headline: v.optional(v.string()),
+    /**
+     * Player names referenced in a moderator `body`, with their player _id
+     * (string) — the client tints each occurrence its chat color so you can
+     * tell at a glance who's being talked about.
+     */
+    mentions: v.optional(
+      v.array(v.object({ name: v.string(), id: v.string() })),
+    ),
+    /**
+     * Set on the post-vote results message — drives the blue/red LIVES vs DIES
+     * tally card in chat (who voted which way), the way local games show it.
+     * The plain-language outcome (lynch / no lynch) is a separate moderator
+     * message posted just after.
+     */
+    voteResult: v.optional(
+      v.object({
+        nomineeName: v.string(),
+        livesVoters: v.array(v.string()),
+        diesVoters: v.array(v.string()),
+      }),
+    ),
+    /**
+     * Set on the dawn night report — rendered as a bold, scannable card
+     * ("DAY N" + "NAME HAS BEEN ELIMINATED" / "NO ONE HAS BEEN ELIMINATED")
+     * rather than a wordy sentence, with eliminated names tinted their chat
+     * color. `id` is the player _id (string) so the client can recompute the
+     * same color used for their avatar/messages.
+     */
+    dawnReport: v.optional(
+      v.object({
+        dayLabel: v.number(),
+        eliminated: v.array(v.object({ name: v.string(), id: v.string() })),
+      }),
+    ),
+    /**
+     * Set on the end-of-game message — rendered as a big proud WIN banner in
+     * chat the moment a win condition is met. The engine jumps straight to the
+     * end-game screen behind the chat; closing the chat reveals the role logs.
+     */
+    winBanner: v.optional(
+      v.object({ winner: v.union(v.literal('village'), v.literal('wolf')) }),
+    ),
+  }).index('by_game_channel', ['gameId', 'channel']),
 });

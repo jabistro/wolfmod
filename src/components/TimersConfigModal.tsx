@@ -26,8 +26,10 @@ type Props = {
     accusationSec: number;
     defenseSec: number;
     voteTimerSec: number;
+    preVoteSec: number;
     maxNominationsPerDay: number;
     wolfPickerSec: number;
+    nightActionSec: number;
   };
   /**
    * When provided, the modal renders a PASS HOST row at the top opening
