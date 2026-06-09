@@ -66,6 +66,44 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Telegram-style emoji prominence. A message that is *only* emoji (one or many)
+// renders with no bubble background and at a larger size; a single emoji renders
+// biggest of all. Any non-emoji character (even one) keeps the normal bubble.
+//
+// Matches an emoji "cluster": a pictographic base + optional variation/skin-tone
+// modifiers + ZWJ-joined sequences (e.g. 👨‍👩‍👧). Built via new RegExp so an
+// engine without Unicode property-escape support degrades gracefully (the
+// try/catch leaves EMOJI_RE null → every message reads as normal text).
+let EMOJI_RE: RegExp | null = null;
+try {
+  const mod = '(\\uFE0F|[\\u{1F3FB}-\\u{1F3FF}])*';
+  const base = `\\p{Extended_Pictographic}${mod}`;
+  EMOJI_RE = new RegExp(`${base}(\\u200D${base})*`, 'gu');
+} catch {
+  EMOJI_RE = null;
+}
+
+/**
+ * Number of emoji clusters when `text` is emoji-only (ignoring whitespace);
+ * 0 when it contains any other character. 1 = single emoji, etc.
+ */
+function emojiOnlyCount(text: string): number {
+  if (!EMOJI_RE) return 0;
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  const matches = trimmed.match(EMOJI_RE);
+  if (!matches) return 0;
+  // Emoji-only iff stripping every cluster + whitespace leaves nothing behind.
+  const remainder = trimmed.replace(EMOJI_RE, '').replace(/\s+/g, '');
+  if (remainder.length > 0) return 0;
+  return matches.length;
+}
+
+/** Font size for an emoji-only message: single emoji biggest, 2+ a tier down. */
+function emojiFontSize(count: number): number {
+  return count <= 1 ? 40 : 26;
+}
+
 // Render a moderator message body with any mentioned player names tinted their
 // chat color (matches their avatar/messages), so it's clear who's referenced.
 function renderModeratorBody(
@@ -1387,6 +1425,18 @@ export default function ChatPane({
                 // My own messages: gold bubble, right-aligned, no avatar — keeps
                 // "me vs everyone else" instantly clear.
                 if (mine) {
+                  // Emoji-only → no bubble, bigger glyphs (Telegram-style).
+                  const ec = emojiOnlyCount(item.body ?? '');
+                  if (ec > 0) {
+                    const fs = emojiFontSize(ec);
+                    return (
+                      <View className="mb-2 max-w-[82%] self-end pr-1">
+                        <Text style={{ fontSize: fs, lineHeight: fs * 1.18 }}>
+                          {item.body}
+                        </Text>
+                      </View>
+                    );
+                  }
                   return (
                     <View className="mb-2 max-w-[82%] self-end">
                       <View
@@ -1442,17 +1492,41 @@ export default function ChatPane({
                       >
                         {item.authorName}
                       </Text>
-                      <View
-                        className="rounded-2xl px-3 py-2"
-                        style={{
-                          alignSelf: 'flex-start',
-                          backgroundColor: OTHER_BUBBLE_BG,
-                        }}
-                      >
-                        <Text className="text-wolf-text" style={{ fontSize: 14 }}>
-                          {item.body}
-                        </Text>
-                      </View>
+                      {(() => {
+                        // Emoji-only → no bubble, bigger glyphs (Telegram-style).
+                        const ec = emojiOnlyCount(item.body ?? '');
+                        if (ec > 0) {
+                          const fs = emojiFontSize(ec);
+                          return (
+                            <Text
+                              style={{
+                                fontSize: fs,
+                                lineHeight: fs * 1.18,
+                                alignSelf: 'flex-start',
+                                marginLeft: 2,
+                              }}
+                            >
+                              {item.body}
+                            </Text>
+                          );
+                        }
+                        return (
+                          <View
+                            className="rounded-2xl px-3 py-2"
+                            style={{
+                              alignSelf: 'flex-start',
+                              backgroundColor: OTHER_BUBBLE_BG,
+                            }}
+                          >
+                            <Text
+                              className="text-wolf-text"
+                              style={{ fontSize: 14 }}
+                            >
+                              {item.body}
+                            </Text>
+                          </View>
+                        );
+                      })()}
                     </View>
                   </View>
                 );
