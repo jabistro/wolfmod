@@ -209,6 +209,32 @@ export async function initializeDayClock(
       gameId,
       expectedEndsAt: endsAt,
     });
+    // Morning roll call: list who's still in the game as the day opens, so
+    // players can answer "who's left?" without leaving the chat. This is the
+    // single day-start chokepoint for every path (normal + post-Hunter
+    // cascade), so the list reflects the FINAL alive set once all night deaths
+    // and any Hunter shot have resolved. Day 1 has no preceding night — the
+    // lobby already showed the full table — so it's skipped.
+    if (game.dayNumber > 1) {
+      const players = await ctx.db
+        .query('players')
+        .withIndex('by_game', q => q.eq('gameId', gameId))
+        .collect();
+      const remaining = players
+        .filter(p => p.alive)
+        .sort((a, b) => (a.seatPosition ?? 0) - (b.seatPosition ?? 0))
+        .map(p => ({ name: p.name, id: p._id as string }));
+      await ctx.db.insert('messages', {
+        gameId,
+        channel: 'village',
+        authorName: 'MODERATOR',
+        body: '',
+        phaseLabel: `Day ${game.dayNumber}`,
+        sentAt: Date.now(),
+        system: true,
+        roster: remaining,
+      });
+    }
   }
 }
 

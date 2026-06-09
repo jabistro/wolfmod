@@ -13,8 +13,19 @@ import { useMutation, usePaginatedQuery, useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { showAlert } from './ThemedAlert';
+import { useChatReadState } from '../hooks/useChatReadState';
 
 type Channel = 'village' | 'wolves' | 'dead' | 'break';
+
+/** Trailing-edge debounce of a value — coalesces rapid changes. */
+function useDebounced<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
+}
 
 const CHANNEL_LABEL: Record<Channel, string> = {
   village: 'VILLAGE',
@@ -22,6 +33,12 @@ const CHANNEL_LABEL: Record<Channel, string> = {
   dead: 'GHOSTS',
   break: 'BREAK ROOM',
 };
+
+// iMessage-style bubbles: my messages in system blue, everyone else's in a
+// grey that's a touch lighter than wolf-card so the blocks read clearly on the
+// dark surface. Both use white text.
+const MY_BUBBLE_BG = '#0A84FF';
+const OTHER_BUBBLE_BG = '#3A3A47';
 
 // Bright, distinct hues that pop on the dark background and read clearly as a
 // name color + an avatar fill (dark initial sits on top). These are decorative
@@ -225,13 +242,17 @@ export default function ChatPane({
   const state = useQuery(api.chat.chatState, { gameId, deviceClientId });
   const sendMessage = useMutation(api.chat.sendMessage);
   const submitTrial = useMutation(api.day.submitTrialStatement);
-  const beginDay = useMutation(api.night.beginDay);
   const pauseDay = useMutation(api.day.pauseDayClock);
   const resumeDay = useMutation(api.day.resumeDayClock);
-  const [beginningDay, setBeginningDay] = useState(false);
 
   const isMorning = state?.phase === 'morning';
   const dayPaused = state?.day?.dayPausedRemainingMs != null;
+  // Vote results just tallied → force the bottom on (re)open so the result card
+  // is what everyone sees, never a restored pre-vote scroll spot. LIVING players
+  // only — dead spectators stay wherever they're reading (they're not voting and
+  // shouldn't get yanked, least of all on the GHOSTS channel).
+  const voteResultsShowing =
+    !!state?.voteResultsShowing && state?.me?.alive === true;
 
   async function toggleDayClock() {
     if (!state?.day) return;
@@ -243,18 +264,6 @@ export default function ChatPane({
       }
     } catch (e) {
       showAlert('Error', e instanceof Error ? e.message : String(e));
-    }
-  }
-
-  async function handleBeginDay() {
-    if (beginningDay) return;
-    setBeginningDay(true);
-    try {
-      await beginDay({ gameId, callerDeviceClientId: deviceClientId });
-    } catch (e) {
-      showAlert('Could not begin day', e instanceof Error ? e.message : String(e));
-    } finally {
-      setBeginningDay(false);
     }
   }
 
@@ -326,6 +335,274 @@ export default function ChatPane({
     { gameId, deviceClientId, channel: active },
     { initialNumItems: 30 },
   );
+
+  // ─── Telegram-style read state ────────────────────────────────────────────
+  // Per-channel "seen" marks + scroll anchors, persisted across phase changes
+  // and restarts. The pane remounts on every phase, and the message list
+  // remounts on every expand/tab-switch, so this state can't live in the list.
+  const read = useChatReadState(gameId, myPlayerId ?? undefined);
+  const listRef = useRef<FlatList>(null);
+
+  // Server unread counts drive the OTHER tabs' badges + the collapsed-bar
+  // total. Fed the persisted marks, debounced so scrolling (which advances the
+  // active channel's mark continuously) doesn't thrash the subscription.
+  const serverMarks = useDebounced(read.readMarks, 700);
+  const unread = useQuery(api.chat.unreadCounts, {
+    gameId,
+    deviceClientId,
+    lastSeen: serverMarks,
+  });
+  useEffect(() => {
+    if (unread) read.seedIfFresh(unread.latest);
+  }, [unread, read.seedIfFresh]);
+  // The debounced server marks start at zero and lag the real marks for one
+  // debounce window on mount — which would flash inflated counts on the other
+  // tabs. Latch "primed" once the server query reflects the loaded marks, and
+  // only trust its (non-active) counts after that. Non-active channels' marks
+  // never change while you're elsewhere, so once primed they stay correct.
+  const [serverPrimed, setServerPrimed] = useState(false);
+  useEffect(() => {
+    if (!serverPrimed && read.ready && serverMarks === read.readMarks) {
+      setServerPrimed(true);
+    }
+  }, [serverPrimed, read.ready, serverMarks, read.readMarks]);
+
+  // The active channel's unread is computed CLIENT-side from the loaded
+  // transcript, so it decrements the instant a message scrolls into view with
+  // no server round-trip. Only another PLAYER's messages are unread — our own
+  // and moderator/system cards (no authorPlayerId: dawn report, dusk notice,
+  // GAME ON) are app-presented narration, never an unread badge/divider.
+  const isUnreadFrom = (m: any): boolean =>
+    m.authorPlayerId != null && m.authorPlayerId !== myPlayerId;
+  const activeMark = read.readMarks[active] ?? 0;
+  const activeUnread = results.reduce(
+    (n, m) => (m.sentAt > activeMark && isUnreadFrom(m) ? n + 1 : n),
+    0,
+  );
+  const channelUnread = (ch: Channel): number => {
+    if (!read.ready) return 0;
+    if (ch === active) return activeUnread;
+    return serverPrimed ? unread?.counts?.[ch] ?? 0 : 0;
+  };
+  const totalUnread = (Object.keys(CHANNEL_LABEL) as Channel[]).reduce(
+    (sum, ch) => sum + channelUnread(ch),
+    0,
+  );
+
+  // "UNREAD MESSAGES" divider position: anchored to the read mark AS OF the
+  // moment the channel is opened/focused, then frozen for the session so it
+  // doesn't jump while you read. Recomputed (slides down) on each reopen.
+  // readMarks is intentionally excluded from the deps — that's what freezes it.
+  const [bannerAnchor, setBannerAnchor] = useState<number | null>(null);
+  useEffect(() => {
+    dividerJumpedRef.current = false; // fresh staging for the caret button
+    if (expanded && read.ready) setBannerAnchor(read.readMarks[active]);
+    else if (!expanded) setBannerAnchor(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, active, read.ready]);
+
+  // Inject the divider into the newest-first list at the read/unread boundary
+  // (visually: just above the oldest unread message).
+  const showBanner =
+    bannerAnchor != null &&
+    results.some(m => m.sentAt > bannerAnchor! && isUnreadFrom(m));
+  const listData = React.useMemo<any[]>(() => {
+    if (!showBanner || bannerAnchor == null) return results as any[];
+    const idx = results.findIndex(m => m.sentAt <= bannerAnchor);
+    const at = idx === -1 ? results.length : idx;
+    const copy: any[] = (results as any[]).slice();
+    copy.splice(at, 0, { _id: '__unread_divider__', __divider: true });
+    return copy;
+  }, [results, showBanner, bannerAnchor]);
+  // Latest list data for async callbacks (restore retries) that would otherwise
+  // close over a stale snapshot before older messages have paged in.
+  const listDataRef = useRef(listData);
+  listDataRef.current = listData;
+
+  // Viewability → advance the read mark (newest message seen) and remember the
+  // top-of-viewport message as the scroll anchor for reopen. Kept in stable
+  // refs so the FlatList callback identity never changes.
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const markSeenRef = useRef(read.markSeen);
+  markSeenRef.current = read.markSeen;
+  const setAnchorRef = useRef(read.setAnchor);
+  setAnchorRef.current = read.setAnchor;
+  const minVisibleIndexRef = useRef(0);
+  const suppressSeenRef = useRef(false);
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
+  const onViewableItemsChanged = useRef(
+    (info: { viewableItems: Array<{ item: any; index: number | null }> }) => {
+      let minIdx = Number.POSITIVE_INFINITY;
+      for (const vi of info.viewableItems) {
+        if (typeof vi.index === 'number' && vi.index < minIdx) minIdx = vi.index;
+      }
+      if (minIdx !== Number.POSITIVE_INFINITY) minVisibleIndexRef.current = minIdx;
+      // While force-restoring scroll on open, don't let the briefly-rendered
+      // bottom rows mark the newest messages as read.
+      if (suppressSeenRef.current) return;
+      const real = info.viewableItems.filter(
+        vi =>
+          vi.item && !vi.item.__divider && typeof vi.item.sentAt === 'number',
+      );
+      if (real.length === 0) return;
+      let maxTs = 0;
+      let top = real[0];
+      for (const vi of real) {
+        if (vi.item.sentAt > maxTs) maxTs = vi.item.sentAt;
+        // Top of the viewport in an inverted list = largest index = oldest.
+        if ((vi.index ?? 0) > (top.index ?? 0)) top = vi;
+      }
+      markSeenRef.current(activeRef.current, maxTs);
+      setAnchorRef.current(activeRef.current, top.item.sentAt);
+    },
+  ).current;
+
+  // Follow-vs-freeze + scroll-to-bottom caret. In an inverted list, offset ~0
+  // is the newest message (bottom); inverted handles "ride along at the bottom
+  // / stay put when scrolled up" natively.
+  const [atBottom, setAtBottom] = useState(true);
+  // Latched once we've jumped to the divider, so the next tap always goes to
+  // the bottom — robust regardless of the inverted list's viewPosition quirks.
+  // Resets when you reach the bottom or switch channels (fresh scroll-up).
+  const dividerJumpedRef = useRef(false);
+  const onListScroll = (e: any) => {
+    const y = e.nativeEvent.contentOffset.y;
+    const next = y <= 24;
+    if (next) dividerJumpedRef.current = false;
+    setAtBottom(prev => (prev !== next ? next : prev));
+  };
+  const onCaretPress = () => {
+    const divIdx = listData.findIndex(it => it.__divider);
+    // First tap → the unread divider (if we're still scrolled up above it);
+    // next tap (or no unread) → all the way to the newest message.
+    const goDivider =
+      divIdx >= 0 &&
+      !dividerJumpedRef.current &&
+      minVisibleIndexRef.current > divIdx;
+    if (goDivider) {
+      dividerJumpedRef.current = true;
+      listRef.current?.scrollToIndex({
+        index: divIdx,
+        viewPosition: 1, // place the divider toward the top of the viewport
+        animated: true,
+      });
+    } else {
+      dividerJumpedRef.current = false;
+      listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    }
+  };
+  const onScrollToIndexFailed = (info: {
+    index: number;
+    averageItemLength: number;
+  }) => {
+    listRef.current?.scrollToOffset({
+      offset: info.averageItemLength * info.index,
+      animated: false,
+    });
+    setTimeout(() => {
+      listRef.current?.scrollToIndex({
+        index: info.index,
+        viewPosition: 1,
+        animated: true,
+      });
+    }, 120);
+  };
+
+  // Position the list each time a channel is (re)opened — the list remounts on
+  // every expand and every tab switch. Priority: (1) the saved scroll position
+  // if you've read here before, else (2) the UNREAD MESSAGES divider so you
+  // start at the first unread, else (3) the bottom (newest). Hold off marking
+  // anything seen until we've positioned, so the briefly-rendered bottom rows
+  // don't clear the unread we're about to scroll to.
+  const restoreSessionRef = useRef('');
+  // True until this mount's first restore runs. The pane remounts on every
+  // phase change (each phase is its own screen), so a fresh mount means we just
+  // arrived in a new phase.
+  const firstRestoreRef = useRef(true);
+  useEffect(() => {
+    if (!expanded || !read.ready) return;
+    const session = `${active}:${gameId}`;
+    restoreSessionRef.current = session;
+    suppressSeenRef.current = true;
+    const isFirstRestore = firstRestoreRef.current;
+    firstRestoreRef.current = false;
+    // Snap to the bottom (newest) — ignoring both the saved anchor AND the
+    // unread divider — in two cases:
+    //  (1) A fresh mount: we just arrived in a new phase and the latest message
+    //      is the point — the dawn report at the start of a post-night day, or
+    //      the GAME ON at day 1. This is what takes EVERYONE, living and ghost,
+    //      to the night's result in #village when morning breaks.
+    //  (2) Freshly-posted vote results (living players only — voteResultsShowing
+    //      is gated on alive, so ghosts are never yanked mid-day).
+    // Everything else (same-mount tab switch / expand-after-collapse) restores
+    // the saved anchor or the unread divider so you keep your place.
+    const goBottom = isFirstRestore || voteResultsShowing;
+    const anchorTs = goBottom ? 0 : read.anchors[active] ?? 0;
+    // Whether we expect something to scroll to (a saved spot or unread). Also
+    // consult the server count for the target channel, since after a tab switch
+    // the per-channel `results` (and thus activeUnread) can briefly lag.
+    const expectTarget =
+      !goBottom &&
+      (anchorTs > 0 || activeUnread > 0 || (unread?.counts?.[active] ?? 0) > 0);
+    const settle = () => {
+      setTimeout(() => {
+        if (restoreSessionRef.current === session) {
+          suppressSeenRef.current = false;
+        }
+      }, 300);
+    };
+    let tries = 0;
+    const attempt = () => {
+      if (restoreSessionRef.current !== session) return; // superseded
+      const data = listDataRef.current;
+      // Snap to the newest (see goBottom above), regardless of saved position.
+      if (goBottom) {
+        listRef.current?.scrollToOffset({ offset: 0, animated: false });
+        settle();
+        return;
+      }
+      let idx = anchorTs
+        ? data.findIndex(it => !it.__divider && it.sentAt === anchorTs)
+        : -1;
+      // No saved position (or it hasn't paged in) → fall back to the divider.
+      if (idx < 0) idx = data.findIndex(it => it.__divider);
+      if (idx >= 0) {
+        listRef.current?.scrollToIndex({
+          index: idx,
+          viewPosition: 1,
+          animated: false,
+        });
+        settle();
+      } else if (expectTarget && tries++ < 12) {
+        setTimeout(attempt, 120); // wait for messages / divider to materialize
+      } else {
+        settle(); // nothing to scroll to → bottom is correct
+      }
+    };
+    setTimeout(attempt, 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, active, read.ready, voteResultsShowing]);
+
+  // Live-follow: while you're parked at the bottom of an open, active channel,
+  // messages stream in as you watch them — nothing is being missed — so keep
+  // both the read mark AND the divider anchor pinned to the newest message.
+  // This is why a message that lands while the chat is already open (e.g. the
+  // moderator's "GAME ON!" at the start of Day 1) never raises an unread badge
+  // or an UNREAD MESSAGES divider. The freeze that preserves an unread line
+  // only kicks in once you scroll up (atBottom → false) to read back, and the
+  // open-time restore-scroll keeps you off the bottom for genuinely-unread
+  // channels, so this doesn't swallow real unread runs. Skipped during the
+  // restore-scroll window so the briefly-rendered bottom rows don't clear it.
+  useEffect(() => {
+    if (!expanded || !read.ready || !atBottom || suppressSeenRef.current) return;
+    if (results.length === 0) return;
+    const newestTs = results[0]?.sentAt; // inverted list: index 0 = newest
+    if (typeof newestTs !== 'number') return;
+    read.markSeen(active, newestTs);
+    setBannerAnchor(newestTs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, read.ready, atBottom, active, results]);
 
   // When it's my accusation/defense window, SEND posts my statement AND ends
   // my turn (advances the trial) — see submitTrialStatement.
@@ -410,23 +687,12 @@ export default function ChatPane({
               CHAT
             </Text>
             <View style={{ flex: 1, alignItems: 'center' }}>
-              {state?.isHost ? (
-                <TouchableOpacity
-                  onPress={handleBeginDay}
-                  disabled={beginningDay}
-                  activeOpacity={0.75}
-                  className="bg-wolf-accent rounded-lg px-5 py-1.5"
-                  style={{ opacity: beginningDay ? 0.5 : 1 }}
-                >
-                  <Text className="text-wolf-bg text-xs font-extrabold tracking-widest">
-                    {state?.gameOver ? 'VIEW RESULTS' : 'BEGIN DAY'}
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                <Text className="text-wolf-muted text-[11px] font-bold tracking-widest text-center">
-                  {state?.gameOver ? 'REVEALING RESULTS…' : 'DAY BEGINS SHORTLY…'}
-                </Text>
-              )}
+              {/* Fully auto-progressed — no host tap. The day rolls in on its
+                  own (instantly, or after a brief cloak dwell when a Hunter /
+                  Hunter Wolf is in play). */}
+              <Text className="text-wolf-muted text-[11px] font-bold tracking-widest text-center">
+                {state?.gameOver ? 'REVEALING RESULTS…' : 'DAY BEGINS SHORTLY…'}
+              </Text>
             </View>
           </>
         ) : expanded && state?.day ? (
@@ -478,6 +744,23 @@ export default function ChatPane({
             CHAT
           </Text>
         )}
+        {!expanded && totalUnread > 0 && (
+          <View
+            style={{
+              minWidth: 20,
+              height: 20,
+              borderRadius: 10,
+              paddingHorizontal: 5,
+              backgroundColor: '#B03A2E',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ color: '#F0EDE8', fontSize: 11, fontWeight: '800' }}>
+              {totalUnread > 99 ? '99+' : totalUnread}
+            </Text>
+          </View>
+        )}
         <Text className="text-wolf-muted text-base" style={{ marginLeft: 8 }}>
           {expanded ? '▾' : '▴'}
         </Text>
@@ -493,13 +776,15 @@ export default function ChatPane({
             <View className="flex-row px-3 pb-2" style={{ gap: 8 }}>
               {channels.map(c => {
                 const isActive = c.channel === active;
+                const tabUnread = channelUnread(c.channel as Channel);
                 return (
                   <TouchableOpacity
                     key={c.channel}
                     onPress={() => setActive(c.channel as Channel)}
-                    className={`rounded-full px-3 py-1.5 ${
+                    className={`flex-row items-center rounded-full px-3 py-1.5 ${
                       isActive ? 'bg-wolf-accent' : 'bg-wolf-card'
                     }`}
+                    style={{ gap: 6 }}
                   >
                     <Text
                       className={`text-[11px] font-bold tracking-widest ${
@@ -508,6 +793,29 @@ export default function ChatPane({
                     >
                       {CHANNEL_LABEL[c.channel as Channel]}
                     </Text>
+                    {tabUnread > 0 && (
+                      <View
+                        style={{
+                          minWidth: 16,
+                          height: 16,
+                          borderRadius: 8,
+                          paddingHorizontal: 4,
+                          backgroundColor: '#B03A2E',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: '#F0EDE8',
+                            fontSize: 10,
+                            fontWeight: '800',
+                          }}
+                        >
+                          {tabUnread > 99 ? '99+' : tabUnread}
+                        </Text>
+                      </View>
+                    )}
                   </TouchableOpacity>
                 );
               })}
@@ -518,11 +826,17 @@ export default function ChatPane({
               the tall expanded pane between the tabs and the composer. */}
           <View style={{ flex: 1 }}>
             <FlatList
-              data={results}
+              ref={listRef}
+              data={listData}
               inverted
               keyExtractor={m => m._id}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 8 }}
+              onScroll={onListScroll}
+              scrollEventThrottle={16}
+              onViewableItemsChanged={onViewableItemsChanged}
+              viewabilityConfig={viewabilityConfig}
+              onScrollToIndexFailed={onScrollToIndexFailed}
               onEndReached={() => {
                 if (status === 'CanLoadMore') loadMore(30);
               }}
@@ -533,6 +847,34 @@ export default function ChatPane({
                 </Text>
               }
               renderItem={({ item }) => {
+                // Full-width "UNREAD MESSAGES" divider at the read/unread
+                // boundary captured when this channel was opened.
+                if (item.__divider) {
+                  return (
+                    <View style={{ paddingVertical: 8 }}>
+                      <View
+                        style={{
+                          backgroundColor: 'rgba(15,19,28,0.9)',
+                          borderRadius: 8,
+                          paddingVertical: 5,
+                          paddingHorizontal: 12,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: '#9DB2C9',
+                            textAlign: 'center',
+                            fontSize: 11,
+                            fontWeight: '800',
+                            letterSpacing: 1.5,
+                          }}
+                        >
+                          UNREAD MESSAGES
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                }
                 // Dawn report card: bold + scannable. Gold "DAY N", then the
                 // elimination line big, with any eliminated name tinted its
                 // own chat color so it's easy to spot who died.
@@ -598,7 +940,7 @@ export default function ChatPane({
                             NO ONE HAS BEEN ELIMINATED
                           </Text>
                         ) : (
-                          dr.eliminated.map((e, i) => (
+                          dr.eliminated.map((e: { id: string; name: string }, i: number) => (
                             <Text
                               key={i}
                               className="font-extrabold text-center"
@@ -618,6 +960,162 @@ export default function ChatPane({
                             </Text>
                           ))
                         )}
+                      </View>
+                    </View>
+                  );
+                }
+                // Hunter / Hunter Wolf death-shot: a prominent elimination card
+                // (matches the dawn report's big-white treatment so it never
+                // reads as a quiet footnote). Both names tinted their chat color.
+                if (item.shotReport) {
+                  const sr = item.shotReport as {
+                    shooter: { id: string; name: string };
+                    target: { id: string; name: string };
+                  };
+                  return (
+                    <View className="my-3 self-stretch items-center px-2">
+                      <Text className="text-wolf-muted text-[10px] tracking-widest mb-1">
+                        MODERATOR
+                      </Text>
+                      <View
+                        className="rounded-xl px-4 py-3 items-center"
+                        style={{
+                          borderWidth: 1,
+                          borderColor: '#D4A017',
+                          backgroundColor: '#1A1A24',
+                          maxWidth: '92%',
+                        }}
+                      >
+                        <Text
+                          className="font-extrabold text-center"
+                          style={{ fontSize: 18, letterSpacing: 0.5 }}
+                        >
+                          <Text style={{ color: colorForPlayer(sr.target.id) }}>
+                            {sr.target.name.toUpperCase()}
+                          </Text>
+                          <Text className="text-wolf-text"> HAS BEEN ELIMINATED</Text>
+                        </Text>
+                        <Text
+                          className="text-wolf-muted text-center"
+                          style={{ fontSize: 13, marginTop: 6 }}
+                        >
+                          <Text className="text-wolf-muted">Shot by </Text>
+                          <Text
+                            style={{
+                              color: colorForPlayer(sr.shooter.id),
+                              fontWeight: '700',
+                            }}
+                          >
+                            {sr.shooter.name}
+                          </Text>
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                }
+                // Mad Bomber detonation (public death — lynch / Hunter shot):
+                // prominent card listing everyone the blast took, attributed to
+                // the bomber. Mirrors the shot card's treatment.
+                if (item.blastReport) {
+                  const br = item.blastReport as {
+                    bomber: { id: string; name: string };
+                    victims: { id: string; name: string }[];
+                  };
+                  return (
+                    <View className="my-3 self-stretch items-center px-2">
+                      <Text className="text-wolf-muted text-[10px] tracking-widest mb-1">
+                        MODERATOR
+                      </Text>
+                      <View
+                        className="rounded-xl px-4 py-3 items-center"
+                        style={{
+                          borderWidth: 1,
+                          borderColor: '#D4A017',
+                          backgroundColor: '#1A1A24',
+                          maxWidth: '92%',
+                        }}
+                      >
+                        <Text
+                          className="text-wolf-red font-extrabold tracking-widest"
+                          style={{ fontSize: 13, marginBottom: 6 }}
+                        >
+                          THE BOMB GOES OFF
+                        </Text>
+                        {br.victims.map((v, i) => (
+                          <Text
+                            key={v.id}
+                            className="font-extrabold text-center"
+                            style={{
+                              fontSize: 18,
+                              letterSpacing: 0.5,
+                              marginTop: i > 0 ? 4 : 0,
+                            }}
+                          >
+                            <Text style={{ color: colorForPlayer(v.id) }}>
+                              {v.name.toUpperCase()}
+                            </Text>
+                            <Text className="text-wolf-text"> HAS BEEN ELIMINATED</Text>
+                          </Text>
+                        ))}
+                        <Text
+                          className="text-wolf-muted text-center"
+                          style={{ fontSize: 13, marginTop: 6 }}
+                        >
+                          <Text className="text-wolf-muted">Caught in </Text>
+                          <Text
+                            style={{
+                              color: colorForPlayer(br.bomber.id),
+                              fontWeight: '700',
+                            }}
+                          >
+                            {br.bomber.name}
+                          </Text>
+                          <Text className="text-wolf-muted">'s blast</Text>
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                }
+                // Morning roll call: "who's still in the game?" Each name tinted
+                // its chat-identity color (matches that player's avatar/messages)
+                // so recognition carries over from the rest of the chat.
+                if (item.roster) {
+                  const roster = item.roster as { id: string; name: string }[];
+                  return (
+                    <View className="my-3 self-stretch items-center px-2">
+                      <Text className="text-wolf-muted text-[10px] tracking-widest mb-1">
+                        MODERATOR
+                      </Text>
+                      <View
+                        className="rounded-xl px-5 py-3 items-center"
+                        style={{
+                          borderWidth: 1,
+                          borderColor: '#D4A017',
+                          backgroundColor: '#1A1A24',
+                          maxWidth: '92%',
+                        }}
+                      >
+                        <Text
+                          className="text-wolf-accent font-bold tracking-widest"
+                          style={{ fontSize: 13 }}
+                        >
+                          STILL IN THE GAME ({roster.length})
+                        </Text>
+                        <View style={{ height: 8 }} />
+                        {roster.map((p, i) => (
+                          <Text
+                            key={p.id}
+                            className="font-extrabold text-center"
+                            style={{
+                              fontSize: 16,
+                              letterSpacing: 0.5,
+                              marginTop: i > 0 ? 3 : 0,
+                              color: colorForPlayer(p.id),
+                            }}
+                          >
+                            {p.name}
+                          </Text>
+                        ))}
                       </View>
                     </View>
                   );
@@ -658,7 +1156,7 @@ export default function ChatPane({
                               —
                             </Text>
                           ) : (
-                            vr.livesVoters.map((n, i) => (
+                            vr.livesVoters.map((n: string, i: number) => (
                               <Text
                                 key={i}
                                 className="text-wolf-text text-center"
@@ -688,7 +1186,7 @@ export default function ChatPane({
                               —
                             </Text>
                           ) : (
-                            vr.diesVoters.map((n, i) => (
+                            vr.diesVoters.map((n: string, i: number) => (
                               <Text
                                 key={i}
                                 className="text-wolf-text text-center"
@@ -722,10 +1220,9 @@ export default function ChatPane({
                       >
                         {item.headline && (
                           <Text
-                            className="text-wolf-text text-center font-extrabold"
+                            className="text-wolf-accent text-center font-bold tracking-widest"
                             style={{
-                              fontSize: 18,
-                              letterSpacing: 0.5,
+                              fontSize: 13,
                               marginBottom: item.body ? 8 : 0,
                             }}
                           >
@@ -754,8 +1251,11 @@ export default function ChatPane({
                 if (mine) {
                   return (
                     <View className="mb-2 max-w-[82%] self-end">
-                      <View className="rounded-2xl px-3 py-2 bg-wolf-accent">
-                        <Text className="text-wolf-bg" style={{ fontSize: 14 }}>
+                      <View
+                        className="rounded-2xl px-3 py-2"
+                        style={{ backgroundColor: MY_BUBBLE_BG }}
+                      >
+                        <Text className="text-wolf-text" style={{ fontSize: 14 }}>
                           {item.body}
                         </Text>
                       </View>
@@ -805,8 +1305,11 @@ export default function ChatPane({
                         {item.authorName}
                       </Text>
                       <View
-                        className="rounded-2xl px-3 py-2 bg-wolf-card"
-                        style={{ alignSelf: 'flex-start' }}
+                        className="rounded-2xl px-3 py-2"
+                        style={{
+                          alignSelf: 'flex-start',
+                          backgroundColor: OTHER_BUBBLE_BG,
+                        }}
                       >
                         <Text className="text-wolf-text" style={{ fontSize: 14 }}>
                           {item.body}
@@ -817,6 +1320,62 @@ export default function ChatPane({
                 );
               }}
             />
+            {/* Scroll-to-bottom caret. Appears when scrolled up; staged: first
+                tap → unread divider, next tap → newest. Bubble shows how many
+                unread wait below (decrements as they scroll into view). */}
+            {!atBottom && (
+              <TouchableOpacity
+                onPress={onCaretPress}
+                activeOpacity={0.8}
+                style={{
+                  position: 'absolute',
+                  right: 12,
+                  bottom: 12,
+                  width: 40,
+                  height: 40,
+                  borderRadius: 20,
+                  backgroundColor: '#22222F',
+                  borderWidth: 1,
+                  borderColor: '#3A3A48',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  elevation: 4,
+                  shadowColor: '#000',
+                  shadowOpacity: 0.4,
+                  shadowRadius: 4,
+                  shadowOffset: { width: 0, height: 2 },
+                }}
+              >
+                <Text style={{ color: '#F0EDE8', fontSize: 16, marginTop: -1 }}>
+                  ▾
+                </Text>
+                {read.ready && activeUnread > 0 && (
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: -7,
+                      minWidth: 18,
+                      height: 18,
+                      borderRadius: 9,
+                      paddingHorizontal: 5,
+                      backgroundColor: '#B03A2E',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: '#F0EDE8',
+                        fontSize: 10,
+                        fontWeight: '800',
+                      }}
+                    >
+                      {activeUnread > 99 ? '99+' : activeUnread}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Trial countdown (accusation / defense / prevote) sits right above
@@ -846,10 +1405,13 @@ export default function ChatPane({
               <TouchableOpacity
                 onPress={handleSend}
                 disabled={!draft.trim() || sending}
-                style={{ opacity: !draft.trim() || sending ? 0.4 : 1 }}
-                className="bg-wolf-accent rounded-full px-5 py-2.5"
+                style={{
+                  opacity: !draft.trim() || sending ? 0.4 : 1,
+                  backgroundColor: MY_BUBBLE_BG,
+                }}
+                className="rounded-full px-5 py-2.5"
               >
-                <Text className="text-wolf-bg font-extrabold tracking-wider">
+                <Text className="text-wolf-text font-extrabold tracking-wider">
                   SEND
                 </Text>
               </TouchableOpacity>

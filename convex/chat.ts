@@ -332,6 +332,9 @@ export const chatState = query({
       // Vote countdown is live — ChatPane auto-collapses so the LIVES/DIES
       // buttons aren't hidden behind the chat.
       voteActive: game.currentNomination?.subPhase === 'vote',
+      // Results just tallied — ChatPane forces every device to the bottom so the
+      // vote-result card is front-and-center (not the pre-vote scroll spot).
+      voteResultsShowing: !!nom && nom.subPhase === 'results',
       trial,
       chatDominant,
       day,
@@ -378,6 +381,63 @@ export const listMessages = query({
       )
       .order('desc')
       .paginate(args.paginationOpts);
+  },
+});
+
+/**
+ * Per-channel unread counts for the caller, across every channel they can
+ * READ — so the collapsed chat bar can show a running total and each channel
+ * tab can show its own badge. `lastSeen[channel]` is the client's high-water
+ * mark (the newest message it has shown for that channel); anything newer
+ * (and not the caller's own) is unread. Also returns each channel's newest
+ * `sentAt` so a fresh client can seed its marks and not count old history.
+ */
+export const unreadCounts = query({
+  args: {
+    gameId: v.id('games'),
+    deviceClientId: v.string(),
+    lastSeen: v.object({
+      village: v.optional(v.number()),
+      wolves: v.optional(v.number()),
+      dead: v.optional(v.number()),
+      break: v.optional(v.number()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const empty = {
+      counts: { village: 0, wolves: 0, dead: 0, break: 0 },
+      latest: { village: 0, wolves: 0, dead: 0, break: 0 },
+    };
+    const game = await ctx.db.get(args.gameId);
+    if (!game || game.mode !== 'remote') return empty;
+    const player = await resolvePlayer(ctx, args.gameId, args.deviceClientId);
+    if (!player) return empty;
+
+    const channels: Channel[] = ['village', 'wolves', 'dead', 'break'];
+    const counts: Record<Channel, number> = empty.counts;
+    const latest: Record<Channel, number> = empty.latest;
+
+    for (const channel of channels) {
+      if (!canReadChannel(channel, player)) continue;
+      const since = args.lastSeen[channel] ?? 0;
+      // Newest-first; record the newest sentAt, then stop once we pass the
+      // caller's last-seen mark. The caller's own messages aren't "unread".
+      for await (const m of ctx.db
+        .query('messages')
+        .withIndex('by_game_channel', q =>
+          q.eq('gameId', args.gameId).eq('channel', channel),
+        )
+        .order('desc')) {
+        if (latest[channel] === 0) latest[channel] = m.sentAt;
+        if (m.sentAt <= since) break;
+        // Only another PLAYER's messages are "unread". Moderator/system cards
+        // (dawn report, dusk notice, GAME ON) are app-presented narration — they
+        // have no authorPlayerId and never count toward an unread badge/divider.
+        if (m.authorPlayerId != null && m.authorPlayerId !== player._id)
+          counts[channel]++;
+      }
+    }
+    return { counts, latest };
   },
 });
 

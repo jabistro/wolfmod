@@ -178,6 +178,46 @@ export async function applyMadBomberBlast(
   return newlyDead;
 }
 
+/**
+ * Remote-only: post a Mad Bomber detonation to the village chat as a permanent,
+ * prominent record listing everyone the blast took. Called only when the bomber
+ * died PUBLICLY (lynch / Hunter shot) — the bomber is already revealed, so
+ * attributing the blast is fair. NOT used for night detonations (those victims
+ * surface in the cloak-preserving dawn report instead). No-op if not remote or
+ * the blast took no one.
+ */
+export async function postBlastReport(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  bomberId: Id<'players'>,
+  victimIds: Id<'players'>[],
+): Promise<void> {
+  if (victimIds.length === 0) return;
+  const game = await ctx.db.get(gameId);
+  if (!game || game.mode !== 'remote') return;
+  const bomber = await ctx.db.get(bomberId);
+  if (!bomber) return;
+  const victims: { name: string; id: string }[] = [];
+  for (const vid of victimIds) {
+    const p = await ctx.db.get(vid);
+    if (p) victims.push({ name: p.name, id: p._id as string });
+  }
+  if (victims.length === 0) return;
+  await ctx.db.insert('messages', {
+    gameId,
+    channel: 'village',
+    authorName: 'MODERATOR',
+    body: '',
+    phaseLabel: `Day ${game.dayNumber}`,
+    sentAt: Date.now(),
+    system: true,
+    blastReport: {
+      bomber: { name: bomber.name, id: bomber._id as string },
+      victims,
+    },
+  });
+}
+
 // ───── Kill resolution + cascade ────────────────────────────────────────────
 
 /**
@@ -446,6 +486,32 @@ export const submitHunterShot = mutation({
       `${me.name.toUpperCase()} HAS SHOT ${target.name.toUpperCase()}`,
       `${target.name.toUpperCase()} HAS BEEN ELIMINATED`,
     ]);
+    // Remote: also drop a PERMANENT record in the village chat. The on-screen
+    // overlay above is transient and, with the chat expanded (the default
+    // during the triggers phase), it's hidden behind the docked chat — so the
+    // chat card is how remote players actually learn of the shot. Every other
+    // elimination (overnight dawn report, lynch) already lands in chat; this
+    // closes the gap. Public action → shooter revealed, same as the overlay.
+    if (game.mode === 'remote') {
+      await ctx.db.insert('messages', {
+        gameId: args.gameId,
+        channel: 'village',
+        authorName: 'MODERATOR',
+        body: '',
+        phaseLabel: `Day ${game.dayNumber}`,
+        sentAt: Date.now(),
+        system: true,
+        shotReport: {
+          shooter: { name: me.name, id: me._id as string },
+          target: { name: target.name, id: target._id as string },
+        },
+      });
+    }
+    // If the shot target was a Mad Bomber, its blast victims (computed above)
+    // also need a public chat record — the shot card only names the bomber.
+    if (target.role === 'Mad Bomber') {
+      await postBlastReport(ctx, args.gameId, target._id, blastDead);
+    }
     // announcementTick will resume the queue.
   },
 });

@@ -26,6 +26,7 @@ import {
   enqueueTriggersForDeaths,
   processTriggerQueue,
   applyMadBomberBlast,
+  postBlastReport,
   TRIGGER_DWELL_MS,
 } from './triggers';
 import { NIGHT_STEPS } from '../src/data/nightOrder';
@@ -1287,6 +1288,10 @@ export const tallyVote = internalMutation({
         game.nightNumber,
         targetId,
       );
+      // Remote: post the detonation to chat so the village sees who the blast
+      // took (the lynch result card only names the bomber). Public death →
+      // fair to attribute the blast.
+      await postBlastReport(ctx, args.gameId, targetId, blastDead);
     }
 
     // Enqueue Hunter/HW triggers from the lynch target AND any blast
@@ -1451,6 +1456,16 @@ export const autoResolveAfterVote = internalMutation({
     if (wasLynched) {
       const won = await applyWinIfReached(ctx, args.gameId);
       if (won) {
+        // Announce the deciding elimination FIRST — even a game-ending lynch
+        // must be confirmed to the village, not inferred from the win banner
+        // (the vote tally alone doesn't say who actually went down).
+        await postModeratorMessage(
+          ctx,
+          game,
+          '',
+          nominee ? [{ name: nominee.name, id: nominee._id as string }] : undefined,
+          `${(nominee?.name ?? 'THE ACCUSED').toUpperCase()} HAS BEEN ELIMINATED`,
+        );
         const ended = await ctx.db.get(args.gameId);
         if (ended) await postWinBanner(ctx, ended);
         await ctx.db.patch(args.gameId, {

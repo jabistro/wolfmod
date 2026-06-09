@@ -1336,10 +1336,24 @@ async function postDawnReport(ctx: MutationCtx, gameId: Id<'games'>) {
     dawnReport: { dayLabel, eliminated },
   });
 
-  // Remote autopilot: let the report sit for a few seconds, then auto-advance
-  // out of morning (no host BEGIN DAY tap).
+  // Remote autopilot: auto-advance out of morning (no host BEGIN DAY tap).
+  // Normally the day rolls IMMEDIATELY — players read the dawn report (which
+  // stays in the chat transcript) as the day begins. But if a Hunter / Hunter
+  // Wolf is in play, keep a uniform read dwell every morning so the timing
+  // never reveals whether one died in the night and is about to take a shot —
+  // the trigger window must stay cloaked for every player. (`triggersFollowUp`
+  // is set just before this when a Hunter/HW died this night.)
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  const hunterInPlay =
+    game.triggersFollowUp === 'day' ||
+    players.some(
+      p => p.alive && (p.role === 'Hunter' || p.role === 'Hunter Wolf'),
+    );
   await ctx.scheduler.runAfter(
-    MORNING_READ_MS,
+    hunterInPlay ? MORNING_READ_MS : 0,
     internal.night.autoBeginDay,
     { gameId },
   );

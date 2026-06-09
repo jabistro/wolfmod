@@ -57,6 +57,12 @@ export default function RemoteGameLayout({
 
   const mustAct =
     (cs?.phase === 'night' && !wolfNight) ||
+    // Triggers phase (Hunter / Hunter Wolf death-shot): the picker IS the
+    // screen body, not a modal — with the chat expanded it's clipped behind the
+    // chat, so the shooter can't reach it and the 10s window auto-SKIPS the
+    // shot. Collapse like night so the actor sees their picker (and everyone
+    // else sees the on-screen shot announcement; chat also keeps a record).
+    cs?.phase === 'triggers' ||
     cs?.voteActive === true ||
     // Lobby is dense (seats / build / start) — keep chat collapsed by default;
     // players expand the bar to banter while waiting.
@@ -83,6 +89,19 @@ export default function RemoteGameLayout({
     if (shouldOpen && !prevShouldOpen.current) setExpanded(true);
     prevShouldOpen.current = shouldOpen;
   }, [shouldOpen]);
+
+  // Pop the chat open at the start of each day so the dawn report (now posted
+  // with no morning pause) is front-and-center. Edge-triggered on ENTERING the
+  // day phase, so it won't fight a manual collapse later in the same day, and
+  // it skips the case where you reconnect already mid-day (no prior phase).
+  const prevPhase = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const phase = cs?.phase;
+    if (phase === 'day' && prevPhase.current && prevPhase.current !== 'day') {
+      setExpanded(true);
+    }
+    prevPhase.current = phase;
+  }, [cs?.phase]);
 
   // Android back button: if the chat is open, close it instead of prompting to
   // leave the game. Registered by this (parent) layout, so it runs before the

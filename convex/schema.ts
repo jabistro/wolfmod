@@ -517,6 +517,12 @@ export default defineSchema({
       v.object({
         dayLabel: v.number(),
         eliminated: v.array(v.object({ name: v.string(), id: v.string() })),
+        // Players still alive as the day opens, seat-ordered — the morning
+        // "who's left in the game?" roll call. Names tinted their chat color in
+        // the card. Optional so dawn reports written before this field still read.
+        remaining: v.optional(
+          v.array(v.object({ name: v.string(), id: v.string() })),
+        ),
       }),
     ),
     /**
@@ -526,6 +532,39 @@ export default defineSchema({
      */
     winBanner: v.optional(
       v.object({ winner: v.union(v.literal('village'), v.literal('wolf')) }),
+    ),
+    /**
+     * Morning roll call: the players still in the game as a day opens (day ≥ 2),
+     * seat-ordered. Posted at true day-start (after night deaths AND any Hunter
+     * cascade resolve) so "who's left?" is accurate before discussion. Rendered
+     * as a moderator card with each name tinted its chat-identity color.
+     */
+    roster: v.optional(
+      v.array(v.object({ name: v.string(), id: v.string() })),
+    ),
+    /**
+     * A Hunter / Hunter Wolf death-shot, posted to the village chat as a
+     * permanent, prominent elimination record (the on-screen trigger overlay is
+     * transient and, in remote mode, hidden behind the docked chat). The shot
+     * is a public action — the shooter is revealed, mirroring the overlay.
+     */
+    shotReport: v.optional(
+      v.object({
+        shooter: v.object({ name: v.string(), id: v.string() }),
+        target: v.object({ name: v.string(), id: v.string() }),
+      }),
+    ),
+    /**
+     * A Mad Bomber detonation, posted to the village chat when the bomber dies
+     * PUBLICLY (lynch or Hunter shot) — listing everyone the blast took. Night
+     * detonations are NOT posted here: their victims already appear in the dawn
+     * report, which deliberately doesn't reveal cause of death.
+     */
+    blastReport: v.optional(
+      v.object({
+        bomber: v.object({ name: v.string(), id: v.string() }),
+        victims: v.array(v.object({ name: v.string(), id: v.string() })),
+      }),
     ),
   }).index('by_game_channel', ['gameId', 'channel']),
 });
