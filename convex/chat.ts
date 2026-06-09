@@ -169,7 +169,9 @@ function postState(
                   lockedReason: 'The accused is giving their defense.',
                 };
           case 'prevote':
-            return { canPost: false, lockedReason: 'Voting is about to begin.' };
+            // No footer text — the trial banner/countdown already signals
+            // that voting is imminent, so the line is redundant.
+            return { canPost: false, lockedReason: null };
           case 'vote':
             return { canPost: false, lockedReason: 'Voting — cast your votes.' };
           case 'results':
@@ -292,6 +294,19 @@ export const chatState = query({
           nom.subPhase === 'prevote' ||
           nom.subPhase === 'results'));
 
+    // Both the discussion stats and the wolf-pack roster need the player list;
+    // fetch it once and share.
+    const wolvesReadable = canReadChannel('wolves', player);
+    const needDayStats =
+      game.phase === 'day' && !nom && !game.nightFallsAt;
+    const allPlayers =
+      wolvesReadable || needDayStats
+        ? await ctx.db
+            .query('players')
+            .withIndex('by_game', q => q.eq('gameId', args.gameId))
+            .collect()
+        : [];
+
     // Active discussion stats, relocated into the chat header (replacing "CHAT"
     // when expanded) so the clock/alive/noms stay visible while the tall chat
     // covers the underlying timer bar. Only during open discussion.
@@ -302,14 +317,10 @@ export const chatState = query({
       nominationsRemaining: number;
       maxNominationsPerDay: number;
     } | null = null;
-    if (game.phase === 'day' && !nom && !game.nightFallsAt) {
-      const players = await ctx.db
-        .query('players')
-        .withIndex('by_game', q => q.eq('gameId', args.gameId))
-        .collect();
+    if (needDayStats) {
       const cfg = dayConfigOf(game);
       day = {
-        aliveCount: players.filter(p => p.alive).length,
+        aliveCount: allPlayers.filter(p => p.alive).length,
         dayEndsAt: game.dayEndsAt ?? null,
         dayPausedRemainingMs: game.dayPausedRemainingMs ?? null,
         nominationsRemaining: Math.max(
@@ -319,6 +330,26 @@ export const chatState = query({
         maxNominationsPerDay: cfg.maxNominationsPerDay,
       };
     }
+
+    // Wolf-pack roster, pinned at the top of the WOLVES chat so the pack can
+    // see who's on their team — and which wolf is which — without leaving the
+    // chat to study the seating ring, speeding up the nightly kill decision.
+    // Mirrors the "Name (Role)" reveal the wolves already share at role reveal.
+    // Real wolves only (Minion/Reviler don't wake with — or chat with — the
+    // pack). Exposed to anyone who can READ the channel: the living pack plus
+    // dead spectators (consistent with the ghost-spectator full-info view).
+    // Seat order so it reads the same on every wolf's phone.
+    const wolfRoster = wolvesReadable
+      ? allPlayers
+          .filter(p => isWolf(p))
+          .sort((a, b) => (a.seatPosition ?? 0) - (b.seatPosition ?? 0))
+          .map(p => ({
+            name: p.name,
+            role: p.role!,
+            alive: p.alive,
+            isMe: p._id === player._id,
+          }))
+      : null;
 
     return {
       enabled: true,
@@ -338,6 +369,7 @@ export const chatState = query({
       trial,
       chatDominant,
       day,
+      wolfRoster,
       // Host paused the discussion → client moves everyone to the BREAK ROOM
       // and makes the gameplay channels read-only.
       paused: isGamePaused(game),

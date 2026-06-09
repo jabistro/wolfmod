@@ -225,6 +225,82 @@ function TrialBanner({ trial }: { trial: TrialInfo }) {
   );
 }
 
+type WolfRosterEntry = {
+  name: string;
+  role: string;
+  alive: boolean;
+  isMe: boolean;
+};
+
+// Pinned at the top of the WOLVES chat so the pack can see who's on their team
+// — and which wolf is which — without leaving the chat to study the seating
+// ring. Mirrors the red-tinted "Name (Role)" pack box from the role reveal.
+// Dead pack members are dimmed + struck through (no longer part of the kill).
+function WolfRoster({ roster }: { roster: WolfRosterEntry[] }) {
+  if (roster.length === 0) return null;
+  // "YOUR PACK" only if the viewer is (or was) a wolf; a dead villager
+  // spectating the channel sees the neutral "THE PACK".
+  const iAmPack = roster.some(w => w.isMe);
+  return (
+    <View
+      style={{
+        marginHorizontal: 12,
+        marginTop: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(255,59,48,0.5)',
+        backgroundColor: 'rgba(255,59,48,0.08)',
+        borderRadius: 12,
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+      }}
+    >
+      <Text
+        className="font-bold tracking-widest"
+        style={{ color: '#FF3B30', fontSize: 10, marginBottom: 6 }}
+      >
+        {iAmPack ? 'YOUR PACK' : 'THE PACK'}
+      </Text>
+      <View className="flex-row flex-wrap" style={{ gap: 6 }}>
+        {roster.map(w => (
+          <View
+            key={w.name}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              backgroundColor: w.isMe
+                ? 'rgba(255,59,48,0.22)'
+                : 'rgba(0,0,0,0.25)',
+              borderRadius: 999,
+              paddingVertical: 3,
+              paddingHorizontal: 9,
+              opacity: w.alive ? 1 : 0.45,
+            }}
+          >
+            <Text
+              className="font-bold"
+              style={{
+                color: '#F0EDE8',
+                fontSize: 12,
+                textDecorationLine: w.alive ? 'none' : 'line-through',
+              }}
+            >
+              {w.name}
+              {w.isMe ? ' (you)' : ''}
+            </Text>
+            <Text
+              className="font-normal"
+              style={{ color: '#C9A99A', fontSize: 12 }}
+            >
+              {' · '}
+              {w.role}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 /**
  * Remote-mode chat surface. All access (which tabs exist, whether the
  * composer is live, the muted reason) comes from the server `chatState`
@@ -430,6 +506,17 @@ export default function ChatPane({
   setAnchorRef.current = read.setAnchor;
   const minVisibleIndexRef = useRef(0);
   const suppressSeenRef = useRef(false);
+  // The most recent settled viewport (channel + newest-visible ts + top-of-
+  // viewport ts), updated on EVERY viewability change even while seen-marking is
+  // suppressed during the restore window. The restore's settle() flushes it once
+  // suppression lifts — without that, a channel short enough that its message(s)
+  // are fully visible without scrolling never fires another viewability event,
+  // so its unread badge would stay stuck (see settle below).
+  const lastViewableRef = useRef<{
+    channel: Channel;
+    maxTs: number;
+    topTs: number;
+  } | null>(null);
   const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 50 }).current;
   const onViewableItemsChanged = useRef(
     (info: { viewableItems: Array<{ item: any; index: number | null }> }) => {
@@ -438,9 +525,6 @@ export default function ChatPane({
         if (typeof vi.index === 'number' && vi.index < minIdx) minIdx = vi.index;
       }
       if (minIdx !== Number.POSITIVE_INFINITY) minVisibleIndexRef.current = minIdx;
-      // While force-restoring scroll on open, don't let the briefly-rendered
-      // bottom rows mark the newest messages as read.
-      if (suppressSeenRef.current) return;
       const real = info.viewableItems.filter(
         vi =>
           vi.item && !vi.item.__divider && typeof vi.item.sentAt === 'number',
@@ -453,6 +537,16 @@ export default function ChatPane({
         // Top of the viewport in an inverted list = largest index = oldest.
         if ((vi.index ?? 0) > (top.index ?? 0)) top = vi;
       }
+      // Always remember the settled viewport so the restore window can flush it.
+      lastViewableRef.current = {
+        channel: activeRef.current,
+        maxTs,
+        topTs: top.item.sentAt,
+      };
+      // While force-restoring scroll on open, don't let the briefly-rendered
+      // bottom rows mark the newest messages as read — settle() applies the
+      // FINAL settled viewport instead.
+      if (suppressSeenRef.current) return;
       markSeenRef.current(activeRef.current, maxTs);
       setAnchorRef.current(activeRef.current, top.item.sentAt);
     },
@@ -509,6 +603,30 @@ export default function ChatPane({
     }, 120);
   };
 
+  // When a trial begins (someone is put on trial), yank LIVING players to the
+  // bottom of the VILLAGE chat so they immediately see who's accused — the chat
+  // also auto-expands for them (chatDominant → shouldOpen in RemoteGameLayout).
+  // One-shot, edge-triggered on the trial appearing: afterward they're free to
+  // scroll wherever they like, never stuck. The ref is honored by the restore
+  // effect below so a concurrent tab/expand remount lands at the bottom too.
+  const snapToBottomOnTrialRef = useRef(false);
+  const trialOpen = !!state?.trial;
+  const iAmAlive = state?.me?.alive === true;
+  const prevTrialOpenRef = useRef(false);
+  useEffect(() => {
+    if (trialOpen && !prevTrialOpenRef.current && iAmAlive) {
+      snapToBottomOnTrialRef.current = true;
+      setActive('village');
+      // Delay past the restore effect's own scroll so the bottom snap wins even
+      // if we were already parked on VILLAGE (no remount → restore won't re-run).
+      setTimeout(() => {
+        listRef.current?.scrollToOffset({ offset: 0, animated: true });
+      }, 120);
+    }
+    prevTrialOpenRef.current = trialOpen;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trialOpen, iAmAlive]);
+
   // Position the list each time a channel is (re)opened — the list remounts on
   // every expand and every tab switch. Priority: (1) the saved scroll position
   // if you've read here before, else (2) the UNREAD MESSAGES divider so you
@@ -537,7 +655,10 @@ export default function ChatPane({
     //      is gated on alive, so ghosts are never yanked mid-day).
     // Everything else (same-mount tab switch / expand-after-collapse) restores
     // the saved anchor or the unread divider so you keep your place.
-    const goBottom = isFirstRestore || voteResultsShowing;
+    //  (3) A trial just began (living players) — see snapToBottomOnTrialRef.
+    const goBottom =
+      isFirstRestore || voteResultsShowing || snapToBottomOnTrialRef.current;
+    snapToBottomOnTrialRef.current = false;
     const anchorTs = goBottom ? 0 : read.anchors[active] ?? 0;
     // Whether we expect something to scroll to (a saved spot or unread). Also
     // consult the server count for the target channel, since after a tab switch
@@ -549,6 +670,17 @@ export default function ChatPane({
       setTimeout(() => {
         if (restoreSessionRef.current === session) {
           suppressSeenRef.current = false;
+          // Apply the final settled viewport now that suppression has lifted.
+          // Covers short channels whose message(s) are fully visible without
+          // scrolling: viewability fired once (during suppression) and won't
+          // fire again, so the badge would otherwise never clear. markSeen is
+          // monotonic and we only ever pass the currently-visible maxTs, so a
+          // scrolled-up restore still leaves the unread-below messages unread.
+          const lv = lastViewableRef.current;
+          if (lv && lv.channel === active) {
+            read.markSeen(active, lv.maxTs);
+            read.setAnchor(active, lv.topTs);
+          }
         }
       }, 300);
     };
@@ -820,6 +952,12 @@ export default function ChatPane({
                 );
               })}
             </View>
+          )}
+
+          {/* Pinned wolf-pack roster on the WOLVES tab — who's on the team and
+              which wolf is which, so the pack can decide without leaving chat. */}
+          {active === 'wolves' && state?.wolfRoster && (
+            <WolfRoster roster={state.wolfRoster} />
           )}
 
           {/* Message list (inverted: newest at the bottom). Flexes to fill
@@ -1416,7 +1554,7 @@ export default function ChatPane({
                 </Text>
               </TouchableOpacity>
             </View>
-          ) : (
+          ) : activeMeta?.lockedReason === null ? null : (
             <View className="px-4 py-3 border-t border-wolf-card">
               <Text className="text-wolf-muted text-center text-sm italic">
                 {activeMeta?.lockedReason ?? 'You can only listen here.'}
