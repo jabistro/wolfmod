@@ -8,6 +8,7 @@ import {
   Modal,
   Pressable,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -499,11 +500,16 @@ function DayHeader({
   mode,
   roomCode,
   onLeavePress,
+  onBuildPress,
 }: {
   dayNumber: number;
   mode: string;
   roomCode: string;
   onLeavePress?: () => void;
+  /** If set, render a 🛠 tools button just left of the ROOM block. Lives in
+   *  the header so it stays reachable inside the remote split-view's header
+   *  peek zone even while the chat pane is expanded. */
+  onBuildPress?: () => void;
 }) {
   return (
     <View className="px-4 pt-10 pb-3" style={{ position: 'relative' }}>
@@ -546,6 +552,19 @@ function DayHeader({
         >
           {roomCode}
         </Text>
+        {onBuildPress && (
+          <TouchableOpacity
+            onPress={onBuildPress}
+            hitSlop={8}
+            style={{ paddingTop: 2, marginRight: 6 }}
+          >
+            <Image
+              source={require('../../assets/images/build.png')}
+              style={{ width: 24, height: 24, tintColor: '#8A8590' }}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -553,21 +572,17 @@ function DayHeader({
 
 // ───── Day action row ──────────────────────────────────────────────────────
 //
-// Sits below the day timer on every day sub-screen. Three equal columns —
-// left (DiscussionView passes "N ALIVE"), center (NOMS LEFT), right (BUILD).
-// The host's settings cog lives on its own row beneath this one via
-// DayCogRow so the cog stays at the far left without crowding the stats.
+// Sits below the day timer on the Discussion sub-screen. Two stat columns —
+// left ("N ALIVE"), center (NOMS LEFT). The 🛠 build button now lives in
+// DayHeader (right of the title, left of ROOM); the host's settings cog lives
+// on its own row beneath this one via DayCogRow.
 
 function DayActionRow({
   left,
   center,
-  showBuild,
-  onBuildPress,
 }: {
   left?: React.ReactNode;
   center?: React.ReactNode;
-  showBuild?: boolean;
-  onBuildPress?: () => void;
 }) {
   return (
     <View
@@ -576,26 +591,7 @@ function DayActionRow({
     >
       <View style={{ flex: 1, alignItems: 'flex-start' }}>{left}</View>
       <View style={{ flex: 1, alignItems: 'center' }}>{center}</View>
-      <View style={{ flex: 1, alignItems: 'flex-end' }}>
-        {showBuild && (
-          <TouchableOpacity
-            onPress={onBuildPress}
-            hitSlop={8}
-            style={{ padding: 4 }}
-          >
-            <Text
-              style={{
-                color: '#8A8590',
-                fontSize: 15,
-                fontWeight: '700',
-                letterSpacing: 2,
-              }}
-            >
-              BUILD
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      <View style={{ flex: 1 }} />
     </View>
   );
 }
@@ -957,6 +953,7 @@ function DiscussionView({
         mode="DISCUSSION"
         roomCode={game.roomCode}
         onLeavePress={onLeavePress}
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       {hostMissing && (
@@ -990,8 +987,6 @@ function DiscussionView({
             NOMS LEFT: {game.nominationsRemaining}/{game.maxNominationsPerDay}
           </Text>
         }
-        showBuild
-        onBuildPress={() => setBuildOpen(true)}
       />
       {isHost && (
         <DayCogRow
@@ -1233,6 +1228,7 @@ function TrialView({
         mode="ON TRIAL"
         roomCode={game.roomCode}
         onLeavePress={onLeavePress}
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       {hostMissing && (
@@ -1256,7 +1252,6 @@ function TrialView({
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
 
-      <DayActionRow showBuild onBuildPress={() => setBuildOpen(true)} />
       {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
 
       <Pressable
@@ -1444,6 +1439,7 @@ function RemoteTrialScreen({
   deviceClientId: string;
 }) {
   const sp = nomination.subPhase;
+  const [buildOpen, setBuildOpen] = useState(false);
   const mode =
     sp === 'accusation'
       ? 'ACCUSATION'
@@ -1459,6 +1455,7 @@ function RemoteTrialScreen({
         mode={mode}
         roomCode={game.roomCode}
         onLeavePress={onLeavePress}
+        onBuildPress={() => setBuildOpen(true)}
       />
       {hostMissing && (
         <HostMissingBanner gameId={game._id} deviceClientId={deviceClientId} />
@@ -1471,6 +1468,11 @@ function RemoteTrialScreen({
           {nomination.nominee?.name?.toUpperCase() ?? '—'}
         </Text>
       </View>
+      <BuildModal
+        visible={buildOpen}
+        onClose={() => setBuildOpen(false)}
+        selectedRoles={game.selectedRoles}
+      />
     </SafeAreaView>
   );
 }
@@ -1575,6 +1577,7 @@ function VoteView({
         mode={isPreVote ? 'GET READY TO VOTE' : 'TIME TO VOTE'}
         roomCode={game.roomCode}
         onLeavePress={onLeavePress}
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       {hostMissing && (
@@ -1590,7 +1593,6 @@ function VoteView({
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
 
-      <DayActionRow showBuild onBuildPress={() => setBuildOpen(true)} />
       {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
 
       <ScrollView
@@ -1881,6 +1883,7 @@ function ResultsView({
         mode="VOTE RESULT"
         roomCode={game.roomCode}
         onLeavePress={onLeavePress}
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       {hostMissing && (
@@ -1896,7 +1899,6 @@ function ResultsView({
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
 
-      <DayActionRow showBuild onBuildPress={() => setBuildOpen(true)} />
 
       <ScrollView
         contentContainerStyle={{

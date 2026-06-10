@@ -90,7 +90,11 @@ export default function BuildModal({ visible, onClose, selectedRoles }: Props) {
           <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={12}>
             <Text style={styles.closeText}>Close</Text>
           </TouchableOpacity>
-          <Text style={styles.title}>BUILD</Text>
+          <View style={styles.titleWrap}>
+            <Image source={require('../../assets/images/build.png')} style={styles.titleIcon} resizeMode="contain" />
+            <Text style={styles.title}>BUILD</Text>
+            <Image source={require('../../assets/images/build.png')} style={styles.titleIcon} resizeMode="contain" />
+          </View>
           <View style={styles.balancePill}>
             <Text style={[styles.balanceText, { color: balanceColor }]}>
               {balance > 0 ? `+${balance}` : balance}
@@ -198,8 +202,15 @@ const styles = StyleSheet.create({
   },
   closeBtn: { width: 60 },
   closeText: { color: '#F0EDE8', fontSize: 16 },
-  title: {
+  titleWrap: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  titleIcon: { width: 22, height: 22, tintColor: '#F0EDE8' },
+  title: {
     color: '#F0EDE8',
     fontSize: 20,
     fontWeight: 'bold',
