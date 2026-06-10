@@ -931,9 +931,34 @@ export default function ChatPane({
             </Text>
           </View>
         )}
-        <Text className="text-wolf-muted text-base" style={{ marginLeft: 8 }}>
-          {expanded ? '▾' : '▴'}
-        </Text>
+        <View
+          style={{
+            marginLeft: 8,
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 4,
+            paddingHorizontal: 10,
+            paddingVertical: 4,
+            borderRadius: 999,
+            backgroundColor: expanded ? '#B03A2E' : '#2E7D46',
+          }}
+        >
+          <Text
+            style={{
+              color: '#F0EDE8',
+              fontSize: 11,
+              fontWeight: '900',
+              letterSpacing: 1,
+            }}
+          >
+            {expanded ? 'CLOSE' : 'OPEN'}
+          </Text>
+          <Text
+            style={{ color: '#F0EDE8', fontSize: 12, lineHeight: 12, fontWeight: '900' }}
+          >
+            {expanded ? '▼' : '▲'}
+          </Text>
+        </View>
       </TouchableOpacity>
 
       {expanded && (

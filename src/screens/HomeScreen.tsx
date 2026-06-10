@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../navigation/types';
+import appConfig from '../../app.json';
 
 type HomeNavProp = StackNavigationProp<RootStackParamList, 'Home'>;
 
@@ -66,8 +67,11 @@ export default function HomeScreen() {
           })}
         </View>
 
-        <Text className="text-wolf-muted text-[10px] tracking-[0.3em] uppercase mt-6 opacity-60">
+        <Text className="text-wolf-muted text-[10px] tracking-[0.3em] uppercase mt-6">
           Built by Bistro
+        </Text>
+        <Text className="text-wolf-muted text-[10px] tracking-[0.2em] mt-1">
+          v{appConfig.expo.version}
         </Text>
 
       </View>
