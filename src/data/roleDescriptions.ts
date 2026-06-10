@@ -140,7 +140,7 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
   'Vampire': 'Solo. Each night, marks a victim. They die the next day the moment they catch their second nomination.',
   'Auracabra': 'Solo. Each night, points at a handful of players — anyone among them carrying a special role dies.',
   'Bogeyman': 'Solo. Each night, if the wolves dither, the Bogeyman picks the kill for them. Wins only when every night-active role is dead.',
-  'Chupacabra': 'Solo. Each night, picks a player — if they\'re a wolf, they die. Once the pack is gone, may turn on the village.',
+  'Chupacabra': 'Solo. Each night, hunts a player — while wolves live, only a wolf falls. Once the pack is gone, any prey dies. Wins alone by clearing the wolves and standing among the last two.',
   'Count Dracula': 'Solo. Each night, claims a bride. Wins solo after surviving a full day and night with three brides on the board.',
   'Father Time': 'Solo. Wins solo if three separate days end with the clock running out and no one lynched.',
   'Hoodlum': 'Solo. Night one, marks a target for every wolf in the game. Wins solo if every one of them dies before the Hoodlum does.',

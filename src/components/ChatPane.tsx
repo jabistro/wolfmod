@@ -1058,22 +1058,28 @@ export default function ChatPane({
                 // jumped to the end-game screen behind the chat — closing the
                 // chat reveals the role logs.
                 if (item.winBanner) {
-                  const wolf = item.winBanner.winner === 'wolf';
+                  const w = item.winBanner.winner;
+                  const banner =
+                    w === 'wolf'
+                      ? { label: 'WOLVES WIN', bg: '#8B1818', border: '#B03A2E' }
+                      : w === 'chupacabra'
+                        ? { label: 'CHUPACABRA WINS', bg: '#6B4423', border: '#C08A4A' }
+                        : { label: 'VILLAGE WINS', bg: '#1F4E80', border: '#5BA0E5' };
                   return (
                     <View className="my-3 self-stretch items-center px-2">
                       <View
                         className="rounded-2xl px-6 py-5 self-stretch items-center"
                         style={{
-                          backgroundColor: wolf ? '#8B1818' : '#1F4E80',
+                          backgroundColor: banner.bg,
                           borderWidth: 2,
-                          borderColor: wolf ? '#B03A2E' : '#5BA0E5',
+                          borderColor: banner.border,
                         }}
                       >
                         <Text
                           className="text-wolf-text font-extrabold tracking-widest text-center"
                           style={{ fontSize: 26 }}
                         >
-                          {wolf ? 'WOLVES WIN' : 'VILLAGE WINS'}
+                          {banner.label}
                         </Text>
                         <Text
                           className="text-wolf-text text-center"

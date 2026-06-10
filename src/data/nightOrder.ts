@@ -32,6 +32,11 @@ export const NIGHT_STEPS = [
   // kill it overrides. Resolution at dawn applies warlock cancel first,
   // then leprechaun, then everything else keys off the effective target.
   'warlock',
+  // The Chupacabra hunts independently of the wolves' pick (picks blind,
+  // like the Warlock) — listed near the wolves so ghost-log readers see its
+  // kill alongside theirs. Lethal only against a wolf while any wolf lives;
+  // once the pack is gone, lethal against anyone.
+  'chupacabra',
   'seer',
   'pi',
   'mentalist',
@@ -70,6 +75,8 @@ export function nightStepLabel(step: NightStep): string {
       return 'The leprechaun is awake';
     case 'warlock':
       return 'The warlock is awake';
+    case 'chupacabra':
+      return 'The chupacabra hunts';
     case 'bodyguard':
       return 'The bodyguard is awake';
     case 'huntress':
@@ -123,6 +130,7 @@ export function gateFor(step: NightStep, hasNightmareWolf: boolean): GateKind {
     case 'leprechaun':
       return hasNightmareWolf ? 'nightmare_wolf' : 'wolves';
     case 'warlock':
+    case 'chupacabra':
     case 'seer':
     case 'pi':
     case 'mentalist':

@@ -188,11 +188,19 @@ export default function MorningScreen() {
                 className="rounded-2xl px-6 py-3 mt-12"
                 style={{
                   backgroundColor:
-                    game.winner === 'wolf' ? '#8B1818' : '#1F4E80',
+                    game.winner === 'wolf'
+                      ? '#8B1818'
+                      : game.winner === 'chupacabra'
+                        ? '#6B4423'
+                        : '#1F4E80',
                 }}
               >
                 <Text className="text-wolf-text text-base font-extrabold tracking-widest text-center">
-                  {game.winner === 'wolf' ? 'WOLVES WIN' : 'VILLAGE WINS'}
+                  {game.winner === 'wolf'
+                    ? 'WOLVES WIN'
+                    : game.winner === 'chupacabra'
+                      ? 'CHUPACABRA WINS'
+                      : 'VILLAGE WINS'}
                 </Text>
               </View>
             )}

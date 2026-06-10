@@ -154,7 +154,7 @@ export const ROLES: Role[] = [
   // brown (default solo color)
   { name: 'Auracabra',               category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),       thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Bogeyman',                category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),         thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
-  { name: 'Chupacabra',              category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),       thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
+  { name: 'Chupacabra',              category: 'solo', image: require('../../roles_ghibli_medium/chupacabra.jpg'),       thumb: require('../../roles_ghibli_thumbs/chupacabra.jpg') },
   { name: 'Count Dracula',           category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),    thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Cult Leader',             category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),      thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Father Time',             category: 'solo', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),      thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },

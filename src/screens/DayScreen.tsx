@@ -67,7 +67,7 @@ type DayGame = {
   phase: string;
   dayNumber: number;
   nightNumber: number;
-  winner: 'village' | 'wolf' | undefined;
+  winner: 'village' | 'wolf' | 'chupacabra' | undefined;
   playerCount: number;
   selectedRoles: string[];
   voteDwellEndsAt: number | null;

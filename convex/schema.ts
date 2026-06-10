@@ -83,7 +83,13 @@ export default defineSchema({
         }),
       ),
     ),
-    winner: v.optional(v.union(v.literal('village'), v.literal('wolf'))),
+    winner: v.optional(
+      v.union(
+        v.literal('village'),
+        v.literal('wolf'),
+        v.literal('chupacabra'),
+      ),
+    ),
     createdAt: v.number(),
     endedAt: v.optional(v.number()),
 
@@ -531,7 +537,13 @@ export default defineSchema({
      * end-game screen behind the chat; closing the chat reveals the role logs.
      */
     winBanner: v.optional(
-      v.object({ winner: v.union(v.literal('village'), v.literal('wolf')) }),
+      v.object({
+        winner: v.union(
+          v.literal('village'),
+          v.literal('wolf'),
+          v.literal('chupacabra'),
+        ),
+      }),
     ),
     /**
      * Morning roll call: the players still in the game as a day opens (day ≥ 2),

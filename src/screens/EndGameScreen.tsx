@@ -97,6 +97,30 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
         </Text>
       );
     }
+    case 'chupacabra_kill': {
+      // killed = bite landed + prey died; saved = bite landed but BG/Witch
+      // blocked it; missed = prey wasn't a wolf while the pack still lived.
+      const label =
+        entry.outcome === 'killed'
+          ? 'KILLED'
+          : entry.outcome === 'saved'
+            ? 'SAVED'
+            : 'NOT A WOLF';
+      const color =
+        entry.outcome === 'killed'
+          ? '#B03A2E'
+          : entry.outcome === 'saved'
+            ? '#5BA0E5'
+            : '#8A8590';
+      return (
+        <Text className="text-wolf-text text-sm">
+          Hunted {t} —{' '}
+          <Text className="font-bold" style={{ color }}>
+            {label}
+          </Text>
+        </Text>
+      );
+    }
     case 'seer_check':
       return (
         <Text className="text-wolf-text text-sm">
@@ -431,13 +455,17 @@ export default function EndGameScreen() {
       ? 'VILLAGE WINS'
       : game.winner === 'wolf'
         ? 'WOLVES WIN'
-        : 'GAME OVER';
+        : game.winner === 'chupacabra'
+          ? 'CHUPACABRA WINS'
+          : 'GAME OVER';
   const winnerBg =
     game.winner === 'village'
       ? '#1F4E80'
       : game.winner === 'wolf'
         ? '#8B1818'
-        : '#22222F';
+        : game.winner === 'chupacabra'
+          ? '#6B4423'
+          : '#22222F';
 
   return (
     <SafeAreaView className="flex-1 bg-wolf-bg">

@@ -239,25 +239,53 @@ export async function initializeDayClock(
 }
 
 /**
- * Returns the winning team if the game is over given current player state,
- * else null. Parity is measured between actual wolves and *everyone else*
- * who is still alive — including wolf-team non-wolves (Minion, Reviler).
+ * Returns the winning side if the game is over given current player state,
+ * else null. Three possible winners: 'village', 'wolf', and 'chupacabra'
+ * (the solo third party).
  *
- * Those roles win alongside the wolves, but their living body still blocks
- * parity: the wolves must reduce the table until they meet-or-exceed every
- * remaining non-wolf. e.g. {1 Werewolf, 1 Reviler, 1 Villager} is NOT a wolf
- * win (1 wolf vs 2 others) — the wolves must first kill one of the other two.
- * Once all actual wolves are dead the village wins (Minion/Reviler lose).
+ * Resolution order:
+ *
+ *  1. Wolves still alive → standard parity over *every* other living body,
+ *     including wolf-team non-wolves (Minion, Reviler) AND the Chupacabra.
+ *     Those bodies all block parity: the wolves must reduce the table until
+ *     they meet-or-exceed every remaining non-wolf. So a final two of
+ *     {1 wolf, 1 Chupacabra} is a WOLF win — the Chupacabra failed to clear
+ *     the pack. e.g. {1 Werewolf, 1 Reviler, 1 Villager} is NOT yet a wolf
+ *     win (1 wolf vs 2 others).
+ *
+ *  2. No wolves left, but a Chupacabra is alive → the village does NOT win;
+ *     the Chupacabra is the last remaining threat and keeps killing nightly.
+ *     It wins once it reaches parity over everyone else — i.e. once at most
+ *     one other player remains (final two with a villager, or last one
+ *     standing). Minion/Reviler count as bodies it must still clear.
+ *
+ *  3. No wolves and no Chupacabra alive → the village wins (Minion/Reviler
+ *     lose alongside the dead wolves).
  */
 export function checkWinCondition(
   players: Doc<'players'>[],
-): 'village' | 'wolf' | null {
+): 'village' | 'wolf' | 'chupacabra' | null {
   const alive = players.filter(p => p.alive);
   const aliveActualWolves = alive.filter(p => p.role && isWolfTeam(p.role));
-  const aliveNonWolves = alive.filter(p => !(p.role && isWolfTeam(p.role)));
-  if (aliveActualWolves.length === 0) return 'village';
-  if (aliveActualWolves.length >= aliveNonWolves.length) return 'wolf';
-  return null;
+  const aliveChupacabras = alive.filter(p => p.role === 'Chupacabra');
+  // Everyone alive who is neither an actual wolf nor a Chupacabra.
+  const aliveOthers = alive.filter(
+    p => !(p.role && isWolfTeam(p.role)) && p.role !== 'Chupacabra',
+  );
+
+  if (aliveActualWolves.length >= 1) {
+    const nonWolves = aliveOthers.length + aliveChupacabras.length;
+    if (aliveActualWolves.length >= nonWolves) return 'wolf';
+    return null;
+  }
+
+  // No actual wolves remain.
+  if (aliveChupacabras.length >= 1) {
+    if (aliveChupacabras.length >= aliveOthers.length) return 'chupacabra';
+    return null;
+  }
+
+  return 'village';
 }
 
 /**
@@ -269,7 +297,7 @@ export function checkWinCondition(
 export async function recordWinIfReached(
   ctx: MutationCtx,
   gameId: Id<'games'>,
-): Promise<'village' | 'wolf' | null> {
+): Promise<'village' | 'wolf' | 'chupacabra' | null> {
   const players = await ctx.db
     .query('players')
     .withIndex('by_game', q => q.eq('gameId', gameId))

@@ -1432,6 +1432,13 @@ export const endGameView = query({
           teamForRole(t.role) === 'village' &&
           t.role !== 'Villager';
         if (isSpecial) addIncoming(a.nightNumber, a.targetPlayerId);
+      } else if (a.actionType === 'chupacabra_kill' && a.targetPlayerId) {
+        // A BG guard on the chupacabra's prey only "mattered" when the hunt
+        // would actually have killed — i.e. the bite was lethal (prey was a
+        // wolf, or the pack was already gone). `result.lethal` is stamped at
+        // morning resolution; a non-lethal hunt never threatened the target.
+        const lethal = (a.result as { lethal?: boolean } | undefined)?.lethal;
+        if (lethal) addIncoming(a.nightNumber, a.targetPlayerId);
       }
     }
 
@@ -1645,6 +1652,26 @@ export const endGameView = query({
           a.targetPlayerId &&
           nightDeaths.has(deathKey(a.nightNumber, a.targetPlayerId));
         baseEntry.outcome = killed ? 'killed' : 'saved';
+      }
+
+      if (a.actionType === 'chupacabra_kill') {
+        // `result.lethal` (stamped at morning resolution) says whether the
+        // bite actually landed — i.e. the prey was a wolf, or the pack was
+        // already gone. Render the HUNT's result, not the target's fate:
+        //   - lethal && died  → KILLED
+        //   - lethal && lived → SAVED (BG/Witch blocked the bite)
+        //   - not lethal      → NOT A WOLF (prey wasn't a wolf while wolves
+        //                       still lived — even if they later died to the
+        //                       wolves / poison / a misfire).
+        const lethal = (a.result as { lethal?: boolean } | undefined)?.lethal;
+        if (lethal === false) {
+          baseEntry.outcome = 'missed';
+        } else {
+          const killed =
+            !!a.targetPlayerId &&
+            nightDeaths.has(deathKey(a.nightNumber, a.targetPlayerId));
+          baseEntry.outcome = killed ? 'killed' : 'saved';
+        }
       }
 
       if (a.actionType === 'revealer_shot') {

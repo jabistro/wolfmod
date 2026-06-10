@@ -131,6 +131,7 @@ export default function NightScreen() {
     witchState,
     leprechaunState,
     warlockState,
+    chupacabraState,
     bgState,
     huntressState,
     revealerState,
@@ -269,6 +270,20 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           warlockState={warlockState}
           meId={me._id}
+          isGhost={isGhost}
+        />
+      )}
+
+      {myActivePickerStep === 'chupacabra' && chupacabraState && (
+        <ChupacabraPicker
+          gameId={game._id}
+          deviceClientId={deviceClientId}
+          alivePlayers={view.alivePlayers}
+          targetables={targetables}
+          totalSeats={game.playerCount}
+          chupacabraState={chupacabraState}
+          meId={me._id}
+          meSeatPosition={me.seatPosition}
           isGhost={isGhost}
         />
       )}
@@ -3496,6 +3511,175 @@ function WarlockPicker({
           <Text className="text-wolf-muted text-sm text-center mb-10 px-4">
             Tonight's wolf kill will land on them instead. Your power will
             be considered used for the rest of the game.
+          </Text>
+          <View className="flex-row" style={{ gap: 14 }}>
+            <TouchableOpacity
+              onPress={handleCancel}
+              disabled={submitting}
+              className="bg-wolf-card rounded-xl py-4 px-10"
+              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
+            >
+              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
+                NO
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleConfirm}
+              disabled={submitting}
+              style={{ opacity: submitting ? 0.4 : 1 }}
+              className="bg-wolf-accent rounded-xl py-4 px-10"
+            >
+              {submitting ? (
+                <ActivityIndicator color="#0F0F14" />
+              ) : (
+                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
+                  YES
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ───── Chupacabra picker ────────────────────────────────────────────────────
+//
+// Solo hunter. Picks one prey EVERY night (no skip). While any wolf lives the
+// hunt only kills a wolf; once the pack is gone, any prey dies. The player gets
+// no view of the wolves' target and no private confirmation — they infer the
+// result from the public dawn report. Confirm copy names the conditional
+// effect per the picker-confirmation + informative-confirm rules.
+
+function ChupacabraPicker({
+  gameId,
+  deviceClientId,
+  alivePlayers,
+  targetables,
+  totalSeats,
+  chupacabraState,
+  meId,
+  meSeatPosition,
+  isGhost,
+}: {
+  gameId: Id<'games'>;
+  deviceClientId: string;
+  alivePlayers: SeatingPlayer[];
+  targetables: Targetable[];
+  totalSeats: number;
+  chupacabraState: {
+    hasActedThisNight: boolean;
+    tonightTarget: { _id: Id<'players'>; name: string } | null;
+  };
+  meId: Id<'players'>;
+  meSeatPosition?: number;
+  isGhost?: boolean;
+}) {
+  const submitKill = useMutation(api.night.submitChupacabraKill);
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingTarget, setPendingTarget] = useState<{
+    id: Id<'players'>;
+    name: string;
+  } | null>(null);
+
+  function handlePickTarget(targetId: Id<'players'>, name: string) {
+    if (submitting || pendingTarget) return;
+    setPendingTarget({ id: targetId, name });
+  }
+
+  async function handleConfirm() {
+    if (!pendingTarget || submitting) return;
+    setSubmitting(true);
+    try {
+      await submitKill({
+        gameId,
+        callerDeviceClientId: deviceClientId,
+        targetPlayerId: pendingTarget.id,
+      });
+      setPendingTarget(null);
+    } catch (e) {
+      showAlert('Could not hunt', e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function handleCancel() {
+    if (submitting) return;
+    setPendingTarget(null);
+  }
+
+  if (chupacabraState.hasActedThisNight) {
+    return (
+      <View className="flex-1 px-6 pt-2 pb-8">
+        <View className="flex-1 items-center justify-center">
+          <ActivityIndicator color="#D4A017" />
+          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+            Waiting for the night to settle…
+          </Text>
+          {chupacabraState.tonightTarget ? (
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4">
+              <Text style={{ color: '#E07070' }} className="font-bold">
+                HUNTED:
+              </Text>{' '}
+              {chupacabraState.tonightTarget.name}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View className="flex-1">
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
+        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
+          {isGhost
+            ? 'The Chupacabra is choosing tonight’s prey.'
+            : 'Choose tonight’s prey. While wolves prowl, only a wolf falls — once the pack is gone, any prey dies.'}
+        </Text>
+        <View style={{ alignItems: 'center' }}>
+          <SeatingCircle
+            totalSeats={totalSeats}
+            players={alivePlayers}
+            meId={meId}
+            viewerSeatIndex={meSeatPosition}
+            selectableIds={
+              new Set(targetables.map(t => t._id as unknown as string))
+            }
+            onPress={
+              submitting || pendingTarget
+                ? undefined
+                : p => handlePickTarget(p._id, p.name)
+            }
+          />
+        </View>
+      </ScrollView>
+
+      {pendingTarget && (
+        <View
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.92)',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 32,
+          }}
+        >
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
+            HUNT
+          </Text>
+          <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
+            {pendingTarget.name.toUpperCase()}
+          </Text>
+          <Text className="text-wolf-muted text-sm text-center mb-10 px-4">
+            If they’re a wolf — or the pack is already gone — they die by dawn.
+            Otherwise the hunt draws no blood tonight.
           </Text>
           <View className="flex-row" style={{ gap: 14 }}>
             <TouchableOpacity

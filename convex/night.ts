@@ -101,6 +101,7 @@ const NIGHTMARE_BLOCKABLE_STEPS = new Set<NightStep>([
   'witch',
   'leprechaun',
   'warlock',
+  'chupacabra',
   'bodyguard',
   'huntress',
   'revealer',
@@ -169,6 +170,10 @@ function activePlayersForStep(
           p => p.role === 'Warlock' && !p.roleState?.warlockSpent,
         ),
       );
+    case 'chupacabra':
+      // Hunts every night with no usage cap — always an active actor while
+      // alive (and not nightmared). Must pick a target (no skip).
+      return dropNightmared(alive.filter(p => p.role === 'Chupacabra'));
     case 'bodyguard':
       return dropNightmared(alive.filter(p => p.role === 'Bodyguard'));
     case 'huntress':
@@ -221,6 +226,8 @@ function stepIsInGame(step: NightStep, selectedRoles: string[]): boolean {
       return set.has('Leprechaun');
     case 'warlock':
       return set.has('Warlock');
+    case 'chupacabra':
+      return set.has('Chupacabra');
     case 'bodyguard':
       return set.has('Bodyguard');
     case 'huntress':
@@ -388,6 +395,17 @@ async function isStepComplete(
         'warlock_skip',
       );
       return kills.length + skips.length >= actors.length;
+    }
+    case 'chupacabra': {
+      // Must pick every night (no skip) — complete once each chupacabra has
+      // recorded a hunt.
+      const hunts = await getNightActions(
+        ctx,
+        gameId,
+        nightNumber,
+        'chupacabra_kill',
+      );
+      return hunts.length >= actors.length;
     }
     case 'bodyguard': {
       const protects = await getNightActions(ctx, gameId, nightNumber, 'bg_protect');
@@ -688,6 +706,25 @@ async function autoResolveStep(
       }
       return;
     }
+    case 'chupacabra': {
+      // Must pick (no skip) — auto-resolve targets a random alive non-self
+      // player, same can't-skip treatment as the Seer / Bodyguard. Lethality
+      // is decided at morning resolution.
+      for (const c of actors) {
+        const candidates = alivePlayers.filter(p => p._id !== c._id);
+        const target = pickRandom(candidates);
+        if (!target) continue;
+        await ctx.db.insert('nightActions', {
+          gameId,
+          nightNumber,
+          actorPlayerId: c._id,
+          actionType: 'chupacabra_kill',
+          targetPlayerId: target._id,
+          resolvedAt: now,
+        });
+      }
+      return;
+    }
     case 'bodyguard': {
       for (const bg of actors) {
         const lastProtected = bg.roleState?.bgLastProtected as
@@ -905,6 +942,43 @@ async function resolveMorning(
   // outcome.
   if (warlockTarget && sortedKills.length === 0) {
     addCandidate(warlockTarget, 'wolf', true);
+  }
+
+  // Chupacabra hunt. The pick is lethal iff the target is a wolf, OR no
+  // actual wolves were alive entering tonight (once the pack is cleared, any
+  // prey dies). A non-wolf pick while wolves still live is a harmless miss —
+  // no candidate. `protectable: true` so BG (or a coincidental Witch save)
+  // can shield the target, per design. Wolves-alive is measured pre-resolution
+  // (before tonight's deaths land), so killing the last wolf the same night
+  // the chupacabra targets a villager does NOT retroactively make that pick
+  // lethal.
+  const wolvesAliveEnteringNight = allPlayersForTG.filter(
+    p => p.alive && p.role && isWolfTeam(p.role),
+  ).length;
+  const chupacabraKills = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'chupacabra_kill',
+  );
+  for (const ck of chupacabraKills) {
+    const tid = ck.targetPlayerId as Id<'players'> | undefined;
+    if (!tid) continue;
+    const target = await ctx.db.get(tid);
+    if (!target) continue;
+    const targetIsWolf = !!target.role && isWolfTeam(target.role);
+    const lethal = targetIsWolf || wolvesAliveEnteringNight === 0;
+    // Stamp the hunt's lethality onto the action row so end-game attribution
+    // reflects whether the BITE landed — not merely whether the prey died.
+    // Without this, a non-wolf prey that the wolves also killed the same night
+    // would wrongly read as a chupacabra KILL. `lethal === false` means the
+    // prey wasn't a wolf while the pack still lived → "NOT A WOLF".
+    await ctx.db.patch(ck._id, {
+      result: { ...(ck.result ?? {}), lethal },
+    });
+    if (lethal) {
+      addCandidate(tid, 'chupacabra', true);
+    }
   }
 
   const witchPoisons = await getNightActions(ctx, gameId, nightNumber, 'witch_poison');
@@ -1869,6 +1943,29 @@ async function predictNightVictims(
   // Diseased-blocked night: Warlock's kill still lands.
   if (warlockTarget && sortedKills.length === 0) {
     addCandidate(warlockTarget, 'wolf', true);
+  }
+
+  // Chupacabra hunt — mirrors resolveMorning: lethal iff the target is a wolf
+  // or no wolves were alive entering tonight. Lets a Doppelganger whose target
+  // is chupacabra-killed convert at the same-night dusk reveal.
+  const cabraWolvesAlive = [...playerById.values()].filter(
+    p => p.alive && p.role && isWolfTeam(p.role),
+  ).length;
+  const chupacabraKills = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'chupacabra_kill',
+  );
+  for (const ck of chupacabraKills) {
+    const tid = ck.targetPlayerId as Id<'players'> | undefined;
+    if (!tid) continue;
+    const target = playerById.get(tid);
+    if (!target) continue;
+    const targetIsWolf = !!target.role && isWolfTeam(target.role);
+    if (targetIsWolf || cabraWolvesAlive === 0) {
+      addCandidate(tid, 'chupacabra', true);
+    }
   }
 
   const witchPoisons = await getNightActions(
@@ -4463,6 +4560,62 @@ export const submitWarlockPass = mutation({
   },
 });
 
+// The Chupacabra hunts every night with no usage cap. They MUST pick a target
+// (no pass) — the kill's lethality is decided at dawn (lethal vs a wolf, or vs
+// anyone once the pack is cleared). They pick blind: no view of the wolves'
+// target, no private feedback on whether their prey was a wolf.
+export const submitChupacabraKill = mutation({
+  args: {
+    gameId: v.id('games'),
+    callerDeviceClientId: v.string(),
+    targetPlayerId: v.id('players'),
+  },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) throw new Error('Game not found.');
+    if (game.phase !== 'night' || !isStepActive(game, 'chupacabra')) {
+      throw new Error('The chupacabra is not currently awake.');
+    }
+
+    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
+    if (!me?.alive || me.role !== 'Chupacabra') {
+      throw new Error('Only the chupacabra can act.');
+    }
+    if (isNightmared(me, game.nightNumber)) {
+      throw new Error('You were put to sleep tonight — you cannot act.');
+    }
+    if (
+      await findMyAction(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        me._id,
+        'chupacabra_kill',
+      )
+    ) {
+      throw new Error('Already acted tonight.');
+    }
+
+    const target = await ctx.db.get(args.targetPlayerId);
+    if (!target || target.gameId !== args.gameId) {
+      throw new Error('Invalid target.');
+    }
+    if (!target.alive) throw new Error('Target is already eliminated.');
+    if (target._id === me._id) throw new Error('You cannot hunt yourself.');
+
+    await ctx.db.insert('nightActions', {
+      gameId: args.gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: me._id,
+      actionType: 'chupacabra_kill',
+      targetPlayerId: args.targetPlayerId,
+      resolvedAt: Date.now(),
+    });
+
+    await ensureReadingWindow(ctx, args.gameId, 'chupacabra');
+  },
+});
+
 /**
  * Idempotent advance — anyone can call it; the engine only moves forward
  * when the current step is complete AND the dwell deadline has passed.
@@ -4540,6 +4693,7 @@ const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
   witch: ['witch_save', 'witch_poison', 'witch_done'],
   leprechaun: ['leprechaun_redirect'],
   warlock: ['warlock_redirect', 'warlock_skip'],
+  chupacabra: ['chupacabra_kill'],
   bodyguard: ['bg_protect'],
   huntress: ['huntress_shot', 'huntress_skip'],
   revealer: ['revealer_shot', 'revealer_skip'],
@@ -4866,6 +5020,7 @@ const STEP_ROLE_LABEL: Record<NightStep, string> = {
   witch: 'Witch',
   leprechaun: 'Leprechaun',
   warlock: 'Warlock',
+  chupacabra: 'Chupacabra',
   bodyguard: 'Bodyguard',
   huntress: 'Huntress',
   revealer: 'Revealer',
@@ -4887,6 +5042,7 @@ const STEP_TO_ROLE: Partial<Record<NightStep, string>> = {
   witch: 'Witch',
   leprechaun: 'Leprechaun',
   warlock: 'Warlock',
+  chupacabra: 'Chupacabra',
   bodyguard: 'Bodyguard',
   huntress: 'Huntress',
   revealer: 'Revealer',
@@ -5110,6 +5266,20 @@ function buildActorCardForStep(
       if (nightmared) return nightmaredEntry();
       if (actor.roleState?.warlockSpent)
         return spentEntry('Power has been used.');
+      return null;
+    }
+    case 'chupacabra': {
+      const hunt = findRow('chupacabra_kill');
+      if (hunt?.targetPlayerId) {
+        return entry(
+          `Hunted ${nameOf(hunt.targetPlayerId as Id<'players'>)}`,
+          LOG_COLOR_WOLF,
+          'action',
+          hunt._id as unknown as string,
+        );
+      }
+      if (eliminated) return eliminatedEntry();
+      if (nightmared) return nightmaredEntry();
       return null;
     }
     case 'bodyguard': {
@@ -5967,6 +6137,39 @@ export const nightView = query({
       };
     }
 
+    // Chupacabra-only state. Hunts every night (no usage cap, no skip).
+    // `hasActedThisNight` drives the locked waiting view after the pick;
+    // `tonightTarget` echoes who they chose. No private feedback on the
+    // result — they infer lethality from the public dawn report.
+    let chupacabraState: {
+      hasActedThisNight: boolean;
+      tonightTarget: { _id: Id<'players'>; name: string } | null;
+    } | null = null;
+    const chupacabraActor = actorForRole('Chupacabra', 'chupacabra');
+    if (chupacabraActor) {
+      const playerById = new Map(players.map(p => [p._id, p]));
+      const myActions = await ctx.db
+        .query('nightActions')
+        .withIndex('by_game_night', q =>
+          q.eq('gameId', args.gameId).eq('nightNumber', game.nightNumber),
+        )
+        .collect();
+      const huntAction = myActions.find(
+        a =>
+          a.actorPlayerId === chupacabraActor._id &&
+          a.actionType === 'chupacabra_kill',
+      );
+      let tonightTarget: { _id: Id<'players'>; name: string } | null = null;
+      if (huntAction?.targetPlayerId) {
+        const t = playerById.get(huntAction.targetPlayerId);
+        if (t) tonightTarget = { _id: t._id, name: t.name };
+      }
+      chupacabraState = {
+        hasActedThisNight: !!huntAction,
+        tonightTarget,
+      };
+    }
+
     // Nightmare Wolf state. Visible to the alive NW always, and to dead
     // spectators during the nightmare_wolf step (ghost mirror). `charges`
     // counts down from 2; `prevTargetIds` tracks the same-target restriction;
@@ -6384,6 +6587,10 @@ export const nightView = query({
         // pickable since the Warlock has no information about the wolves'
         // own target.
         pool = alive;
+      } else if (step === 'chupacabra') {
+        // Hunt any alive player but themselves. Wolves are pickable (in fact
+        // the goal while the pack lives); the Chupacabra is blind to roles.
+        pool = alive.filter(p => p._id !== v._id);
       } else if (step === 'bodyguard') {
         const lastProtected = v.roleState?.bgLastProtected as
           | Id<'players'>
@@ -6495,6 +6702,7 @@ export const nightView = query({
       witchState,
       leprechaunState,
       warlockState,
+      chupacabraState,
       bgState,
       huntressState,
       revealerState,

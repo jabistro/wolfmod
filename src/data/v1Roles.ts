@@ -37,6 +37,8 @@ export const V1_ROLES = [
   'Cursed',
   'Doppelganger',
   'Sasquatch',
+  // Solo / third-party win condition
+  'Chupacabra',
 ] as const;
 
 export type V1Role = (typeof V1_ROLES)[number];
@@ -68,7 +70,13 @@ export function isWolfTeam(role: string): boolean {
  * create a "whose redirect fires first?" ambiguity; multiple Doppelgangers
  * would leak each other's identities at first-night seat selection.
  */
-export const SINGLETON_ROLES = ['Leprechaun', 'Doppelganger'] as const;
+export const SINGLETON_ROLES = [
+  'Leprechaun',
+  'Doppelganger',
+  // The Chupacabra is a unique solo win condition — two would create
+  // competing "I win alone" states with no defined resolution.
+  'Chupacabra',
+] as const;
 export function isSingletonRole(name: string): boolean {
   return (SINGLETON_ROLES as readonly string[]).includes(name);
 }
@@ -96,14 +104,17 @@ const VILLAGE_ROLES = new Set<string>([
   'Lycan',
   'Mason',
 ]);
-// No v1 roles are currently TEAM_SOLO. Reviler and Minion both win with the
+// The Chupacabra is the first TEAM_SOLO role — it wins alone (eliminate every
+// wolf, then reach parity). The Mentalist reads it as a different team from
+// both the village and the wolves. Reviler and Minion both win with the
 // wolves and are wolf-team for grouping (Mentalist reads them as same-team
 // as actual wolves). For parity, though, they count as non-wolf bodies the
 // wolves must still clear (see `checkWinCondition`) — they win alongside the
 // wolves but only an actual wolf advances parity.
-// TEAM_SOLO stays defined for future v2 roles (Tanner, Cult Leader, etc.).
+// TEAM_SOLO also stays open for future v2 roles (Tanner, Cult Leader, etc.).
 
 export function teamForRole(role: string): Team {
+  if (role === 'Chupacabra') return TEAM_SOLO;
   if (isWolfTeam(role) || role === 'Minion' || role === 'Reviler') return TEAM_WOLF;
   if (VILLAGE_ROLES.has(role)) return TEAM_VILLAGE;
   return TEAM_VILLAGE;
