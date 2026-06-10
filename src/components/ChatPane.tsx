@@ -101,7 +101,7 @@ function emojiOnlyCount(text: string): number {
 
 /** Font size for an emoji-only message: single emoji biggest, 2+ a tier down. */
 function emojiFontSize(count: number): number {
-  return count <= 1 ? 40 : 26;
+  return count <= 1 ? 46 : 26;
 }
 
 // Render a moderator message body with any mentioned player names tinted their
