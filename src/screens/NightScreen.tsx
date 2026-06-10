@@ -10,8 +10,8 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
-  Image,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -4272,9 +4272,10 @@ function WaitingView({ role }: { role?: string }) {
         </Animated.Text>
         <View style={{ width: '100%', height: 200 }}>
           <Image
-            source={require('../../assets/images/allan-de-paepe-ezgif-com-gif-maker-2.gif')}
+            source={require('../../assets/images/night-bg.webp')}
             style={{ width: '100%', height: '100%' }}
-            resizeMode="contain"
+            contentFit="contain"
+            cachePolicy="memory-disk"
           />
         </View>
         {role && (
