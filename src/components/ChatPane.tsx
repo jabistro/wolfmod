@@ -358,9 +358,16 @@ export default function ChatPane({
   const submitTrial = useMutation(api.day.submitTrialStatement);
   const pauseDay = useMutation(api.day.pauseDayClock);
   const resumeDay = useMutation(api.day.resumeDayClock);
+  const pauseTrial = useMutation(api.day.pauseTrialClock);
+  const startTrial = useMutation(api.day.startTrialClock);
 
   const isMorning = state?.phase === 'morning';
   const dayPaused = state?.day?.dayPausedRemainingMs != null;
+  // A trial is in flight (accusation / defense / prevote / vote) — the host can
+  // pause it just like open discussion. `state.paused` (isGamePaused) reflects
+  // the frozen sub-phase clock here, so it drives both the icon and resume.
+  const inTrial = !!state?.trial || state?.voteActive === true;
+  const gamePaused = state?.paused === true;
   // Vote results just tallied → force the bottom on (re)open so the result card
   // is what everyone sees, never a restored pre-vote scroll spot. LIVING players
   // only — dead spectators stay wherever they're reading (they're not voting and
@@ -375,6 +382,21 @@ export default function ChatPane({
         await resumeDay({ gameId, callerDeviceClientId: deviceClientId });
       } else {
         await pauseDay({ gameId, callerDeviceClientId: deviceClientId });
+      }
+    } catch (e) {
+      showAlert('Error', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // Pause / resume the active trial (accusation / defense / prevote / vote).
+  // Freezes the sub-phase clock; isGamePaused flips everyone to the break room
+  // just like a discussion pause.
+  async function toggleTrialClock() {
+    try {
+      if (gamePaused) {
+        await startTrial({ gameId, callerDeviceClientId: deviceClientId });
+      } else {
+        await pauseTrial({ gameId, callerDeviceClientId: deviceClientId });
       }
     } catch (e) {
       showAlert('Error', e instanceof Error ? e.message : String(e));
@@ -897,6 +919,32 @@ export default function ChatPane({
               {state.day.maxNominationsPerDay}
             </Text>
           </>
+        ) : expanded && state?.isHost && state?.phase === 'day' && inTrial ? (
+          // A trial is in flight — give the host the same pause control they
+          // have in open discussion. Pausing freezes the trial clock and sends
+          // everyone to the BREAK ROOM (see isGamePaused).
+          <View
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 10,
+            }}
+          >
+            <TouchableOpacity
+              onPress={toggleTrialClock}
+              hitSlop={8}
+              className="w-7 h-7 rounded-full bg-wolf-card items-center justify-center"
+            >
+              <Text className="text-wolf-text" style={{ fontSize: 12 }}>
+                {gamePaused ? '▶' : '❚❚'}
+              </Text>
+            </TouchableOpacity>
+            <Text className="text-wolf-muted text-[11px] font-bold tracking-widest">
+              {gamePaused ? 'PAUSED' : state?.voteActive ? 'VOTING' : 'ON TRIAL'}
+            </Text>
+          </View>
         ) : expanded && state?.decisionClock != null ? (
           <>
             <Text className="text-wolf-red text-[11px] font-bold tracking-widest">

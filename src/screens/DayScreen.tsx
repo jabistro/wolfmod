@@ -1632,7 +1632,9 @@ function VoteView({
                   : isHost
                     ? 'TAP TO RESUME'
                     : 'WAITING FOR HOST'
-                : 'SECONDS'}
+                : isHost
+                  ? 'TAP TO PAUSE'
+                  : 'SECONDS'}
           </Text>
         </Pressable>
 

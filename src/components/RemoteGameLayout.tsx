@@ -90,6 +90,16 @@ export default function RemoteGameLayout({
     prevShouldOpen.current = shouldOpen;
   }, [shouldOpen]);
 
+  // On RESUME (pause → unpause) during an act-now moment — notably the live
+  // vote — re-collapse so the action UI (LIVES/DIES) that the break-room pause
+  // expanded over is reachable again. Edge-triggered on the unpause only.
+  const prevPaused = useRef(false);
+  useEffect(() => {
+    const paused = cs?.paused === true;
+    if (!paused && prevPaused.current && mustAct) setExpanded(false);
+    prevPaused.current = paused;
+  }, [cs?.paused, mustAct]);
+
   // Pop the chat open at the start of each day so the dawn report (now posted
   // with no morning pause) is front-and-center. Edge-triggered on ENTERING the
   // day phase, so it won't fight a manual collapse later in the same day, and

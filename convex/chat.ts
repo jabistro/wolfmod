@@ -30,20 +30,22 @@ function isWolf(player: Doc<'players'>): boolean {
 }
 
 /**
- * Host has paused the discussion clock (not a trial / nightfall pause). While
- * true, the gameplay channels go read-only and the BREAK ROOM opens.
+ * Host has paused the game during the day — either the open discussion clock
+ * OR an in-flight trial sub-phase (accusation / defense / prevote / vote).
+ * While true, the gameplay channels go read-only and the BREAK ROOM opens.
  */
 function isGamePaused(game: Doc<'games'>): boolean {
-  return (
-    game.phase === 'day' &&
-    !game.currentNomination &&
-    // A nomination being confirmed (pendingTrial) also pauses the day clock,
-    // but that's the trial starting — NOT a host pause, so don't blip to the
-    // break room before the accusation opens.
-    !game.pendingTrial &&
-    !game.nightFallsAt &&
-    game.dayPausedRemainingMs != null
-  );
+  if (game.phase !== 'day' || game.nightFallsAt) return false;
+  const nom = game.currentNomination;
+  if (nom) {
+    // A trial is in flight — paused when the host has frozen the sub-phase
+    // clock. The results step is the vote being read, never a host pause.
+    return nom.subPhase !== 'results' && nom.subPhasePausedRemainingMs != null;
+  }
+  // Open discussion — paused when the host froze the day clock. A nomination
+  // being confirmed (pendingTrial) also freezes the day clock, but that's the
+  // trial starting, NOT a host pause, so don't blip to the break room.
+  return !game.pendingTrial && game.dayPausedRemainingMs != null;
 }
 
 /** Who may READ a channel's transcript. */
