@@ -279,6 +279,29 @@ export default defineSchema({
     wolfCubVengeance: v.optional(v.boolean()),
 
     /**
+     * Alpha Wolf one-time conversion lifecycle. Only present when an Alpha
+     * Wolf is in the build (initialized to 'unused' at game start).
+     *   - 'unused'  : no qualifying wolf death yet.
+     *   - 'armed'   : another (non-Alpha) wolf has died while the Alpha lived;
+     *                 the NEXT wolves step converts instead of kills (if the
+     *                 Alpha is still alive then). Set once, never re-armed.
+     *   - 'spent'   : the conversion night has happened (landed, was blocked,
+     *                 was Warlock-cancelled, or was lost because the Alpha
+     *                 died before it could fire). Never converts again.
+     */
+    alphaConvert: v.optional(
+      v.union(v.literal('unused'), v.literal('armed'), v.literal('spent')),
+    ),
+    /**
+     * The nightNumber on which the Alpha conversion is actively resolving.
+     * Set at `beginNightWaves` when `alphaConvert==='armed'` AND an Alpha is
+     * still alive. Read by the wolves picker (CONVERT verb), the
+     * `alpha_conversion` reveal step, and morning resolution. Cleared (and
+     * `alphaConvert` flipped to 'spent') at that morning's resolution.
+     */
+    alphaConvertActiveNight: v.optional(v.number()),
+
+    /**
      * Lifetime set of players the Leprechaun has previously moved a wolf
      * kill OFF of. Each entry is one-and-done — the Leprechaun cannot
      * redirect a kill targeting that same player again later in the game.

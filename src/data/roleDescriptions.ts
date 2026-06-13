@@ -80,7 +80,7 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
   'Nightmare Wolf': 'Wakes with the pack, then stays awake alone. Twice per game, puts a villager to sleep — their night power doesn\'t fire that night.',
   'Exploding Wolf': 'Wakes with the pack. When this wolf dies, both adjacent players go down in the blast.',
   'Kamikaze Wolf': 'Wakes with the pack. Booby-trapped — if the Seer checks them while other wolves still live, both die.',
-  'Alpha Wolf': 'Wakes with the pack. The night after a wolf is lynched, may convert that night\'s target into a new wolf instead of killing.',
+  'Alpha Wolf': 'Wakes and kills with the pack. The first time another wolf dies while the Alpha lives, the next night the pack converts a villager into a new wolf instead of killing — once per game.',
   'Oracle Wolf': 'Wakes with the pack. Every wolf death triggers a return to the night, granting one role-read on any player.',
   'Assassin Wolf': 'Wakes with the pack. Lashes out on death — may take a neighbor down too.',
   'Dreamwolf': 'A dormant wolf — stays asleep until a wolf falls or the pack tries to claim them.',

@@ -24,6 +24,12 @@ const PAGE_FALLBACK = { page: [], isDone: true, continueCursor: '' };
 type Channel = 'village' | 'wolves' | 'dead' | 'break';
 
 function isWolf(player: Doc<'players'>): boolean {
+  // A freshly-converted wolf (Alpha conversion, Cursed, Doppelganger→wolf)
+  // doesn't "wake with the pack" until the following night — until then they
+  // must NOT see the wolves channel/roster, and the existing pack must NOT see
+  // them in it (which would reveal the conversion landed early). The flag is
+  // cleared at the next wolves step (enterStep in night.ts) when they wake.
+  if (player.roleState?.pendingPackReveal) return false;
   // Real wolves only — `seerAppearsAsWolf` (Mama Wolf's mark) is deliberately
   // NOT consulted, so her targets never join the pack's chat.
   return !!player.role && isWolfTeam(player.role);

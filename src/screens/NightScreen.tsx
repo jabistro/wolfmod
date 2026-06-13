@@ -137,6 +137,7 @@ export default function NightScreen() {
     revealerState,
     revilerState,
     cursedConversionState,
+    alphaConversionState,
     doppelgangerRevealState,
     masonRevealState,
     nightmareWolfState,
@@ -193,6 +194,7 @@ export default function NightScreen() {
             killsSoFar={wolfState.killsSoFar}
             pendingKill={wolfState.pendingKill}
             pickerEndsAt={wolfState.pickerEndsAt}
+            convertActive={wolfState.convertActive}
             isGhost={isGhost}
           />
         )
@@ -350,6 +352,13 @@ export default function NightScreen() {
         />
       )}
 
+      {activeStepNames.includes('alpha_conversion') && alphaConversionState && (
+        <AlphaConversionView
+          isMine={alphaConversionState.isMine}
+          convertedName={alphaConversionState.convertedName}
+        />
+      )}
+
       {(activeStepNames.includes('doppelganger_dawn') ||
         activeStepNames.includes('doppelganger_dusk')) &&
         doppelgangerRevealState && (
@@ -433,9 +442,10 @@ export default function NightScreen() {
               <NightDecisionCountdown endsAt={myDecisionEndsAt} />
             )}
             {pickerTree}
-            {!isMyStep && !cursedConversionState && !doppelgangerRevealState && (
-              <WaitingView role={me.role} />
-            )}
+            {!isMyStep &&
+              !cursedConversionState &&
+              !alphaConversionState &&
+              !doppelgangerRevealState && <WaitingView role={me.role} />}
           </>
         )
       ) : activeStepNames.length === 0 ? (
@@ -678,6 +688,53 @@ function CursedRevealView({
   );
 }
 
+// ───── Alpha Wolf conversion reveal ────────────────────────────────────────
+//
+// Shown during the alpha_conversion step to the converted player (alive
+// caller, `isMine`) and to dead spectators (ghost mirror). No OK button —
+// the step dwells and auto-advances (reveal-no-ack rule), so a distracted
+// player can't stall the table. The converted player's role still reads as
+// their original one this night (the flip lands at morning); they only learn
+// their packmates when they wake with the wolves next night. Other living
+// players see the generic WaitingView — they have no way to tell whether the
+// wolves converted them tonight.
+
+function AlphaConversionView({
+  isMine,
+  convertedName,
+}: {
+  isMine: boolean;
+  convertedName: string;
+}) {
+  return (
+    <View className="flex-1 px-6 pt-2 pb-8">
+      <View className="flex-1 items-center justify-center">
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
+          A HOWL IN THE DARK
+        </Text>
+        {isMine ? (
+          <>
+            <Text className="text-wolf-text text-2xl font-extrabold text-center leading-8 px-2">
+              {'THE PACK HAS CLAIMED '}
+              <Text className="text-wolf-red">YOU</Text>
+              {'. YOU ARE NOW A '}
+              <Text className="text-wolf-red">WOLF</Text>
+              {'.'}
+            </Text>
+            <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+              Tomorrow night you wake with the wolves and learn who they are.
+            </Text>
+          </>
+        ) : (
+          <Text className="text-wolf-muted text-xs tracking-widest text-center px-4">
+            {convertedName.toUpperCase()} HAS BEEN TURNED INTO A WOLF
+          </Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
 // ───── Doppelganger reveal ─────────────────────────────────────────────────
 //
 // Shown during the dawn / dusk steps to the converted Doppelganger (alive
@@ -884,6 +941,7 @@ function WolvesPicker({
   killsSoFar,
   pendingKill,
   pickerEndsAt,
+  convertActive,
   isGhost,
 }: {
   gameId: Id<'games'>;
@@ -909,6 +967,7 @@ function WolvesPicker({
     candidatePlayerIds: Id<'players'>[];
   } | null;
   pickerEndsAt: number | null;
+  convertActive: boolean;
   isGhost?: boolean;
 }) {
   const submitVote = useMutation(api.night.submitWolfVote);
@@ -921,6 +980,10 @@ function WolvesPicker({
   const vengeance = requiredKills > 1;
   const allKillsLocked = killsSoFar.length >= requiredKills;
   const killNumber = killsSoFar.length + 1;
+  // Alpha Wolf conversion night: the FIRST pick (no picks locked yet) converts
+  // a villager into a wolf instead of killing. A Wolf Cub vengeance round 2 on
+  // the same night reverts to a normal kill.
+  const isConvertRound = convertActive && killsSoFar.length === 0;
 
   // RNG bounce — cycles a highlight through `candidatePlayerIds` for
   // RNG_BOUNCE_MS, then settles. The seating circle picks up the
@@ -996,10 +1059,16 @@ function WolvesPicker({
   const lockedIds = new Set<string>(
     killsSoFar.map(k => k.targetId as unknown as string),
   );
+  // On the conversion round the pack can only turn a non-wolf into a wolf, so
+  // packmates aren't selectable (matches the server guard in submitWolfVote).
+  const wolfIds = new Set<string>(
+    wolves.map(w => w._id as unknown as string),
+  );
   const selectableForThisKill = new Set(
     targetables
       .map(t => t._id as unknown as string)
-      .filter(id => !lockedIds.has(id)),
+      .filter(id => !lockedIds.has(id))
+      .filter(id => !isConvertRound || !wolfIds.has(id)),
   );
 
   async function handleVote(targetId: Id<'players'>) {
@@ -1048,15 +1117,49 @@ function WolvesPicker({
     : bouncing
       ? "Time's up — picking a target…"
       : pendingKill || consensus
-        ? 'Consensus reached. Sealing the kill…'
+        ? isConvertRound
+          ? 'Consensus reached. Sealing the conversion…'
+          : 'Consensus reached. Sealing the kill…'
         : isGhost
           ? 'The wolves are voting. They must agree.'
-          : 'Tap a player to vote. All wolves must agree.';
+          : isConvertRound
+            ? 'Tap a player to convert into a wolf. All wolves must agree.'
+            : 'Tap a player to vote. All wolves must agree.';
 
   return (
     <View className="flex-1">
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
-        {vengeance && (
+        {convertActive ? (
+          <View className="bg-wolf-card rounded-xl px-4 py-3 mb-3 border border-wolf-red">
+            <Text className="text-wolf-red text-xs font-bold tracking-widest text-center">
+              ALPHA WOLF — CONVERSION
+            </Text>
+            <Text className="text-wolf-text text-sm text-center mt-1">
+              {vengeance
+                ? allKillsLocked
+                  ? 'CONVERSION + KILL LOCKED'
+                  : isConvertRound
+                    ? 'STEP 1 OF 2 — CONVERT'
+                    : 'STEP 2 OF 2 — KILL'
+                : isConvertRound
+                  ? 'Turn a villager into a wolf — no one dies tonight'
+                  : 'CONVERSION LOCKED'}
+            </Text>
+            {vengeance && (
+              <Text className="text-wolf-muted text-xs text-center mt-2">
+                Convert first, then a Wolf Cub vengeance kill.
+              </Text>
+            )}
+            {killsSoFar.length > 0 && (
+              <Text className="text-wolf-muted text-xs text-center mt-2">
+                {isConvertRound ? 'Converting: ' : 'Converted: '}
+                <Text className="text-wolf-red">
+                  {killsSoFar.map(k => k.targetName).join(', ')}
+                </Text>
+              </Text>
+            )}
+          </View>
+        ) : vengeance ? (
           <View className="bg-wolf-card rounded-xl px-4 py-3 mb-3 border border-wolf-red">
             <Text className="text-wolf-red text-xs font-bold tracking-widest text-center">
               WOLF CUB VENGEANCE
@@ -1075,7 +1178,7 @@ function WolvesPicker({
               </Text>
             )}
           </View>
-        )}
+        ) : null}
 
         <Text className="text-wolf-text text-base text-center mt-2 mb-3">
           {statusText}

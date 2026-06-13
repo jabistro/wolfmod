@@ -19,9 +19,14 @@ import {
   dayConfigOf,
   DAY_CONFIG_DEFAULTS,
   flagCubDeathIfApplicable,
+  flagAlphaConvertIfApplicable,
   wipeNomTapsForDay,
 } from './helpers';
-import { enterStep, fireDoppelgangerConversionsForDeaths } from './night';
+import {
+  enterStep,
+  fireDoppelgangerConversionsForDeaths,
+  prepareAlphaConvertNight,
+} from './night';
 import {
   enqueueTriggersForDeaths,
   processTriggerQueue,
@@ -1265,6 +1270,8 @@ export const tallyVote = internalMutation({
     });
     // Wolf Cub vengeance: lynching the cub triggers 2 wolf kills next night.
     await flagCubDeathIfApplicable(ctx, args.gameId, [targetId]);
+    // Alpha Wolf: lynching a pack member arms the one-time conversion.
+    await flagAlphaConvertIfApplicable(ctx, args.gameId, [targetId]);
     // Doppelganger conversion: deferred reveal at next dawn step.
     await fireDoppelgangerConversionsForDeaths(
       ctx,
@@ -1371,6 +1378,8 @@ export const continueGameAfterVote = mutation({
         phase: 'night',
         nightNumber: game.nightNumber + 1,
       });
+      // Alpha Wolf conversion-night determination (bypasses beginNightWaves).
+      await prepareAlphaConvertNight(ctx, args.gameId);
       await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
       return;
     }
@@ -1595,6 +1604,9 @@ export const enterNightFromDayClock = internalMutation({
       phase: 'night',
       nightNumber: game.nightNumber + 1,
     });
+    // Alpha Wolf conversion-night determination (this path bypasses
+    // beginNightWaves, so stamp it here before the first step activates).
+    await prepareAlphaConvertNight(ctx, args.gameId);
     await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
   },
 });
@@ -1633,6 +1645,9 @@ export const enterNightFromDay = internalMutation({
       phase: 'night',
       nightNumber: game.nightNumber + 1,
     });
+    // Alpha Wolf conversion-night determination (this path bypasses
+    // beginNightWaves, so stamp it here before the first step activates).
+    await prepareAlphaConvertNight(ctx, args.gameId);
     await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
   },
 });

@@ -56,6 +56,21 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
   const t = entry.targetName ?? '—';
   switch (entry.kind) {
     case 'wolf_kill': {
+      // A Warlock bend stays opaque to the pack: the wolves only learn their
+      // kill was thwarted, never where it landed. The Warlock's own
+      // warlock_redirect row carries who actually died, so revealing the
+      // destination here would both duplicate it and leak info the wolves
+      // shouldn't have. Leprechaun redirects still show the arrow.
+      if (entry.redirectedBy === 'Warlock') {
+        return (
+          <Text className="text-wolf-text text-sm">
+            Targeted {t} —{' '}
+            <Text className="font-bold" style={{ color: '#5072C8' }}>
+              BLOCKED BY WARLOCK
+            </Text>
+          </Text>
+        );
+      }
       const label =
         entry.outcome === 'killed'
           ? 'KILLED'
@@ -63,7 +78,11 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
             ? 'DEATH DELAYED'
             : entry.outcome === 'converted'
               ? 'CONVERTED'
-              : 'SAVED';
+              : entry.outcome === 'conversion_blocked'
+                ? 'CONVERSION BLOCKED'
+                : 'SAVED';
+      // conversion_blocked shares SAVED's blue — both mean a wolf action was
+      // thwarted and the target walks away unharmed.
       const color =
         entry.outcome === 'killed'
           ? '#B03A2E'
@@ -74,10 +93,6 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
               : '#5BA0E5';
       const redirected =
         entry.secondTargetName != null && entry.secondTargetName !== t;
-      // Color the redirect arrow by who bent the kill — Leprechaun's mint
-      // green vs the Warlock's deeper sorcerer blue.
-      const redirectColor =
-        entry.redirectedBy === 'Warlock' ? '#5072C8' : '#5BC97A';
       return (
         <Text className="text-wolf-text text-sm">
           Targeted {t}
@@ -85,7 +100,7 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
             <>
               {' '}
               →{' '}
-              <Text className="font-bold" style={{ color: redirectColor }}>
+              <Text className="font-bold" style={{ color: '#5BC97A' }}>
                 {entry.secondTargetName}
               </Text>
             </>
@@ -544,6 +559,15 @@ export default function EndGameScreen() {
               p.originalRole === 'Sasquatch' &&
               p.role !== 'Sasquatch' &&
               p.sasquatchConvertedAtNight != null;
+            // Alpha Wolf conversion: any villager-side role turned into a
+            // Werewolf by the pack. Unlike Cursed/Sasquatch the origin role
+            // varies (Seer, Villager, …), so show it explicitly — otherwise a
+            // converted Seer reads as a plain Werewolf with a stray Seer check.
+            const alphaConverted =
+              p.alphaConvertedAtNight != null &&
+              p.role === 'Werewolf' &&
+              !!p.originalRole &&
+              p.originalRole !== 'Werewolf';
             return (
               <View
                 key={p._id}
@@ -576,6 +600,11 @@ export default function EndGameScreen() {
                     {sasquatchFlipped && (
                       <Text className="text-wolf-muted text-xs italic uppercase">
                         Sasquatch → Werewolf (n{p.sasquatchConvertedAtNight})
+                      </Text>
+                    )}
+                    {alphaConverted && (
+                      <Text className="text-wolf-muted text-xs italic uppercase">
+                        {p.originalRole} → Werewolf (n{p.alphaConvertedAtNight})
                       </Text>
                     )}
                     {startedAsDoppelganger && (

@@ -47,6 +47,14 @@ export const NIGHT_STEPS = [
   'revealer',
   'reviler',
   'cursed_conversion',
+  // Alpha Wolf conversion. On a conversion night the wolves' first pick is a
+  // CONVERT, not a kill; this end-of-night step evaluates whether it lands
+  // (not Bodyguard-protected, not Warlock-cancelled, target survives other
+  // sources) and shows the converted player their private "you are a wolf"
+  // reveal. Mirrors cursed_conversion's last-step timing. No-op on normal
+  // nights (dwell 0). Runs after cursed_conversion so a Cursed convert-target
+  // is handled by the Cursed path and skipped here.
+  'alpha_conversion',
   // Reveals same-night Doppelganger conversions (target dies tonight).
   // Runs last, mirroring Cursed's end-of-night reveal timing.
   'doppelganger_dusk',
@@ -86,6 +94,7 @@ export function nightStepLabel(step: NightStep): string {
     case 'reviler':
       return 'The reviler is awake';
     case 'cursed_conversion':
+    case 'alpha_conversion':
     case 'doppelganger_dawn':
     case 'doppelganger_dusk':
       // Deliberately neutral so the wake-order header doesn't telegraph that
@@ -140,6 +149,7 @@ export function gateFor(step: NightStep, hasNightmareWolf: boolean): GateKind {
     case 'reviler':
       return hasNightmareWolf ? 'nightmare_wolf' : 'none';
     case 'cursed_conversion':
+    case 'alpha_conversion':
     case 'doppelganger_dusk':
       return 'all_others';
   }

@@ -1463,6 +1463,9 @@ export default function ChatPane({
                     <View className="my-3 self-stretch items-center px-2">
                       <Text className="text-wolf-muted text-[10px] tracking-widest mb-1">
                         {item.authorName.toUpperCase()}
+                        {item.phaseLabel
+                          ? ` · ${item.phaseLabel.toUpperCase()}`
+                          : ''}
                       </Text>
                       <View
                         className="rounded-xl px-4 py-3 items-center"

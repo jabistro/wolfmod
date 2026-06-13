@@ -1,7 +1,12 @@
 import { mutation, query, type MutationCtx } from './_generated/server';
 import { v, ConvexError } from 'convex/values';
 import type { Id } from './_generated/dataModel';
-import { isWolfTeam, teamForRole, SINGLETON_ROLES } from '../src/data/v1Roles';
+import {
+  isWolfTeam,
+  teamForRole,
+  SINGLETON_ROLES,
+  incompatibleRolesInBuild,
+} from '../src/data/v1Roles';
 import {
   findCaller,
   requireHost,
@@ -413,6 +418,17 @@ export const setRoles = mutation({
         throw new Error(`Only one ${r} is allowed per game.`);
       }
     }
+    // Hard-excluded role pairs (e.g. Alpha Wolf + Witch/Leprechaun). The
+    // lobby UI blocks adding these together, but guard here as the backstop.
+    const presentRoles = new Set(args.roles);
+    for (const r of presentRoles) {
+      const conflicts = incompatibleRolesInBuild(r, presentRoles);
+      if (conflicts.length > 0) {
+        throw new Error(
+          `${r} can't be in the same game as ${conflicts.join(' or ')}.`,
+        );
+      }
+    }
 
     // If the host changed the build out from under existing dev pins, prune
     // any pin whose role no longer has a slot in the new build (respecting
@@ -673,7 +689,15 @@ export const startGame = mutation({
       if (batch.length < 100) break;
     }
 
-    await ctx.db.patch(args.gameId, { phase: 'reveal' });
+    // Arm the Alpha Wolf's one-time conversion lifecycle when one is in the
+    // build. 'unused' until another wolf dies (see flagAlphaConvertIfApplicable).
+    const alphaConvertInit = game.selectedRoles.includes('Alpha Wolf')
+      ? ('unused' as const)
+      : undefined;
+    await ctx.db.patch(args.gameId, {
+      phase: 'reveal',
+      ...(alphaConvertInit ? { alphaConvert: alphaConvertInit } : {}),
+    });
   },
 });
 
@@ -1293,6 +1317,32 @@ export const endGameView = query({
         }
       }
     }
+    // Alpha Wolf conversions: keyed on the CONVERT TARGET (the new wolf), not
+    // an actor (the row has no actorPlayerId). nightNumber is the conversion
+    // night. Used to (a) render the wolf_kill row as CONVERTED not SAVED, and
+    // (b) keep the freshly-converted player off the pack's kill log for nights
+    // up to and including their conversion night (they weren't pack yet).
+    const alphaConversionByPlayer = new Map<Id<'players'>, number>();
+    for (const a of actions) {
+      if (a.actionType === 'alpha_conversion' && a.targetPlayerId) {
+        if (!alphaConversionByPlayer.has(a.targetPlayerId)) {
+          alphaConversionByPlayer.set(a.targetPlayerId, a.nightNumber);
+        }
+      }
+    }
+    // Failed Alpha Wolf conversions: the pack picked a CONVERT target but a
+    // Bodyguard/Witch (or another lethal source) blocked it, so no new wolf
+    // joined. Keyed on the target + conversion night. Used only to render the
+    // pack's wolf_kill row as CONVERSION BLOCKED instead of SAVED/KILLED — the
+    // wolves' intent was a conversion, not a kill.
+    const blockedAlphaConversionByPlayer = new Map<Id<'players'>, number>();
+    for (const a of actions) {
+      if (a.actionType === 'alpha_conversion_blocked' && a.targetPlayerId) {
+        if (!blockedAlphaConversionByPlayer.has(a.targetPlayerId)) {
+          blockedAlphaConversionByPlayer.set(a.targetPlayerId, a.nightNumber);
+        }
+      }
+    }
     // Doppelganger conversions: parallel structure to cursedConversionByPlayer
     // but also retains the toRole + triggerPhase so end-game can show
     // "Doppelganger → Werewolf (n3)" and the wolf-kill attribution loop can
@@ -1572,7 +1622,14 @@ export const endGameView = query({
         }
         const converted =
           effectiveId &&
-          cursedConversionByPlayer.get(effectiveId) === a.nightNumber;
+          (cursedConversionByPlayer.get(effectiveId) === a.nightNumber ||
+            alphaConversionByPlayer.get(effectiveId) === a.nightNumber);
+        // A blocked Alpha conversion outranks the kill/save labels: the pack's
+        // action was a conversion attempt, so report whether the CONVERSION
+        // landed, not whether the target happened to live or die.
+        const conversionBlocked =
+          effectiveId &&
+          blockedAlphaConversionByPlayer.get(effectiveId) === a.nightNumber;
         const delayed =
           effectiveId &&
           delayedWounds.has(deathKey(a.nightNumber, effectiveId));
@@ -1581,11 +1638,13 @@ export const endGameView = query({
           nightDeaths.has(deathKey(a.nightNumber, effectiveId));
         baseEntry.outcome = converted
           ? 'converted'
-          : delayed
-            ? 'delayed'
-            : killed
-              ? 'killed'
-              : 'saved';
+          : conversionBlocked
+            ? 'conversion_blocked'
+            : delayed
+              ? 'delayed'
+              : killed
+                ? 'killed'
+                : 'saved';
         // Team decision — attribute to every wolf-team player who was alive
         // at the start of this night. Wolves act first in NIGHT_STEPS, so a
         // wolf who died during night N still made (or witnessed) night N's
@@ -1616,6 +1675,12 @@ export const endGameView = query({
           if (dopp != null && a.nightNumber <= dopp.nightNumber) {
             continue;
           }
+          // Alpha-converted player wasn't with the pack on (or before) their
+          // conversion night — exclude that night's pack kill from their log.
+          const alphaNight = alphaConversionByPlayer.get(p._id);
+          if (alphaNight != null && a.nightNumber <= alphaNight) {
+            continue;
+          }
           const death = deathByPlayer.get(p._id);
           if (death && a.nightNumber > death.nightNumber) continue;
           pushEntry(p._id, baseEntry);
@@ -1638,6 +1703,12 @@ export const endGameView = query({
           }
           const dopp = doppelgangerConversionByPlayer.get(p._id);
           if (dopp != null && a.nightNumber <= dopp.nightNumber) {
+            continue;
+          }
+          // Alpha-converted player wasn't with the pack on (or before) their
+          // conversion night — exclude that night's pack kill from their log.
+          const alphaNight = alphaConversionByPlayer.get(p._id);
+          if (alphaNight != null && a.nightNumber <= alphaNight) {
             continue;
           }
           const death = deathByPlayer.get(p._id);
@@ -1811,6 +1882,8 @@ export const endGameView = query({
           originalRole: p.originalRole ?? null,
           cursedConvertedAtNight:
             cursedConversionByPlayer.get(p._id) ?? null,
+          alphaConvertedAtNight:
+            alphaConversionByPlayer.get(p._id) ?? null,
           sasquatchConvertedAtNight:
             sasquatchConversionByPlayer.get(p._id) ?? null,
           doppelgangerConvertedAtNight:

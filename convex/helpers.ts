@@ -108,6 +108,53 @@ export async function flagCubDeathIfApplicable(
   }
 }
 
+/**
+ * Alpha Wolf one-time conversion arming. The FIRST time another (non-Alpha)
+ * wolf dies — by any cause, day or night — while an Alpha Wolf is still alive,
+ * flip `alphaConvert` from 'unused' to 'armed'. The next wolves step then
+ * converts a villager into a wolf instead of killing (resolved at
+ * `beginNightWaves` / morning). Set once and never re-armed: a no-op if
+ * `alphaConvert` isn't 'unused' (no Alpha in game, or already armed/spent).
+ *
+ * Called beside every `flagCubDeathIfApplicable` site. At the morning
+ * resolution site, pass the suppressed-self-wolf-kill-filtered list (same as
+ * Cub vengeance) so wolves can't farm the conversion by eating their own with
+ * no redirector present.
+ */
+export async function flagAlphaConvertIfApplicable(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  justDiedIds: Id<'players'>[],
+): Promise<void> {
+  if (justDiedIds.length === 0) return;
+  const game = await ctx.db.get(gameId);
+  if (!game) return;
+  // Already armed or spent → never re-arm (one-time). Anything else
+  // ('unused' or, defensively, an uninitialized undefined) can arm — the
+  // living-Alpha check below still gates on an Alpha actually being in play.
+  if (game.alphaConvert === 'armed' || game.alphaConvert === 'spent') return;
+
+  // A non-Alpha wolf must have just died.
+  let packMemberDied = false;
+  for (const id of justDiedIds) {
+    const p = await ctx.db.get(id);
+    if (p?.role && isWolfTeam(p.role) && p.role !== 'Alpha Wolf') {
+      packMemberDied = true;
+      break;
+    }
+  }
+  if (!packMemberDied) return;
+
+  // ...and an Alpha Wolf must still be alive to lead the conversion.
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  if (!players.some(p => p.alive && p.role === 'Alpha Wolf')) return;
+
+  await ctx.db.patch(gameId, { alphaConvert: 'armed' });
+}
+
 // ───── Day-phase config defaults ───────────────────────────────────────────
 //
 // All four are stored as optional fields on the game record so a host can

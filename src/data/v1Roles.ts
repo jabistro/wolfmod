@@ -30,6 +30,7 @@ export const V1_ROLES = [
   'Wolf Cub',
   'Nightmare Wolf',
   'Mama Wolf',
+  'Alpha Wolf',
   // Solo / wolf-aligned
   'Minion',
   'Reviler',
@@ -49,8 +50,8 @@ export function isV1Role(name: string): name is V1Role {
 
 /**
  * Roles that wake with the wolves at night and see each other (with their
- * specific roles) during the role-reveal setup. v2 will add Alpha Wolf
- * here. The Minion knows who's on this list but is not on it.
+ * specific roles) during the role-reveal setup. The Minion knows who's on
+ * this list but is not on it.
  */
 export const WOLF_TEAM_ROLES = [
   'Werewolf',
@@ -59,6 +60,7 @@ export const WOLF_TEAM_ROLES = [
   'Wolf Cub',
   'Nightmare Wolf',
   'Mama Wolf',
+  'Alpha Wolf',
 ] as const;
 
 export function isWolfTeam(role: string): boolean {
@@ -79,6 +81,36 @@ export const SINGLETON_ROLES = [
 ] as const;
 export function isSingletonRole(name: string): boolean {
   return (SINGLETON_ROLES as readonly string[]).includes(name);
+}
+
+/**
+ * Role pairs that may NOT appear in the same build, with the why. The
+ * Alpha Wolf's once-per-game conversion replaces a kill, so the morning
+ * reads "no one died" — the village (and the Alpha) only learn whether it
+ * landed when the target does or doesn't wake with the pack next night. The
+ * Witch and the Leprechaun are the only roles shown the wolves' target at
+ * night; on a conversion night they'd see who was converted (and could
+ * trivially deduce the new wolf when no death follows), which breaks the
+ * mystery the conversion depends on. So they're hard-excluded from any build
+ * with an Alpha Wolf. The map is symmetric — look up either side.
+ */
+export const INCOMPATIBLE_ROLES: Record<string, readonly string[]> = {
+  'Alpha Wolf': ['Witch', 'Leprechaun'],
+  Witch: ['Alpha Wolf'],
+  Leprechaun: ['Alpha Wolf'],
+};
+
+/**
+ * Given a role and the set of role names already in the build, returns the
+ * names of any in-build roles that conflict with it. Empty = no conflict.
+ */
+export function incompatibleRolesInBuild(
+  role: string,
+  presentRoles: ReadonlySet<string>,
+): string[] {
+  const conflicts = INCOMPATIBLE_ROLES[role];
+  if (!conflicts) return [];
+  return conflicts.filter(r => presentRoles.has(r));
 }
 
 export const TEAM_VILLAGE = 'village' as const;

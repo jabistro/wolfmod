@@ -17,7 +17,12 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
-import { V1_ROLES, isSingletonRole, isWolfTeam } from '../data/v1Roles';
+import {
+  V1_ROLES,
+  isSingletonRole,
+  isWolfTeam,
+  incompatibleRolesInBuild,
+} from '../data/v1Roles';
 import { ROLES, CATEGORIES, roleSortKey, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
 import TimersConfigModal from '../components/TimersConfigModal';
@@ -185,6 +190,15 @@ export default function LobbyScreen() {
 
   const draftTotal = useMemo(
     () => Object.values(draftCounts).reduce((a, b) => a + b, 0),
+    [draftCounts],
+  );
+  // Roles currently in the draft (count > 0) — used to enforce hard-excluded
+  // role pairs (e.g. Alpha Wolf can't share a build with Witch/Leprechaun).
+  const draftedRoleSet = useMemo(
+    () =>
+      new Set(
+        Object.keys(draftCounts).filter(r => (draftCounts[r] ?? 0) > 0),
+      ),
     [draftCounts],
   );
   const draftBalance = useMemo(() => {
@@ -383,6 +397,9 @@ export default function LobbyScreen() {
   function increment(role: string) {
     if (draftTotal >= game.playerCount) return;
     if (isSingletonRole(role) && (draftCounts[role] ?? 0) >= 1) return;
+    // Hard-excluded role pair already in the build — block (defensive; the +
+    // button is also disabled in the picker row below).
+    if (incompatibleRolesInBuild(role, draftedRoleSet).length > 0) return;
     setDraftCounts(c => ({ ...c, [role]: (c[role] ?? 0) + 1 }));
   }
   function decrement(role: string) {
@@ -1098,8 +1115,17 @@ export default function LobbyScreen() {
                         filtered.map(role => {
                           const count = draftCounts[role] ?? 0;
                           const atSingletonCap = isSingletonRole(role) && count >= 1;
+                          // Hard-excluded pairing already drafted (e.g. Witch
+                          // or Leprechaun when Alpha Wolf is in, or vice versa).
+                          const conflicts = incompatibleRolesInBuild(
+                            role,
+                            draftedRoleSet,
+                          );
+                          const blockedByConflict = count === 0 && conflicts.length > 0;
                           const canIncrement =
-                            draftTotal < game.playerCount && !atSingletonCap;
+                            draftTotal < game.playerCount &&
+                            !atSingletonCap &&
+                            !blockedByConflict;
                           const val = getRoleValue(role);
                           const bg =
                             val > 0 ? '#1a4a1a' : val < 0 ? '#4a1a1a' : '#2a2a2a';
@@ -1110,9 +1136,16 @@ export default function LobbyScreen() {
                               key={role}
                               className="flex-row items-center py-3 border-b border-wolf-card"
                             >
-                              <Text className="text-wolf-text text-base flex-1">
-                                {role}
-                              </Text>
+                              <View className="flex-1 pr-2">
+                                <Text className="text-wolf-text text-base">
+                                  {role}
+                                </Text>
+                                {blockedByConflict && (
+                                  <Text className="text-wolf-red text-xs mt-0.5">
+                                    Can't combine with {conflicts.join(' or ')}
+                                  </Text>
+                                )}
+                              </View>
                               <View
                                 style={{
                                   backgroundColor: bg,

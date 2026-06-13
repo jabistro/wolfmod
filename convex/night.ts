@@ -17,6 +17,7 @@ import {
   postWinBanner,
   initializeDayClock,
   flagCubDeathIfApplicable,
+  flagAlphaConvertIfApplicable,
   wipeNomTapsForDay,
   dayConfigOf,
 } from './helpers';
@@ -192,6 +193,11 @@ function activePlayersForStep(
       // No actor input. The step computes & writes conversion rows on
       // entry and just dwells so the converted Cursed can read the reveal.
       return [];
+    case 'alpha_conversion':
+      // No actor input. On a conversion night the step evaluates the wolves'
+      // first pick on entry and dwells so the converted player reads their
+      // reveal; on every other night it's a 0-dwell no-op.
+      return [];
     case 'doppelganger_dawn':
     case 'doppelganger_dusk':
       // Same shape as cursed_conversion — no picker. Reveals are gated on
@@ -238,6 +244,8 @@ function stepIsInGame(step: NightStep, selectedRoles: string[]): boolean {
       return set.has('Reviler');
     case 'cursed_conversion':
       return set.has('Cursed');
+    case 'alpha_conversion':
+      return set.has('Alpha Wolf');
     case 'doppelganger_dawn':
     case 'doppelganger_dusk':
       return set.has('Doppelganger');
@@ -447,12 +455,13 @@ async function isStepComplete(
       );
       return acks.length >= conversions.length;
     }
+    case 'alpha_conversion':
     case 'doppelganger_dawn':
     case 'doppelganger_dusk':
-      // No ack required — the converted Doppelganger reads the modal during
-      // the dwell window and the step auto-advances when the dwell elapses.
-      // Cleanup of pendingDoppelgangerReveal happens in advanceFromCurrentStep
-      // so the field is gone by the time the next step renders.
+      // No ack required — the converted player reads the modal during the
+      // dwell window and the step auto-advances when the dwell elapses. (One
+      // spaced-out player otherwise stalls the table; see the reveal-no-ack
+      // house rule.)
       return true;
   }
 }
@@ -826,6 +835,18 @@ async function resolveMorning(
   if (gameAtStart?.wolfCubVengeance) {
     await ctx.db.patch(gameId, { wolfCubVengeance: false });
   }
+  // Alpha Wolf one-time conversion. If tonight was the conversion night,
+  // consume the power now (spent forever — whether the conversion lands, is
+  // BG-blocked, or was Warlock-cancelled) and clear the active-night marker.
+  // The local flag drives the suppress-death + role-flip below.
+  const isAlphaConvertNight =
+    gameAtStart?.alphaConvertActiveNight === nightNumber;
+  if (isAlphaConvertNight) {
+    await ctx.db.patch(gameId, {
+      alphaConvert: 'spent',
+      alphaConvertActiveNight: undefined,
+    });
+  }
   // Defensive: clear any stale pendingWolfKill in case the dwell never
   // got to finalize (e.g. game force-ended mid-dwell). Normal flow has
   // `finalizePendingWolfKill` clear it before the step advances.
@@ -1035,6 +1056,29 @@ async function resolveMorning(
   // them.
   const newDeadIds: Id<'players'>[] = [];
 
+  // Alpha Wolf conversion. An `alpha_conversion` row (written at the
+  // alpha_conversion step on a conversion night) already verified the wolves'
+  // effective first pick was an unprotected, surviving non-wolf and not
+  // Warlock-cancelled. Suppress the wolf "kill" candidate so the target lives;
+  // their role is flipped to 'Werewolf' below (after deaths, before the win
+  // check) so they wake with the pack starting next night. Computed up here
+  // so the Tough Guy and Cursed passes can both see it.
+  const convertedAlphaIds = new Set<Id<'players'>>();
+  if (isAlphaConvertNight) {
+    const alphaConversions = await getNightActions(
+      ctx,
+      gameId,
+      nightNumber,
+      'alpha_conversion',
+    );
+    for (const a of alphaConversions) {
+      const tid = a.targetPlayerId as Id<'players'> | undefined;
+      if (!tid) continue;
+      convertedAlphaIds.add(tid);
+      candidates.delete(tid);
+    }
+  }
+
   // Tough Guy first-attack survival. For every TG attacked by wolves this
   // night who isn't already wounded and isn't BG-protected, drop the wolf
   // entry from candidates ONLY when wolf is their sole cause (poison,
@@ -1044,6 +1088,9 @@ async function resolveMorning(
   for (const k of kills) {
     const effId = effectiveKillTarget(k);
     if (!effId) continue;
+    // A Tough Guy chosen as the Alpha conversion target is converted, not
+    // wounded — the conversion already won the suppress-death decision above.
+    if (convertedAlphaIds.has(effId)) continue;
     const tg = await ctx.db.get(effId);
     if (!tg || tg.role !== 'Tough Guy') continue;
     if (tg.roleState?.toughGuyWounded) continue;
@@ -1151,6 +1198,14 @@ async function resolveMorning(
   // wolf-on-wolf cub kills are excluded when there's no Leprechaun (no
   // farming the vengeance bonus).
   await flagCubDeathIfApplicable(
+    ctx,
+    gameId,
+    newDeadIds.filter(id => !suppressedSelfWolfKills.has(id)),
+  );
+  // Alpha Wolf: a pack member dying overnight arms the one-time conversion.
+  // Same suppressed-self-wolf-kill filter as Cub vengeance — no farming the
+  // conversion by eating your own when there's no redirector in the game.
+  await flagAlphaConvertIfApplicable(
     ctx,
     gameId,
     newDeadIds.filter(id => !suppressedSelfWolfKills.has(id)),
@@ -1331,7 +1386,25 @@ async function resolveMorning(
   for (const cid of convertedCursedIds) {
     const cursed = await ctx.db.get(cid);
     if (!cursed || !cursed.alive) continue;
-    await ctx.db.patch(cid, { role: 'Werewolf' });
+    // pendingPackReveal: same cloak as the Alpha conversion — a converted
+    // Cursed shouldn't see the wolves chat/roster (nor appear in it) until
+    // they wake with the pack next night.
+    await ctx.db.patch(cid, {
+      role: 'Werewolf',
+      roleState: { ...(cursed.roleState ?? {}), pendingPackReveal: true },
+    });
+  }
+  // Flip the Alpha Wolf conversion target → Werewolf, same timing as Cursed.
+  // originalRole is preserved so end-game shows the "Villager → Werewolf" arc.
+  // `pendingPackReveal` cloaks them from the wolves chat/roster until they
+  // wake with the pack next night (matches the reveal's promise).
+  for (const aid of convertedAlphaIds) {
+    const conv = await ctx.db.get(aid);
+    if (!conv || !conv.alive) continue;
+    await ctx.db.patch(aid, {
+      role: 'Werewolf',
+      roleState: { ...(conv.roleState ?? {}), pendingPackReveal: true },
+    });
   }
 
   const hunterDeaths = (
@@ -1611,6 +1684,156 @@ async function resolveCursedConversionsForNight(
   }
 }
 
+// ───── Alpha Wolf conversion ───────────────────────────────────────────────
+//
+// Runs at the `alpha_conversion` night step (after every other role has
+// locked in) ONLY on the night `game.alphaConvertActiveNight` marks. On a
+// conversion night the wolves' FIRST pick is a CONVERT, not a kill — the
+// pristine target of the oldest `wolf_kill` row. This writes an
+// `alpha_conversion` row (target + willConvert) when the conversion lands so
+// the converted player's reveal can read it and morning resolution can
+// suppress the "kill" + flip their role to Werewolf. Mirrors the Cursed
+// resolver's protection/other-death checks.
+//
+// The conversion FAILS (no row, target stays a villager, no death) when:
+//   - the Warlock fired (cancels the conversion; morning instead kills the
+//     Warlock's own pick via the existing effectiveKillTarget override), OR
+//   - the Bodyguard protected the convert target (house rule: BG blocks the
+//     conversion entirely, same as Cursed), OR
+//   - the target is being killed by another source tonight (can't convert a
+//     corpse) the BG didn't also cover.
+//
+// A convert target who is themselves a Cursed is left to the Cursed path
+// (which already converts a wolf-attacked Cursed to a Werewolf) and skipped
+// here, so a player can't get two competing conversion reveals.
+async function resolveAlphaConversionForNight(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  nightNumber: number,
+): Promise<void> {
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+
+  const kills = await getNightActions(ctx, gameId, nightNumber, 'wolf_kill');
+  if (kills.length === 0) return; // no pick to convert (e.g. diseased-blocked)
+  const sortedKills = kills.slice().sort((a, b) => a.resolvedAt - b.resolvedAt);
+  const convertTargetId = sortedKills[0].targetPlayerId as
+    | Id<'players'>
+    | undefined;
+  if (!convertTargetId) return;
+
+  // Warlock fired → the conversion is cancelled (morning kills the Warlock's
+  // pick instead via effectiveKillTarget). No conversion.
+  const warlockRedirects = await getNightActions(
+    ctx,
+    gameId,
+    nightNumber,
+    'warlock_redirect',
+  );
+  if (warlockRedirects.some(w => !!w.targetPlayerId)) return;
+
+  const target = players.find(p => p._id === convertTargetId);
+  if (!target || !target.alive) return;
+  // Defensive: never "convert" someone who's already a wolf, and let the
+  // Cursed path own a Cursed convert-target.
+  if (target.role && isWolfTeam(target.role)) return;
+  if (target.role === 'Cursed') return;
+
+  // Bodyguard / Witch save protect the target → conversion blocked, target
+  // stays a villager (the existing protection logic also spares them from the
+  // "kill" candidate at morning, so no one dies).
+  const bgProtects = await getNightActions(ctx, gameId, nightNumber, 'bg_protect');
+  const bgProtectedIds = new Set<Id<'players'>>();
+  for (const bg of bgProtects) {
+    if (bg.targetPlayerId) bgProtectedIds.add(bg.targetPlayerId);
+  }
+  const witchSaves = await getNightActions(ctx, gameId, nightNumber, 'witch_save');
+  const protectedIds = new Set<Id<'players'>>(bgProtectedIds);
+  for (const s of witchSaves) {
+    if (s.targetPlayerId) protectedIds.add(s.targetPlayerId);
+  }
+  if (protectedIds.has(convertTargetId)) {
+    await recordBlockedAlphaConversion(ctx, gameId, nightNumber, convertTargetId);
+    return;
+  }
+
+  // Other lethal sources the BG didn't also cover would kill the target —
+  // can't convert a corpse. (Witch is excluded from Alpha builds, so poison
+  // can't appear, but the check is harmless.)
+  const otherKillTargets = new Set<Id<'players'>>();
+  const witchPoisons = await getNightActions(ctx, gameId, nightNumber, 'witch_poison');
+  for (const p of witchPoisons) {
+    if (p.targetPlayerId && !bgProtectedIds.has(p.targetPlayerId)) {
+      otherKillTargets.add(p.targetPlayerId);
+    }
+  }
+  const huntressShots = await getNightActions(ctx, gameId, nightNumber, 'huntress_shot');
+  for (const h of huntressShots) {
+    if (h.targetPlayerId && !bgProtectedIds.has(h.targetPlayerId)) {
+      otherKillTargets.add(h.targetPlayerId);
+    }
+  }
+  const revealerShots = await getNightActions(ctx, gameId, nightNumber, 'revealer_shot');
+  for (const rs of revealerShots) {
+    if (!rs.targetPlayerId) continue;
+    const t = players.find(p => p._id === rs.targetPlayerId);
+    if (t?.role && isWolfTeam(t.role) && !bgProtectedIds.has(rs.targetPlayerId)) {
+      otherKillTargets.add(rs.targetPlayerId);
+    }
+  }
+  const revilerShots = await getNightActions(ctx, gameId, nightNumber, 'reviler_shot');
+  for (const rs of revilerShots) {
+    if (!rs.targetPlayerId) continue;
+    const t = players.find(p => p._id === rs.targetPlayerId);
+    if (t && isSpecialVillager(t.role) && !bgProtectedIds.has(rs.targetPlayerId)) {
+      otherKillTargets.add(rs.targetPlayerId);
+    }
+  }
+  if (otherKillTargets.has(convertTargetId)) {
+    await recordBlockedAlphaConversion(ctx, gameId, nightNumber, convertTargetId);
+    return;
+  }
+
+  await ctx.db.insert('nightActions', {
+    gameId,
+    nightNumber,
+    actorPlayerId: undefined,
+    actionType: 'alpha_conversion',
+    targetPlayerId: convertTargetId,
+    result: { willConvert: true },
+    resolvedAt: Date.now(),
+  });
+}
+
+/**
+ * Record a failed Alpha Wolf conversion attempt. The wolves spent the night's
+ * pick on a CONVERT (not a kill), but a Bodyguard/Witch protected the target —
+ * or another lethal source dropped them first — so no new wolf joins the pack.
+ *
+ * This is a distinct actionType from `alpha_conversion` (which means the
+ * conversion landed) so the morning Werewolf-flip never picks it up; it exists
+ * purely so the end-game log can read "Targeted X — CONVERSION BLOCKED" instead
+ * of "SAVED"/"KILLED" on the pack's row, reflecting the wolves' actual intent.
+ */
+async function recordBlockedAlphaConversion(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+  nightNumber: number,
+  targetPlayerId: Id<'players'>,
+): Promise<void> {
+  await ctx.db.insert('nightActions', {
+    gameId,
+    nightNumber,
+    actorPlayerId: undefined,
+    actionType: 'alpha_conversion_blocked',
+    targetPlayerId,
+    result: { willConvert: false },
+    resolvedAt: Date.now(),
+  });
+}
+
 // ───── Sasquatch conversion ────────────────────────────────────────────────
 //
 // Sasquatch starts on the village team. The village's bargain: lynch one
@@ -1772,6 +1995,9 @@ async function applyDoppelgangerConversion(
         victimId: victim._id,
         victimName: victim.name,
       },
+      // Inheriting a wolf role means waking with the pack next night — cloak
+      // them from the wolves chat/roster until then (same as Alpha/Cursed).
+      ...(isWolfTeam(newRole) ? { pendingPackReveal: true } : {}),
     },
   });
   // Stamp the conversion row under nightNumber: 0 so it groups with the
@@ -2309,6 +2535,34 @@ function hasNightmareWolfInGame(selectedRoles: string[]): boolean {
   return selectedRoles.includes('Nightmare Wolf');
 }
 
+/**
+ * Decide whether tonight is an Alpha Wolf conversion night and stamp it.
+ * MUST be called at every night-entry point — `beginNightWaves` (local BEGIN
+ * NIGHT) AND the autopilot/trigger paths in day.ts/triggers.ts that transition
+ * straight into `enterStep(NIGHT_STEPS[0])` and bypass `beginNightWaves`.
+ * Call AFTER the `phase:'night'` + `nightNumber` patch and BEFORE the first
+ * step activates. If the one-time conversion is armed and an Alpha is still
+ * alive, mark this night active; if the Alpha died in the interim, the power
+ * is lost (spent) and the wolves kill normally. No-op otherwise.
+ */
+export async function prepareAlphaConvertNight(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<void> {
+  const game = await ctx.db.get(gameId);
+  if (!game || game.alphaConvert !== 'armed') return;
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  const alphaAlive = players.some(p => p.alive && p.role === 'Alpha Wolf');
+  if (alphaAlive) {
+    await ctx.db.patch(gameId, { alphaConvertActiveNight: game.nightNumber });
+  } else {
+    await ctx.db.patch(gameId, { alphaConvert: 'spent' });
+  }
+}
+
 export async function beginNightWaves(
   ctx: MutationCtx,
   gameId: Id<'games'>,
@@ -2334,6 +2588,10 @@ export async function beginNightWaves(
     nightStep: undefined,
     nightStepEndsAt: undefined,
   });
+  // Alpha Wolf conversion-night determination. Must run before any step
+  // activates so the wolves picker (CONVERT verb) and the alpha_conversion
+  // reveal step read the right state this night.
+  await prepareAlphaConvertNight(ctx, gameId);
   await ctx.scheduler.runAfter(floorMs, internal.night.nightFloorTick, {
     gameId,
   });
@@ -2402,6 +2660,15 @@ export async function enterStep(
   if (step === 'cursed_conversion' && !game.selectedRoles.includes('Cursed')) {
     dwellMs = 0;
   }
+  // Alpha conversion only needs its reveal dwell on the actual conversion
+  // night. Every other night (including normal nights with an Alpha in play)
+  // it's an instant no-op so the night doesn't stall on a dead step.
+  if (
+    step === 'alpha_conversion' &&
+    game.alphaConvertActiveNight !== game.nightNumber
+  ) {
+    dwellMs = 0;
+  }
   const endsAt = Date.now() + dwellMs;
   const active = getActiveStepEntries(game);
   active.push({ step, endsAt });
@@ -2416,6 +2683,57 @@ export async function enterStep(
     .collect();
   const alive = players.filter(p => p.alive);
   const actors = activePlayersForStep(step, alive, game.nightNumber);
+
+  // Freshly-converted wolves (Alpha conversion / Cursed / Doppelganger→wolf)
+  // "wake with the pack" the night after their flip. This is that moment —
+  // clear the chat cloak so they (and the existing pack) see each other in the
+  // wolves channel + roster from now on. Until now they counted as a wolf for
+  // parity but were hidden from pack chat (see chat.ts isWolf). The wolves
+  // picker already reveals the pack to them this same step.
+  if (step === 'wolves') {
+    for (const w of actors) {
+      if (w.roleState?.pendingPackReveal) {
+        const next = { ...w.roleState };
+        delete next.pendingPackReveal;
+        await ctx.db.patch(w._id, { roleState: next });
+      }
+    }
+
+    // Moderator note in the wolves chat naming tonight's job, so the pack
+    // doesn't have to close the chat to read the picker behind it. Remote
+    // only (no chat locally); skipped on a diseased-blocked night (the blocked
+    // view already explains it) and when no wolves are awake to read it.
+    if (
+      game.mode === 'remote' &&
+      !game.wolvesBlockedNextNight &&
+      actors.length > 0
+    ) {
+      const convert = game.alphaConvertActiveNight === game.nightNumber;
+      const vengeance = !!game.wolfCubVengeance;
+      const headline = convert
+        ? vengeance
+          ? 'TIME TO CONVERT & KILL'
+          : 'TIME TO CONVERT'
+        : 'TIME TO KILL';
+      const body = convert
+        ? vengeance
+          ? 'Convert a villager into a wolf, then claim a victim.'
+          : 'Turn a villager into a wolf — no kill tonight.'
+        : vengeance
+          ? 'Wolf Cub vengeance — choose two victims tonight.'
+          : "Choose tonight's victim.";
+      await ctx.db.insert('messages', {
+        gameId,
+        channel: 'wolves',
+        authorName: 'MODERATOR',
+        body,
+        phaseLabel: `Night ${game.nightNumber}`,
+        sentAt: Date.now(),
+        system: true,
+        headline,
+      });
+    }
+  }
 
   // A witch whose save AND poison are both spent has nothing left to decide,
   // so we pre-record their "done" — same path as a bot — and let the dwell
@@ -2455,6 +2773,12 @@ export async function enterStep(
     // No actor input — compute conversion eligibility inline so the dwell
     // window already has the row to read for the Cursed's private reveal.
     await resolveCursedConversionsForNight(ctx, gameId, game.nightNumber);
+  } else if (step === 'alpha_conversion') {
+    // Only fires on the actual conversion night — evaluate the wolves' first
+    // pick and (if it lands) write the alpha_conversion row + reveal.
+    if (game.alphaConvertActiveNight === game.nightNumber) {
+      await resolveAlphaConversionForNight(ctx, gameId, game.nightNumber);
+    }
   } else if (step === 'doppelganger_dusk') {
     // Predict tonight's victims and fire any same-night Doppelganger
     // conversions before morning resolution runs. The step auto-advances
@@ -2973,6 +3297,17 @@ export const submitWolfVote = mutation({
     );
     if (lockedTargets.has(args.targetPlayerId as unknown as string)) {
       throw new Error('That player is already a kill target tonight.');
+    }
+    // Alpha conversion night, round 1 (no kills locked yet) is a CONVERT —
+    // the pack can only turn a non-wolf into a wolf, never a packmate. Later
+    // rounds (Wolf Cub vengeance kill #2) are normal kills with no restriction.
+    if (
+      game.alphaConvertActiveNight === game.nightNumber &&
+      existingKills.length === 0 &&
+      target.role &&
+      isWolfTeam(target.role)
+    ) {
+      throw new Error('The conversion must target someone outside the pack.');
     }
 
     await ctx.db.patch(me._id, {
@@ -4699,6 +5034,7 @@ const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
   revealer: ['revealer_shot', 'revealer_skip'],
   reviler: ['reviler_shot', 'reviler_skip'],
   cursed_conversion: ['cursed_conversion', 'cursed_conversion_ack'],
+  alpha_conversion: ['alpha_conversion'],
   doppelganger_dawn: ['doppelganger_conversion_reveal'],
   doppelganger_dusk: ['doppelganger_conversion', 'doppelganger_conversion_reveal'],
 };
@@ -5026,6 +5362,7 @@ const STEP_ROLE_LABEL: Record<NightStep, string> = {
   revealer: 'Revealer',
   reviler: 'Reviler',
   cursed_conversion: 'Cursed',
+  alpha_conversion: 'Alpha Wolf',
   doppelganger_dawn: 'Doppelganger',
   doppelganger_dusk: 'Doppelganger',
 };
@@ -5401,6 +5738,11 @@ async function buildNightLog(
 
   const log: NightLogEntry[] = [];
   let wolfKillSeen = 0;
+  // On an Alpha conversion night the wolves' FIRST pick is a CONVERT, not a
+  // kill — label it as such so ghosts read the right intent (the landed
+  // outcome is the separate alpha_conversion card below).
+  const gameDoc = await ctx.db.get(gameId);
+  const convertNight = gameDoc?.alphaConvertActiveNight === nightNumber;
 
   // Walk every step in canonical wake order. Emit cards only for steps
   // that are currently active or already completed — pending (gated) steps
@@ -5434,12 +5776,16 @@ async function buildNightLog(
         if (action.actionType === 'wolf_kill') {
           wolfKillSeen++;
           const t = nameOf(action.targetPlayerId as Id<'players'>);
+          const isConvertPick = convertNight && wolfKillSeen === 1;
           log.push({
             id,
             roleLabel: 'Wolves',
             actorName: wolfNames,
-            statusLabel:
-              wolfKillSeen > 1 ? `Also targeted ${t}` : `Targeted ${t}`,
+            statusLabel: isConvertPick
+              ? `Chose to convert ${t}`
+              : wolfKillSeen > 1
+                ? `Also targeted ${t}`
+                : `Targeted ${t}`,
             statusColor: LOG_COLOR_WOLF,
             kind: 'action',
           });
@@ -5486,6 +5832,27 @@ async function buildNightLog(
           roleLabel: wasDopp ? 'Cursed (Doppelganger)' : 'Cursed',
           actorName: actor?.name ?? '',
           statusLabel: 'Was bitten and is now a Werewolf',
+          statusColor: LOG_COLOR_WOLF,
+          kind: 'action',
+        });
+      }
+      continue;
+    }
+
+    if (step === 'alpha_conversion') {
+      // One card per landed conversion, naming the converted player (ghosts
+      // get full night info). The target's original role is the label so the
+      // log reads "Villager — Turned into a Werewolf".
+      const rows = allActions.filter(a => a.actionType === 'alpha_conversion');
+      for (const action of rows) {
+        const target = action.targetPlayerId
+          ? playerById.get(action.targetPlayerId)
+          : undefined;
+        log.push({
+          id: action._id as unknown as string,
+          roleLabel: 'Alpha Wolf',
+          actorName: target?.name ?? '',
+          statusLabel: 'Turned into a Werewolf by the pack',
           statusColor: LOG_COLOR_WOLF,
           kind: 'action',
         });
@@ -5680,6 +6047,12 @@ export const nightView = query({
            * trigger at expiry.
            */
           pickerEndsAt: number | null;
+          /**
+           * Alpha Wolf conversion night: the pack's first pick converts a
+           * villager into a wolf instead of killing. The client swaps round
+           * 1's verb to CONVERT and restricts its targets to non-wolves.
+           */
+          convertActive: boolean;
         }
       | null = null;
     // Set on the caller's view when they're a freshly-flipped Sasquatch — the
@@ -5735,6 +6108,11 @@ export const nightView = query({
             }
           : null,
         pickerEndsAt: game.wolvesPickerEndsAt ?? null,
+        // Alpha Wolf conversion night: the pack's FIRST pick converts a
+        // villager into a wolf instead of killing. The client swaps the verb
+        // for round 1 (killsSoFar empty) and restricts targets to non-wolves;
+        // a Wolf Cub vengeance round 2 is still a normal kill.
+        convertActive: game.alphaConvertActiveNight === game.nightNumber,
       };
     }
 
@@ -6334,6 +6712,40 @@ export const nightView = query({
       }
     }
 
+    // Alpha Wolf conversion reveal. Populated only when the alpha_conversion
+    // step is active AND tonight produced a landed conversion. Visible to:
+    //   - the converted player themselves (`isMine: true`) — their role is
+    //     still their original one this night (the flip lands at morning), so
+    //     they'd otherwise see the generic WaitingView, and
+    //   - dead spectators during the step (ghost mirror, per "ghosts get full
+    //     night info").
+    // No ack — the step dwells and auto-advances (reveal-no-ack rule).
+    let alphaConversionState: {
+      isMine: boolean;
+      convertedName: string;
+    } | null = null;
+    if (activeStepSet.has('alpha_conversion')) {
+      const alphaConversions = await getNightActions(
+        ctx,
+        args.gameId,
+        game.nightNumber,
+        'alpha_conversion',
+      );
+      if (alphaConversions.length > 0) {
+        const playerById = new Map(players.map(p => [p._id, p]));
+        const targetId = alphaConversions[0].targetPlayerId as
+          | Id<'players'>
+          | undefined;
+        const convertedName = targetId
+          ? playerById.get(targetId)?.name ?? 'someone'
+          : 'someone';
+        const isMine = me.alive && !!targetId && me._id === targetId;
+        if (isMine || !me.alive) {
+          alphaConversionState = { isMine, convertedName };
+        }
+      }
+    }
+
     // Doppelganger reveal state. Populated during the dawn / dusk steps.
     // Visible to:
     //   - the converted Doppelganger themselves (`isMine: true`, includes
@@ -6708,6 +7120,7 @@ export const nightView = query({
       revealerState,
       revilerState,
       cursedConversionState,
+      alphaConversionState,
       doppelgangerRevealState,
       masonRevealState,
       nightmareWolfState,
