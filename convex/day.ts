@@ -23,6 +23,7 @@ import {
   wipeNomTapsForDay,
 } from './helpers';
 import {
+  applyDrunkSoberUp,
   enterStep,
   fireDoppelgangerConversionsForDeaths,
   prepareAlphaConvertNight,
@@ -1380,6 +1381,8 @@ export const continueGameAfterVote = mutation({
       });
       // Alpha Wolf conversion-night determination (bypasses beginNightWaves).
       await prepareAlphaConvertNight(ctx, args.gameId);
+      // Drunk sober-up (start of N3) — bypasses beginNightWaves like the above.
+      if (await applyDrunkSoberUp(ctx, args.gameId)) return;
       await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
       return;
     }
@@ -1607,6 +1610,8 @@ export const enterNightFromDayClock = internalMutation({
     // Alpha Wolf conversion-night determination (this path bypasses
     // beginNightWaves, so stamp it here before the first step activates).
     await prepareAlphaConvertNight(ctx, args.gameId);
+    // Drunk sober-up (start of N3) — bypasses beginNightWaves like the above.
+    if (await applyDrunkSoberUp(ctx, args.gameId)) return;
     await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
   },
 });
@@ -1648,6 +1653,8 @@ export const enterNightFromDay = internalMutation({
     // Alpha Wolf conversion-night determination (this path bypasses
     // beginNightWaves, so stamp it here before the first step activates).
     await prepareAlphaConvertNight(ctx, args.gameId);
+    // Drunk sober-up (start of N3) — bypasses beginNightWaves like the above.
+    if (await applyDrunkSoberUp(ctx, args.gameId)) return;
     await enterStep(ctx, args.gameId, NIGHT_STEPS[0]);
   },
 });

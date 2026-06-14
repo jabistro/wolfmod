@@ -38,6 +38,7 @@ export const V1_ROLES = [
   'Cursed',
   'Doppelganger',
   'Sasquatch',
+  'Drunk',
   // Solo / third-party win condition
   'Chupacabra',
 ] as const;
@@ -78,6 +79,9 @@ export const SINGLETON_ROLES = [
   // The Chupacabra is a unique solo win condition — two would create
   // competing "I win alone" states with no defined resolution.
   'Chupacabra',
+  // Two Drunks would each demand their own set-aside future role, doubling
+  // the "+1 role" deal requirement and making the lobby math confusing.
+  'Drunk',
 ] as const;
 export function isSingletonRole(name: string): boolean {
   return (SINGLETON_ROLES as readonly string[]).includes(name);
@@ -135,6 +139,11 @@ const VILLAGE_ROLES = new Set<string>([
   'Warlock',
   'Lycan',
   'Mason',
+  // The Drunk masquerades as a villager until they sober into their hidden
+  // role on the third night — so they read as village-team to everyone
+  // (Seer, Mentalist, etc.). The Reviler is the one exception: its hunt sees
+  // through the booze to the true (delayed) identity — see `revilerSeesRole`.
+  'Drunk',
 ]);
 // The Chupacabra is the first TEAM_SOLO role — it wins alone (eliminate every
 // wolf, then reach parity). The Mentalist reads it as a different team from

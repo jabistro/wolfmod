@@ -580,14 +580,22 @@ export const startGame = mutation({
     if (players.some(p => p.seatPosition === undefined)) {
       throw new Error('All players must be seated before starting.');
     }
-    if (game.selectedRoles.length !== game.playerCount) {
+    // A Drunk build carries one extra role beyond the seat count — the
+    // "+1" is set aside as the Drunk's hidden future role (revealed on N3).
+    const hasDrunk = game.selectedRoles.includes('Drunk');
+    const expectedRoleCount = game.playerCount + (hasDrunk ? 1 : 0);
+    if (game.selectedRoles.length !== expectedRoleCount) {
       throw new Error(
-        `Need ${game.playerCount} roles selected, have ${game.selectedRoles.length}.`,
+        `Need ${expectedRoleCount} roles selected${
+          hasDrunk ? ' (the Drunk adds one set-aside role)' : ''
+        }, have ${game.selectedRoles.length}.`,
       );
     }
     // Pre-game parity guard. Starting wolves at or above half the table means
     // the wolves win on N1 before the first kill — block instead of letting
-    // the host start a game that's already over.
+    // the host start a game that's already over. Counts every wolf in the
+    // build (conservative: a wolf set aside as the Drunk's future role won't
+    // actually be in play on N1, so this can only over-count, never under).
     const wolfCount = game.selectedRoles.filter(isWolfTeam).length;
     if (wolfCount * 2 >= game.playerCount) {
       throw new Error(
@@ -613,6 +621,44 @@ export const startGame = mutation({
       remaining.splice(idx, 1);
       seatToRole[pin.seatPosition] = pin.role;
     }
+
+    // Pick the Drunk's set-aside future role from the unpinned remainder.
+    // Preference, strictest first: never the Drunk itself (it must be dealt
+    // to a seat, never the odd card out); avoid setup-only roles the Drunk
+    // could never use if inherited late (Doppelganger/Mama Wolf — their power
+    // is a pregame action); never set aside the last wolf (0 wolves in play
+    // would hand the village an instant N1 win). Each tier relaxes a rule so
+    // a pick is always found unless dev pins stranded the Drunk.
+    let drunkDelayedRole: string | undefined;
+    if (hasDrunk) {
+      const SETUP_ONLY = new Set(['Doppelganger', 'Mama Wolf']);
+      const wolvesInRemaining = remaining.filter(isWolfTeam).length;
+      const notLastWolf = (r: string) =>
+        !(isWolfTeam(r) && wolvesInRemaining <= 1);
+      const tiers: Array<(r: string) => boolean> = [
+        r => r !== 'Drunk' && !SETUP_ONLY.has(r) && notLastWolf(r),
+        r => r !== 'Drunk' && notLastWolf(r),
+        r => r !== 'Drunk',
+      ];
+      let pickIdx = -1;
+      for (const ok of tiers) {
+        const candidates = remaining
+          .map((r, i) => ({ r, i }))
+          .filter(({ r }) => ok(r));
+        if (candidates.length > 0) {
+          pickIdx =
+            candidates[Math.floor(Math.random() * candidates.length)].i;
+          break;
+        }
+      }
+      if (pickIdx === -1) {
+        throw new Error(
+          'Cannot set aside the Drunk’s hidden role — every other role is pinned to a seat. Free up a pin.',
+        );
+      }
+      drunkDelayedRole = remaining.splice(pickIdx, 1)[0];
+    }
+
     const shuffled = shuffle(remaining);
     let nextLeftover = 0;
     for (let seat = 0; seat < game.playerCount; seat++) {
@@ -634,7 +680,14 @@ export const startGame = mutation({
         role: string;
         originalRole: string;
         revealedAt?: number;
+        drunkDelayedRole?: string;
       } = { role, originalRole: role };
+      // Stash the set-aside role on whoever drew the Drunk; the N3 sober-up
+      // (applyDrunkSoberUp) patches `role` to this then. Bots need no pregame
+      // action — the Drunk has none until it sobers.
+      if (role === 'Drunk' && drunkDelayedRole) {
+        patch.drunkDelayedRole = drunkDelayedRole;
+      }
       if (isBotName(player.name)) {
         patch.revealedAt = now;
         if (role === 'Doppelganger') botDoppelgangerId = player._id;
@@ -1477,10 +1530,11 @@ export const endGameView = query({
         }
       } else if (a.actionType === 'reviler_shot' && a.targetPlayerId) {
         const t = players.find(p => p._id === a.targetPlayerId);
+        // Reviler sees through a not-yet-sobered Drunk to its true (delayed)
+        // identity — mirror `revilerSeesRole` in night.ts.
+        const seen = t?.role === 'Drunk' ? t.drunkDelayedRole : t?.role;
         const isSpecial =
-          !!t?.role &&
-          teamForRole(t.role) === 'village' &&
-          t.role !== 'Villager';
+          !!seen && teamForRole(seen) === 'village' && seen !== 'Villager';
         if (isSpecial) addIncoming(a.nightNumber, a.targetPlayerId);
       } else if (a.actionType === 'chupacabra_kill' && a.targetPlayerId) {
         // A BG guard on the chupacabra's prey only "mattered" when the hunt
@@ -1770,10 +1824,12 @@ export const endGameView = query({
         const target = a.targetPlayerId
           ? players.find(p => p._id === a.targetPlayerId)
           : null;
+        // Reviler sees through a not-yet-sobered Drunk to its true (delayed)
+        // identity — mirror `revilerSeesRole` in night.ts.
+        const seen =
+          target?.role === 'Drunk' ? target.drunkDelayedRole : target?.role;
         const targetIsSpecial =
-          !!target?.role &&
-          teamForRole(target.role) === 'village' &&
-          target.role !== 'Villager';
+          !!seen && teamForRole(seen) === 'village' && seen !== 'Villager';
         if (targetIsSpecial) {
           const killed =
             a.targetPlayerId &&

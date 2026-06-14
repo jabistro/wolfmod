@@ -125,8 +125,7 @@ export const ROLE_DESCRIPTIONS: Record<string, string> = {
   'Tanner': 'Wins solo only if voted out by the village during the day.',
   'Cult Leader': 'Each night, recruits a player into the cult. Wins when the cult outnumbers the village.',
   'Sasquatch': 'Starts on the village team — but only if the village votes out a player every day. The first day with no lynch, joins the wolves out of spite.',
-  // TODO: verify Bezier variant
-  'Drunk': 'Holds a hidden role unknown even to themselves until the game brings it out.',
+  'Drunk': 'Too soused to recall their real role. On the third night they sober up and become who they were all along.',
   'Blighted': 'Solo. Starts on the village. If the wolves attack and they survive, they become a wolf — but hunt alone, never with the pack.',
   'Grave Robber': 'Solo. On death, picks any living player to die in their place — and takes that player\'s role.',
   'Black Cat': 'Solo. On death, drags one of the killers down too. Wins with whichever team didn\'t do them in.',

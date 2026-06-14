@@ -69,6 +69,10 @@ const STEP_DWELL_MAX_MS = 12000;
 // actors still get the full original dwell, preserving cloak variance.
 const REVEAL_WINDOW_MS = 5000;
 
+// The night the Drunk sobers up and patches into their hidden role. Per house
+// rules they "remember who they really are" at the start of the third night.
+const DRUNK_REVEAL_NIGHT = 3;
+
 // Remote autopilot: how long the dawn night report sits before morning
 // auto-advances to the next day (no host BEGIN DAY tap).
 const MORNING_READ_MS = 5000;
@@ -1034,7 +1038,7 @@ async function resolveMorning(
     if (!rs.targetPlayerId || !rs.actorPlayerId) continue;
     const target = await ctx.db.get(rs.targetPlayerId);
     if (!target) continue;
-    if (isSpecialVillager(target.role)) {
+    if (isSpecialVillager(revilerSeesRole(target))) {
       addCandidate(rs.targetPlayerId, 'reviler', true);
     } else {
       addCandidate(rs.actorPlayerId, 'reviler-miss', false);
@@ -1338,11 +1342,24 @@ async function resolveMorning(
     .withIndex('by_game', q => q.eq('gameId', gameId))
     .collect();
   for (const p of players) {
-    if (p.roleState && 'wolfVote' in p.roleState) {
-      const next = { ...p.roleState };
+    if (!p.roleState) continue;
+    let next = p.roleState;
+    let changed = false;
+    if ('wolfVote' in p.roleState) {
+      next = { ...next };
       delete next.wolfVote;
-      await ctx.db.patch(p._id, { roleState: next });
+      changed = true;
     }
+    // The Drunk's sober-up reveal was shown during the night that just ended;
+    // strip it so the overlay can't re-show on a NightScreen remount. Cleared
+    // here (not on a step advance) because the Drunk can sober into any role,
+    // so there's no single step to anchor on — and morning runs in every mode.
+    if ('pendingDrunkReveal' in p.roleState) {
+      next = changed ? next : { ...next };
+      delete (next as { pendingDrunkReveal?: unknown }).pendingDrunkReveal;
+      changed = true;
+    }
+    if (changed) await ctx.db.patch(p._id, { roleState: next });
   }
 
   // Mad Bomber detonations resolve INLINE — every bomber in the morning
@@ -1662,7 +1679,7 @@ async function resolveCursedConversionsForNight(
   for (const rs of revilerShots) {
     if (!rs.targetPlayerId) continue;
     const target = players.find(p => p._id === rs.targetPlayerId);
-    if (target && isSpecialVillager(target.role) && !bgProtectedIds.has(rs.targetPlayerId)) {
+    if (target && isSpecialVillager(revilerSeesRole(target)) && !bgProtectedIds.has(rs.targetPlayerId)) {
       otherKillTargets.add(rs.targetPlayerId);
     }
   }
@@ -1787,7 +1804,7 @@ async function resolveAlphaConversionForNight(
   for (const rs of revilerShots) {
     if (!rs.targetPlayerId) continue;
     const t = players.find(p => p._id === rs.targetPlayerId);
-    if (t && isSpecialVillager(t.role) && !bgProtectedIds.has(rs.targetPlayerId)) {
+    if (t && isSpecialVillager(revilerSeesRole(t)) && !bgProtectedIds.has(rs.targetPlayerId)) {
       otherKillTargets.add(rs.targetPlayerId);
     }
   }
@@ -1986,6 +2003,13 @@ async function applyDoppelgangerConversion(
   await ctx.db.patch(doppelganger._id, {
     role: newRole,
     doppelgangerTarget: undefined,
+    // Inheriting a still-un-sobered Drunk (victim died before N3) carries the
+    // Drunk's set-aside future role along, so the Doppelganger sobers into it
+    // on N3 exactly as the original would have. (A Drunk who died AFTER N3 is
+    // already its real role, so `newRole` is that role and this is skipped.)
+    ...(newRole === 'Drunk' && victim.drunkDelayedRole
+      ? { drunkDelayedRole: victim.drunkDelayedRole }
+      : {}),
     roleState: {
       pendingDoppelgangerReveal: {
         fromRole: doppelganger.role ?? 'Doppelganger',
@@ -2241,7 +2265,7 @@ async function predictNightVictims(
     if (!rs.targetPlayerId || !rs.actorPlayerId) continue;
     const target = playerById.get(rs.targetPlayerId);
     if (!target) continue;
-    if (isSpecialVillager(target.role)) {
+    if (isSpecialVillager(revilerSeesRole(target))) {
       addCandidate(rs.targetPlayerId, 'reviler', true);
     } else {
       addCandidate(rs.actorPlayerId, 'reviler-miss', false);
@@ -2563,6 +2587,60 @@ export async function prepareAlphaConvertNight(
   }
 }
 
+/**
+ * Drunk sober-up. At the START of the third night, every still-un-sobered
+ * Drunk (alive, current role still 'Drunk', with a set-aside `drunkDelayedRole`)
+ * patches into their hidden role. Must run at EVERY night-entry point, BEFORE
+ * any step activates, so:
+ *   - a Drunk who sobers into a night-acting role (Seer/Witch/…) gets their
+ *     turn that very night, and
+ *   - a Drunk who sobers into a wolf joins THIS night's kill and wolf chat
+ *     (no deferred pack-reveal cloak — same-night wake, per house rules).
+ * `originalRole` stays 'Drunk' for the end-game arc. A Drunk converted earlier
+ * (e.g. Alpha Wolf) no longer has role 'Drunk', so they're skipped and the
+ * set-aside role is silently discarded. Returns true if the resulting parity
+ * shift ended the game (callers must bail before activating steps).
+ */
+export async function applyDrunkSoberUp(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<boolean> {
+  const game = await ctx.db.get(gameId);
+  if (!game || game.phase !== 'night') return false;
+  if (game.nightNumber !== DRUNK_REVEAL_NIGHT) return false;
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  const now = Date.now();
+  let flippedAny = false;
+  for (const p of players) {
+    if (!p.alive || p.role !== 'Drunk' || !p.drunkDelayedRole) continue;
+    const toRole = p.drunkDelayedRole;
+    await ctx.db.patch(p._id, {
+      role: toRole,
+      roleState: {
+        ...(p.roleState ?? {}),
+        pendingDrunkReveal: { fromRole: 'Drunk', toRole, atNight: game.nightNumber },
+      },
+    });
+    await ctx.db.insert('nightActions', {
+      gameId,
+      nightNumber: game.nightNumber,
+      actorPlayerId: p._id,
+      actionType: 'drunk_reveal',
+      targetPlayerId: p._id,
+      result: { fromRole: 'Drunk', toRole },
+      resolvedAt: now,
+    });
+    flippedAny = true;
+  }
+  // A Drunk→wolf flip can hand the wolves parity at night-start; let the
+  // caller end the game before any step runs.
+  if (flippedAny) return await applyWinIfReached(ctx, gameId);
+  return false;
+}
+
 export async function beginNightWaves(
   ctx: MutationCtx,
   gameId: Id<'games'>,
@@ -2592,6 +2670,9 @@ export async function beginNightWaves(
   // activates so the wolves picker (CONVERT verb) and the alpha_conversion
   // reveal step read the right state this night.
   await prepareAlphaConvertNight(ctx, gameId);
+  // Drunk sober-up (start of N3). Runs before steps activate so a sobered
+  // night-actor / new wolf joins tonight. Bail if the parity shift ends it.
+  if (await applyDrunkSoberUp(ctx, gameId)) return;
   await ctx.scheduler.runAfter(floorMs, internal.night.nightFloorTick, {
     gameId,
   });
@@ -4035,6 +4116,23 @@ export const submitRevealerSkip = mutation({
 function isSpecialVillager(role: string | undefined): boolean {
   if (!role) return false;
   return teamForRole(role) === 'village' && role !== 'Villager';
+}
+
+/**
+ * The role the Reviler's hunt actually reads. A Drunk masquerades as a plain
+ * villager until they sober into their hidden role on N3 — but the Reviler's
+ * power sees through the booze to the true (delayed) identity. So a shot on a
+ * not-yet-sobered Drunk resolves against `drunkDelayedRole`: a delayed special
+ * villager dies, a delayed plain Villager or wolf is a miss (shooter dies),
+ * exactly as if the Drunk were already that role. Every other player reads as
+ * their current role.
+ */
+function revilerSeesRole(target: {
+  role?: string;
+  drunkDelayedRole?: string;
+}): string | undefined {
+  if (target.role === 'Drunk') return target.drunkDelayedRole;
+  return target.role;
 }
 
 export const submitRevilerShot = mutation({
@@ -5922,6 +6020,31 @@ async function buildNightLog(
     }
   }
 
+  // Drunk sober-up (N3 only): not a wake-order step, and it fires at night
+  // start before any picker — so prepend its card(s) to the top of the log.
+  // Ghosts get full info: the role the Drunk turned out to be.
+  const drunkCards: NightLogEntry[] = allActions
+    .filter(a => a.actionType === 'drunk_reveal')
+    .map(action => {
+      const actor = action.actorPlayerId
+        ? playerById.get(action.actorPlayerId)
+        : undefined;
+      const toRole = (action.result?.toRole as string | undefined) ?? '';
+      const wasDopp =
+        actor?.originalRole === 'Doppelganger' &&
+        actor?.role !== 'Doppelganger';
+      return {
+        id: action._id as unknown as string,
+        roleLabel: wasDopp ? 'Drunk (Doppelganger)' : 'Drunk',
+        actorName: actor?.name ?? '',
+        statusLabel: toRole ? `Sobered up — now the ${toRole}` : 'Sobered up',
+        statusColor:
+          toRole && isWolfTeam(toRole) ? LOG_COLOR_WOLF : LOG_COLOR_ACTION,
+        kind: 'action' as const,
+      };
+    });
+  if (drunkCards.length > 0) log.unshift(...drunkCards);
+
   return log;
 }
 
@@ -6063,6 +6186,29 @@ export const nightView = query({
       me.alive &&
       me.role === 'Werewolf' &&
       !!me.roleState?.pendingSasquatchReveal;
+    // Set on the caller's view when they sobered up from the Drunk this night
+    // (start of N3). Not tied to a step — shown as a one-time overlay. When the
+    // hidden role is a wolf, carries the living pack so the overlay can name
+    // them; otherwise just the role they became.
+    const pendingDrunk =
+      me.alive && me.role !== 'Drunk'
+        ? (me.roleState?.pendingDrunkReveal as
+            | { toRole?: string }
+            | undefined)
+        : undefined;
+    let drunkReveal: {
+      toRole: string;
+      wolves: Array<{ _id: Id<'players'>; name: string }>;
+    } | null = null;
+    if (pendingDrunk?.toRole) {
+      const toRole = pendingDrunk.toRole;
+      const pack = isWolfTeam(toRole)
+        ? alive
+            .filter(p => p._id !== me._id && p.role && isWolfTeam(p.role))
+            .map(p => ({ _id: p._id, name: p.name }))
+        : [];
+      drunkReveal = { toRole, wolves: pack };
+    }
     const wolfPerspective =
       activeStepSet.has('wolves') &&
       ((me.alive && me.role && isWolfTeam(me.role)) || !me.alive);
@@ -7108,6 +7254,7 @@ export const nightView = query({
       stepLabel,
       wolfState,
       sasquatchReveal,
+      drunkReveal,
       seerHistory,
       piState,
       mentalistState,

@@ -406,6 +406,17 @@ export default defineSchema({
      * changes the player's actual role — only what the Seer's check returns.
      */
     seerAppearsAsWolf: v.optional(v.boolean()),
+    /**
+     * The Drunk's set-aside future role. Chosen at deal time (the "+1" role a
+     * Drunk build carries beyond the player count) and stashed on whoever
+     * draws the Drunk. At the start of the third night the Drunk sobers up and
+     * `role` is patched to this value (originalRole stays 'Drunk' for the
+     * end-game arc). Stays set after the flip for end-game/log reads, and is
+     * copied onto a Doppelganger that inherits a still-un-sobered Drunk so
+     * they sober on the same night. The Reviler's hunt reads this through the
+     * 'Drunk' mask — see `revilerSeesRole`.
+     */
+    drunkDelayedRole: v.optional(v.string()),
     alive: v.boolean(),
     isHost: v.boolean(),
     deviceClientId: v.string(),

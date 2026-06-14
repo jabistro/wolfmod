@@ -264,10 +264,17 @@ export default function LobbyScreen() {
   const allSeated =
     seatedByPosition.size === game.playerCount &&
     players.length === game.playerCount;
-  const rolesValid = game.selectedRoles.length === game.playerCount;
-  const tooManyRoles = game.selectedRoles.length > game.playerCount;
+  // A Drunk build needs one extra role beyond the seat count — the "+1" is
+  // set aside as the Drunk's hidden future role (revealed on N3).
+  const roleTarget =
+    game.playerCount + (game.selectedRoles.includes('Drunk') ? 1 : 0);
+  // Same target, but driven by the in-progress draft (role picker modal).
+  const draftTarget =
+    game.playerCount + ((draftCounts['Drunk'] ?? 0) > 0 ? 1 : 0);
+  const rolesValid = game.selectedRoles.length === roleTarget;
+  const tooManyRoles = game.selectedRoles.length > roleTarget;
   const tooFewRoles =
-    game.selectedRoles.length > 0 && game.selectedRoles.length < game.playerCount;
+    game.selectedRoles.length > 0 && game.selectedRoles.length < roleTarget;
   // Pre-game parity guard: if starting wolves already reach half the table, the
   // wolves win on N1 before the first kill resolves. Counts the literal wolf
   // roles only (isWolfTeam) — Cursed/Sasquatch/Doppelganger start village-team.
@@ -395,7 +402,13 @@ export default function LobbyScreen() {
   }
 
   function increment(role: string) {
-    if (draftTotal >= game.playerCount) return;
+    // Adding the Drunk raises the target by one (its set-aside future role),
+    // so it must be allowed even when the draft is already at the no-Drunk
+    // cap. For every other role the target reflects whether a Drunk is in.
+    const targetAfter =
+      game.playerCount +
+      (role === 'Drunk' || (draftCounts['Drunk'] ?? 0) > 0 ? 1 : 0);
+    if (draftTotal >= targetAfter) return;
     if (isSingletonRole(role) && (draftCounts[role] ?? 0) >= 1) return;
     // Hard-excluded role pair already in the build — block (defensive; the +
     // button is also disabled in the picker row below).
@@ -703,7 +716,7 @@ export default function LobbyScreen() {
           <View className="flex-row items-center justify-between mb-2">
             <View className="flex-row items-center" style={{ gap: 8 }}>
               <Text className="text-wolf-muted text-xs font-bold tracking-widest">
-                ROLES ({game.selectedRoles.length} / {game.playerCount})
+                ROLES ({game.selectedRoles.length} / {roleTarget})
               </Text>
               {tooManyRoles && (
                 <Text className="text-wolf-red text-xs font-bold tracking-widest">
@@ -842,11 +855,11 @@ export default function LobbyScreen() {
                 {!allSeated
                   ? 'All players must be seated.'
                   : tooManyRoles
-                    ? `Too many roles — remove ${game.selectedRoles.length - game.playerCount} or add seats.`
+                    ? `Too many roles — remove ${game.selectedRoles.length - roleTarget} or add seats.`
                     : tooFewRoles
-                      ? `Need ${game.playerCount - game.selectedRoles.length} more role${game.playerCount - game.selectedRoles.length === 1 ? '' : 's'}.`
+                      ? `Need ${roleTarget - game.selectedRoles.length} more role${roleTarget - game.selectedRoles.length === 1 ? '' : 's'}${game.selectedRoles.includes('Drunk') ? ' (the Drunk needs a hidden role to sober into)' : ''}.`
                       : !rolesValid
-                        ? `Pick ${game.playerCount} roles.`
+                        ? `Pick ${roleTarget} roles.`
                         : wolfParity
                           ? `Too many wolves — wolves must be less than half the table (max ${Math.ceil(game.playerCount / 2) - 1} for ${game.playerCount} players).`
                           : ''}
@@ -972,7 +985,7 @@ export default function LobbyScreen() {
               </TouchableOpacity>
               <View className="flex-1 items-center">
                 <Text className="text-wolf-text text-base font-bold">
-                  Roles ({draftTotal} / {game.playerCount})
+                  Roles ({draftTotal} / {draftTarget})
                 </Text>
                 <Text
                   style={{
@@ -992,8 +1005,8 @@ export default function LobbyScreen() {
               </View>
               <TouchableOpacity
                 onPress={saveRoles}
-                disabled={draftTotal !== game.playerCount}
-                style={{ opacity: draftTotal === game.playerCount ? 1 : 0.4 }}
+                disabled={draftTotal !== draftTarget}
+                style={{ opacity: draftTotal === draftTarget ? 1 : 0.4 }}
                 className="w-16 items-end"
               >
                 <Text className="text-wolf-accent font-bold">Done</Text>
@@ -1122,8 +1135,16 @@ export default function LobbyScreen() {
                             draftedRoleSet,
                           );
                           const blockedByConflict = count === 0 && conflicts.length > 0;
+                          // The Drunk raises the target by one, so it can be
+                          // added even at the no-Drunk cap; every other role
+                          // respects whether a Drunk is already in the draft.
+                          const targetForRow =
+                            game.playerCount +
+                            (role === 'Drunk' || (draftCounts['Drunk'] ?? 0) > 0
+                              ? 1
+                              : 0);
                           const canIncrement =
-                            draftTotal < game.playerCount &&
+                            draftTotal < targetForRow &&
                             !atSingletonCap &&
                             !blockedByConflict;
                           const val = getRoleValue(role);

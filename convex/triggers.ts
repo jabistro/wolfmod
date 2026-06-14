@@ -19,6 +19,7 @@ import {
   type TriggerRole,
 } from './helpers';
 import {
+  applyDrunkSoberUp,
   enterStep,
   fireDoppelgangerConversionsForDeaths,
   prepareAlphaConvertNight,
@@ -397,6 +398,8 @@ async function finalizeTriggerPhase(
   });
   // Alpha Wolf conversion-night determination (bypasses beginNightWaves).
   await prepareAlphaConvertNight(ctx, gameId);
+  // Drunk sober-up (start of N3) — bypasses beginNightWaves like the above.
+  if (await applyDrunkSoberUp(ctx, gameId)) return;
   await enterStep(ctx, gameId, NIGHT_STEPS[0]);
 }
 

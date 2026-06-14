@@ -30,6 +30,8 @@ import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import { MasonRevealModal } from '../components/MasonRevealModal';
+import { isWolfTeam } from '../data/v1Roles';
+import { getRoleDescription } from '../data/roleDescriptions';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Night'>;
 type Route = RouteProp<RootStackParamList, 'Night'>;
@@ -78,6 +80,18 @@ export default function NightScreen() {
     return () => clearTimeout(timer);
   }, [sasquatchRevealNow]);
 
+  // Drunk sober-up overlay: the start of N3, the Drunk learns the hidden role
+  // they were all along. Same 5 s one-shot as the Sasquatch flip; the server
+  // clears the pending flag at morning so it won't replay.
+  const drunkRevealNow = !!view?.drunkReveal;
+  const [drunkOverlayOpen, setDrunkOverlayOpen] = useState(false);
+  useEffect(() => {
+    if (!drunkRevealNow) return;
+    setDrunkOverlayOpen(true);
+    const timer = setTimeout(() => setDrunkOverlayOpen(false), 5000);
+    return () => clearTimeout(timer);
+  }, [drunkRevealNow]);
+
   // Phase-driven nav: when night ends → morning, route everyone forward.
   useEffect(() => {
     if (!view) return;
@@ -125,6 +139,7 @@ export default function NightScreen() {
     myDecisionEndsAt,
     wolfState,
     sasquatchReveal,
+    drunkReveal,
     seerHistory,
     piState,
     mentalistState,
@@ -461,6 +476,12 @@ export default function NightScreen() {
       <SasquatchRevealOverlay
         visible={sasquatchOverlayOpen && sasquatchReveal === true}
         wolves={wolfState?.wolves ?? []}
+      />
+
+      <DrunkRevealOverlay
+        visible={drunkOverlayOpen && !!drunkReveal}
+        toRole={drunkReveal?.toRole ?? ''}
+        wolves={drunkReveal?.wolves ?? []}
       />
 
       <MasonRevealModal
@@ -864,6 +885,79 @@ function SasquatchRevealOverlay({
           <Text className="text-wolf-muted text-xs text-center mt-5">
             You wake with the wolves now. Choose a victim together.
           </Text>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ───── Drunk sober-up overlay ──────────────────────────────────────────────
+//
+// Rendered on the sobered Drunk's phone at the start of N3, when their hidden
+// role takes over. Auto-dismisses after the 5 s reading window (no OK button —
+// reveal-no-ack rule). When the hidden role is a wolf they wake with the pack
+// THAT night, so the roster is shown; otherwise it announces the new role and
+// its power so they can act tonight if it's a night role.
+
+function DrunkRevealOverlay({
+  visible,
+  toRole,
+  wolves,
+}: {
+  visible: boolean;
+  toRole: string;
+  wolves: Array<{ _id: Id<'players'>; name: string }>;
+}) {
+  const becameWolf = !!toRole && isWolfTeam(toRole);
+  const description = getRoleDescription(toRole);
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View className="flex-1 bg-wolf-bg items-center justify-center px-6">
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
+          THE ROOM STOPS SPINNING
+        </Text>
+        <View
+          className="bg-wolf-card rounded-2xl px-6 py-6"
+          style={{ maxWidth: 360 }}
+        >
+          <Text className="text-wolf-text text-base leading-6 text-center">
+            {'You sober up and remember who you really are. You are the '}
+            <Text
+              className={becameWolf ? 'font-extrabold' : 'text-wolf-accent font-extrabold'}
+              style={becameWolf ? { color: '#B03A2E' } : undefined}
+            >
+              {toRole.toUpperCase()}
+            </Text>
+            {'.'}
+          </Text>
+          {becameWolf ? (
+            <>
+              {wolves.length > 0 && (
+                <View className="mt-5">
+                  <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-2">
+                    YOUR PACK
+                  </Text>
+                  {wolves.map(w => (
+                    <Text
+                      key={w._id}
+                      className="text-wolf-accent text-base font-extrabold text-center"
+                    >
+                      {w.name.toUpperCase()}
+                    </Text>
+                  ))}
+                </View>
+              )}
+              <Text className="text-wolf-muted text-xs text-center mt-5">
+                You wake with the wolves tonight. Choose a victim together.
+              </Text>
+            </>
+          ) : (
+            description && (
+              <Text className="text-wolf-muted text-sm text-center mt-4">
+                {description}
+              </Text>
+            )
+          )}
         </View>
       </View>
     </Modal>

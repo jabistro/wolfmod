@@ -551,6 +551,12 @@ export default function EndGameScreen() {
             // (Doppelganged X — ROLE on N0, CONVERSION on the reveal night)
             // tell the full story.
             const startedAsDoppelganger = p.originalRole === 'Doppelganger';
+            // A Drunk who sobered into their hidden role on N3: subtitle is
+            // just "DRUNK" (the role pill shows what they became, and the N3
+            // night log narrates "Sobered up — now the X"). A Drunk who died
+            // before sobering keeps role === 'Drunk' and needs no subtitle.
+            const soberedFromDrunk =
+              p.originalRole === 'Drunk' && p.role !== 'Drunk';
             // Sasquatch flips out of spite on the first day with no lynch —
             // role-patched to Werewolf at the start of that night, same shape
             // as the Cursed flip but driven by table inaction, not a wolf
@@ -610,6 +616,11 @@ export default function EndGameScreen() {
                     {startedAsDoppelganger && (
                       <Text className="text-wolf-muted text-xs italic uppercase">
                         Doppelganger
+                      </Text>
+                    )}
+                    {soberedFromDrunk && (
+                      <Text className="text-wolf-muted text-xs italic uppercase">
+                        Drunk
                       </Text>
                     )}
                     {!p.alive && (
