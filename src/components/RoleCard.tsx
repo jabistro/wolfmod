@@ -20,9 +20,26 @@ type Props = {
   // description wraps in fewer lines — this keeps the overall card SHORT.
   // Used on RoleReveal so a long teammate list isn't pushed off-screen.
   imageHeight?: number;
+  // Drop the description panel entirely (e.g. the graveyard, where only the
+  // identity matters and the rules text is noise).
+  hideDescription?: boolean;
+  // Override the value-badge diameter (compact cards default to 28). The
+  // graveyard wants a much smaller circle so the art reads as the focus.
+  badgeSize?: number;
+  // Compact only: pad the matte beneath the portrait by the same amount of
+  // black space the matte leaves on each side, so the art sits in an evenly
+  // framed box (top-aligned). Used by the graveyard.
+  evenFrame?: boolean;
 };
 
-export default function RoleCard({ role, width = 280, imageHeight: imageHeightProp }: Props) {
+export default function RoleCard({
+  role,
+  width = 280,
+  imageHeight: imageHeightProp,
+  hideDescription = false,
+  badgeSize: badgeSizeProp,
+  evenFrame = false,
+}: Props) {
   const { theme } = useTheme();
   const roleData = ROLES.find(r => r.name === role);
   if (!roleData) return null;
@@ -39,8 +56,15 @@ export default function RoleCard({ role, width = 280, imageHeight: imageHeightPr
   const imageWidth = compact ? Math.round(imageHeight * (3 / 4)) : width;
 
   // Shrink the value badge + description alongside the card.
-  const badgeSize = compact ? 28 : 36;
-  const badgeFont = compact ? 12 : 14;
+  const badgeSize = badgeSizeProp ?? (compact ? 28 : 36);
+  const badgeFont = badgeSizeProp
+    ? Math.max(9, Math.round(badgeSizeProp * 0.5))
+    : compact
+      ? 12
+      : 14;
+  // Side matte each side of the portrait; mirror it beneath when evenFrame.
+  const sideMatte = compact ? Math.max(0, Math.round((width - imageWidth) / 2)) : 0;
+  const matteHeight = compact ? imageHeight + (evenFrame ? sideMatte : 0) : imageHeight;
   const descFontSize = compact ? 12 : 13;
   const descLineHeight = compact ? 16 : 18;
   const descPadV = compact ? 8 : 10;
@@ -82,10 +106,10 @@ export default function RoleCard({ role, width = 280, imageHeight: imageHeightPr
         <View
           style={{
             width,
-            height: imageHeight,
+            height: matteHeight,
             backgroundColor: '#0F0F14',
             alignItems: 'center',
-            justifyContent: 'center',
+            justifyContent: evenFrame ? 'flex-start' : 'center',
           }}
         >
           <Image
@@ -101,7 +125,7 @@ export default function RoleCard({ role, width = 280, imageHeight: imageHeightPr
           resizeMode="cover"
         />
       )}
-      {description.length > 0 && (
+      {!hideDescription && description.length > 0 && (
         <View style={[styles.descPanel, { paddingVertical: descPadV }]}>
           <Text style={[styles.descText, { fontSize: descFontSize, lineHeight: descLineHeight }]}>
             {description}

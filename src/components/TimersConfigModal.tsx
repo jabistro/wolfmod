@@ -6,6 +6,8 @@ import {
   Text,
   TouchableOpacity,
   ActivityIndicator,
+  Switch,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation } from 'convex/react';
@@ -47,6 +49,11 @@ type Props = {
    * for mid-game contexts (not lobby — lobby uses Leave to tear down).
    */
   canEndGame?: boolean;
+  /**
+   * When provided, render the "role reveal" variant toggles and persist them
+   * with the rest of the config. Omit to hide the section entirely.
+   */
+  revealConfig?: { revealOnLynch: boolean; revealOnNightDeath: boolean };
 };
 
 export default function TimersConfigModal({
@@ -58,12 +65,18 @@ export default function TimersConfigModal({
   passHostCandidates,
   roomCode,
   canEndGame,
+  revealConfig,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const setDayConfig = useMutation(api.day.setDayConfig);
   const passHost = useMutation(api.games.passHost);
   const endGameByHost = useMutation(api.games.endGameByHost);
   const [values, setValues] = useState(initial);
+  const [revealLynch, setRevealLynch] = useState(!!revealConfig?.revealOnLynch);
+  const [revealNight, setRevealNight] = useState(
+    !!revealConfig?.revealOnNightDeath,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [mode, setMode] = useState<'main' | 'pick-host'>('main');
   const [passing, setPassing] = useState<Id<'players'> | null>(null);
@@ -73,9 +86,11 @@ export default function TimersConfigModal({
   useEffect(() => {
     if (visible) {
       setValues(initial);
+      setRevealLynch(!!revealConfig?.revealOnLynch);
+      setRevealNight(!!revealConfig?.revealOnNightDeath);
       setMode('main');
     }
-  }, [visible, initial]);
+  }, [visible, initial, revealConfig]);
 
   function update(key: keyof TimerConfigValues, next: number) {
     setValues(v => ({ ...v, [key]: next }));
@@ -88,6 +103,9 @@ export default function TimersConfigModal({
         gameId,
         callerDeviceClientId: deviceClientId,
         ...values,
+        ...(revealConfig
+          ? { revealOnLynch: revealLynch, revealOnNightDeath: revealNight }
+          : {}),
       });
       onClose();
     } catch (e) {
@@ -228,7 +246,17 @@ export default function TimersConfigModal({
               )}
             </ScrollView>
           ) : (
-            <View style={{ paddingHorizontal: 24, paddingVertical: 20, gap: 18 }}>
+            // Cap the scroll area so a tall config (timers + role-reveal +
+            // end-game) can never push the fixed Save header off the top of
+            // the screen — the content scrolls instead.
+            <ScrollView
+              style={{ maxHeight: windowHeight * 0.62 }}
+              contentContainerStyle={{
+                paddingHorizontal: 24,
+                paddingVertical: 20,
+                gap: 18,
+              }}
+            >
               {roomCode && (
                 <View className="items-center">
                   <Text
@@ -265,6 +293,46 @@ export default function TimersConfigModal({
                 </TouchableOpacity>
               )}
               <TimerSteppers values={values} onChange={update} />
+              {revealConfig && (
+                <View style={{ gap: 10 }}>
+                  <Text
+                    className="text-wolf-muted"
+                    style={{ fontSize: 11, fontWeight: '700', letterSpacing: 2 }}
+                  >
+                    ROLE REVEAL
+                  </Text>
+                  <View className="flex-row items-center justify-between bg-wolf-card rounded-xl px-4 py-3">
+                    <Text
+                      className="text-wolf-text flex-1 pr-3"
+                      style={{ fontSize: 13, fontWeight: '700', letterSpacing: 1 }}
+                    >
+                      ON LYNCH
+                    </Text>
+                    <Switch
+                      value={revealLynch}
+                      onValueChange={setRevealLynch}
+                      trackColor={{ false: '#1A1A24', true: '#D4A017' }}
+                      thumbColor="#F0EDE8"
+                      ios_backgroundColor="#1A1A24"
+                    />
+                  </View>
+                  <View className="flex-row items-center justify-between bg-wolf-card rounded-xl px-4 py-3">
+                    <Text
+                      className="text-wolf-text flex-1 pr-3"
+                      style={{ fontSize: 13, fontWeight: '700', letterSpacing: 1 }}
+                    >
+                      ON NIGHT DEATH
+                    </Text>
+                    <Switch
+                      value={revealNight}
+                      onValueChange={setRevealNight}
+                      trackColor={{ false: '#1A1A24', true: '#D4A017' }}
+                      thumbColor="#F0EDE8"
+                      ios_backgroundColor="#1A1A24"
+                    />
+                  </View>
+                </View>
+              )}
               {canEndGame && (
                 <TouchableOpacity
                   onPress={handleEndGame}
@@ -285,7 +353,7 @@ export default function TimersConfigModal({
                   )}
                 </TouchableOpacity>
               )}
-            </View>
+            </ScrollView>
           )}
         </View>
       </View>

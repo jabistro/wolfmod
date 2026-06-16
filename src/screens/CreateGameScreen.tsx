@@ -18,6 +18,7 @@ import { useDeviceId } from '../hooks/useDeviceId';
 import { showAlert } from '../components/ThemedAlert';
 import { useTimerDefaults } from '../contexts/TimerDefaultsContext';
 import { usePlayerName } from '../contexts/PlayerNameContext';
+import { useRoleReveal } from '../contexts/RoleRevealContext';
 
 type Nav = StackNavigationProp<RootStackParamList, 'CreateGame'>;
 
@@ -30,6 +31,7 @@ export default function CreateGameScreen() {
   const createGame = useMutation(api.games.createGame);
   const { timerDefaults } = useTimerDefaults();
   const { playerName, setPlayerName } = usePlayerName();
+  const { revealOnLynch, revealOnNightDeath } = useRoleReveal();
 
   const [name, setName] = useState('');
   const [playerCount, setPlayerCount] = useState(9);
@@ -58,6 +60,8 @@ export default function CreateGameScreen() {
         hostName: name.trim(),
         deviceClientId,
         mode,
+        revealOnLynch,
+        revealOnNightDeath,
         ...timerDefaults,
       });
       setPlayerName(name.trim());

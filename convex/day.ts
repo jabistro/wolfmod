@@ -75,6 +75,7 @@ async function postModeratorMessage(
   body: string,
   mentions?: { name: string; id: string }[],
   headline?: string,
+  revealRole?: string,
 ) {
   if (!isRemote(game)) return;
   await ctx.db.insert('messages', {
@@ -87,6 +88,7 @@ async function postModeratorMessage(
     system: true,
     ...(mentions && mentions.length ? { mentions } : {}),
     ...(headline ? { headline } : {}),
+    ...(revealRole ? { revealRole } : {}),
   });
 }
 
@@ -141,6 +143,8 @@ export const setDayConfig = mutation({
     maxNominationsPerDay: v.optional(v.number()),
     wolfPickerSec: v.optional(v.number()),
     nightActionSec: v.optional(v.number()),
+    revealOnLynch: v.optional(v.boolean()),
+    revealOnNightDeath: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
@@ -151,6 +155,9 @@ export const setDayConfig = mutation({
     await requireHost(ctx, args.gameId, args.callerDeviceClientId);
 
     const patch: Partial<Doc<'games'>> = {};
+    if (args.revealOnLynch !== undefined) patch.revealOnLynch = args.revealOnLynch;
+    if (args.revealOnNightDeath !== undefined)
+      patch.revealOnNightDeath = args.revealOnNightDeath;
     if (args.dayDurationSec !== undefined) {
       if (args.dayDurationSec < 30) throw new Error('Day too short.');
       patch.dayDurationSec = args.dayDurationSec;
@@ -1477,6 +1484,7 @@ export const autoResolveAfterVote = internalMutation({
           '',
           nominee ? [{ name: nominee.name, id: nominee._id as string }] : undefined,
           `${(nominee?.name ?? 'THE ACCUSED').toUpperCase()} HAS BEEN ELIMINATED`,
+          game.revealOnLynch && nominee ? nominee.role : undefined,
         );
         const ended = await ctx.db.get(args.gameId);
         if (ended) await postWinBanner(ctx, ended);
@@ -1513,7 +1521,14 @@ export const autoResolveAfterVote = internalMutation({
         wasLynched && nominee
           ? [{ name: nominee.name, id: nominee._id as string }]
           : undefined;
-      await postModeratorMessage(ctx, game, detail, outcomeMentions, headline);
+      await postModeratorMessage(
+        ctx,
+        game,
+        detail,
+        outcomeMentions,
+        headline,
+        wasLynched && game.revealOnLynch && nominee ? nominee.role : undefined,
+      );
       await ctx.scheduler.runAfter(
         NIGHTFALL_WARNING_MS,
         internal.day.enterNightFromDay,
@@ -1680,6 +1695,11 @@ export const dayView = query({
     const playerById = new Map(players.map(p => [p._id, p]));
     const alive = players.filter(p => p.alive);
 
+    // "Role reveal" variant: when on, day-phase deaths (the lynch + any
+    // Hunter/HW/Mad Bomber cascade it triggers) surface the victim's CURRENT
+    // role. Off → role stays null and the client renders the plain panel.
+    const revealOnLynch = game.revealOnLynch ?? false;
+
     const cfg = dayConfigOf(game);
     const nominationsUsed = game.nominationsThisDay ?? 0;
     const nominationsRemaining = Math.max(
@@ -1702,6 +1722,7 @@ export const dayView = query({
       name: string;
       cause: string;
       shotByName: string | null;
+      role: string | null;
     }> = [];
     if (game.currentNomination?.resultsRevealed) {
       const nom = game.currentNomination;
@@ -1739,12 +1760,18 @@ export const dayView = query({
             if (shooter) shotByName = shooter.name;
           }
         }
-        cascadeDeaths.push({ _id: p._id, name: p.name, cause, shotByName });
+        cascadeDeaths.push({
+          _id: p._id,
+          name: p.name,
+          cause,
+          shotByName,
+          role: revealOnLynch ? p.role ?? null : null,
+        });
       }
     }
 
     let nomination: {
-      nominee: { _id: Id<'players'>; name: string } | null;
+      nominee: { _id: Id<'players'>; name: string; role: string | null } | null;
       subPhase: 'accusation' | 'defense' | 'prevote' | 'vote' | 'results';
       subPhaseEndsAt: number;
       subPhasePausedRemainingMs: number | null;
@@ -1806,7 +1833,16 @@ export const dayView = query({
         : null;
       nomination = {
         nominee: nominee
-          ? { _id: nominee._id, name: nominee.name }
+          ? {
+              _id: nominee._id,
+              name: nominee.name,
+              // Reveal the lynched player's CURRENT role once results are
+              // shown and they actually died (results + dead == lynched).
+              role:
+                revealOnLynch && nom.resultsRevealed && !nominee.alive
+                  ? nominee.role ?? null
+                  : null,
+            }
           : null,
         subPhase: nom.subPhase,
         subPhaseEndsAt: nom.subPhaseEndsAt,
@@ -1894,6 +1930,8 @@ export const dayView = query({
         playerCount: game.playerCount,
         selectedRoles: game.selectedRoles,
         voteDwellEndsAt: game.voteDwellEndsAt ?? null,
+        revealOnLynch: game.revealOnLynch ?? false,
+        revealOnNightDeath: game.revealOnNightDeath ?? false,
         pendingTriggerCount: game.pendingDeathTriggers?.length ?? 0,
         // Day-clock state
         dayEndsAt: game.dayEndsAt ?? null,

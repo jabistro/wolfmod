@@ -6,6 +6,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../navigation/types';
 import { usePlayerName } from '../contexts/PlayerNameContext';
 import { useDevMode } from '../contexts/DevModeContext';
+import { useRoleReveal } from '../contexts/RoleRevealContext';
 import { DEV_FEATURES_AVAILABLE } from '../config/devFlags';
 
 type NavProp = StackNavigationProp<RootStackParamList, 'Settings'>;
@@ -20,6 +21,12 @@ export default function SettingsScreen() {
   const navigation = useNavigation<NavProp>();
   const { playerName, setPlayerName } = usePlayerName();
   const { devModeEnabled, setDevModeEnabled } = useDevMode();
+  const {
+    revealOnLynch,
+    setRevealOnLynch,
+    revealOnNightDeath,
+    setRevealOnNightDeath,
+  } = useRoleReveal();
 
   const rows: Row[] = [
     { label: 'THEMES', onPress: () => navigation.navigate('Themes'), enabled: true },
@@ -53,6 +60,48 @@ export default function SettingsScreen() {
           <Text className="text-wolf-muted text-xs px-1">
             Pre-fills your name when you create or join a game.
           </Text>
+        </View>
+
+        {/* Role reveal variant. Off by default — these seed a new game's
+            setting at create time; the host can still flip them in the lobby. */}
+        <View className="mt-4">
+          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1 px-1">
+            ROLE REVEAL
+          </Text>
+          <View className="bg-wolf-card border border-wolf-surface rounded-2xl px-5 py-4 flex-row items-center justify-between">
+            <View className="flex-1 pr-4">
+              <Text className="text-wolf-text text-base font-semibold tracking-wider">
+                ON LYNCH
+              </Text>
+              <Text className="text-wolf-muted text-xs mt-1">
+                When the village votes someone out, reveal their role.
+              </Text>
+            </View>
+            <Switch
+              value={revealOnLynch}
+              onValueChange={setRevealOnLynch}
+              trackColor={{ false: '#1A1A24', true: '#D4A017' }}
+              thumbColor="#F0EDE8"
+              ios_backgroundColor="#1A1A24"
+            />
+          </View>
+          <View className="bg-wolf-card border border-wolf-surface rounded-2xl px-5 py-4 mt-2 flex-row items-center justify-between">
+            <View className="flex-1 pr-4">
+              <Text className="text-wolf-text text-base font-semibold tracking-wider">
+                ON NIGHT DEATH
+              </Text>
+              <Text className="text-wolf-muted text-xs mt-1">
+                When a player dies in the night, reveal their role at dawn.
+              </Text>
+            </View>
+            <Switch
+              value={revealOnNightDeath}
+              onValueChange={setRevealOnNightDeath}
+              trackColor={{ false: '#1A1A24', true: '#D4A017' }}
+              thumbColor="#F0EDE8"
+              ios_backgroundColor="#1A1A24"
+            />
+          </View>
         </View>
 
         {/* Only meaningful in builds that expose lobby dev tools; hidden in

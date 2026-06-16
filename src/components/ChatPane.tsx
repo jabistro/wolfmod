@@ -1195,25 +1195,39 @@ export default function ChatPane({
                             NO ONE HAS BEEN ELIMINATED
                           </Text>
                         ) : (
-                          dr.eliminated.map((e: { id: string; name: string }, i: number) => (
-                            <Text
-                              key={i}
-                              className="font-extrabold text-center"
-                              style={{
-                                fontSize: 18,
-                                letterSpacing: 0.5,
-                                marginTop: i > 0 ? 4 : 0,
-                              }}
-                            >
-                              <Text style={{ color: colorForPlayer(e.id) }}>
-                                {e.name.toUpperCase()}
-                              </Text>
-                              <Text className="text-wolf-text">
-                                {' '}
-                                HAS BEEN ELIMINATED
-                              </Text>
-                            </Text>
-                          ))
+                          dr.eliminated.map(
+                            (
+                              e: { id: string; name: string; role?: string },
+                              i: number,
+                            ) => (
+                              <View
+                                key={i}
+                                className="items-center"
+                                style={{ marginTop: i > 0 ? 8 : 0 }}
+                              >
+                                <Text
+                                  className="font-extrabold text-center"
+                                  style={{ fontSize: 18, letterSpacing: 0.5 }}
+                                >
+                                  <Text style={{ color: colorForPlayer(e.id) }}>
+                                    {e.name.toUpperCase()}
+                                  </Text>
+                                  <Text className="text-wolf-text">
+                                    {' '}
+                                    HAS BEEN ELIMINATED
+                                  </Text>
+                                </Text>
+                                {e.role ? (
+                                  <Text
+                                    className="text-wolf-accent font-extrabold tracking-widest text-center"
+                                    style={{ fontSize: 12, marginTop: 2 }}
+                                  >
+                                    WAS THE {e.role.toUpperCase()}
+                                  </Text>
+                                ) : null}
+                              </View>
+                            ),
+                          )
                         )}
                       </View>
                     </View>
@@ -1225,7 +1239,7 @@ export default function ChatPane({
                 if (item.shotReport) {
                   const sr = item.shotReport as {
                     shooter: { id: string; name: string };
-                    target: { id: string; name: string };
+                    target: { id: string; name: string; role?: string };
                   };
                   return (
                     <View className="my-3 self-stretch items-center px-2">
@@ -1250,6 +1264,14 @@ export default function ChatPane({
                           </Text>
                           <Text className="text-wolf-text"> HAS BEEN ELIMINATED</Text>
                         </Text>
+                        {sr.target.role ? (
+                          <Text
+                            className="text-wolf-accent font-extrabold tracking-widest text-center"
+                            style={{ fontSize: 12, marginTop: 4 }}
+                          >
+                            WAS THE {sr.target.role.toUpperCase()}
+                          </Text>
+                        ) : null}
                         <Text
                           className="text-wolf-muted text-center"
                           style={{ fontSize: 13, marginTop: 6 }}
@@ -1274,7 +1296,7 @@ export default function ChatPane({
                 if (item.blastReport) {
                   const br = item.blastReport as {
                     bomber: { id: string; name: string };
-                    victims: { id: string; name: string }[];
+                    victims: { id: string; name: string; role?: string }[];
                   };
                   return (
                     <View className="my-3 self-stretch items-center px-2">
@@ -1297,20 +1319,29 @@ export default function ChatPane({
                           THE BOMB GOES OFF
                         </Text>
                         {br.victims.map((v, i) => (
-                          <Text
+                          <View
                             key={v.id}
-                            className="font-extrabold text-center"
-                            style={{
-                              fontSize: 18,
-                              letterSpacing: 0.5,
-                              marginTop: i > 0 ? 4 : 0,
-                            }}
+                            className="items-center"
+                            style={{ marginTop: i > 0 ? 8 : 0 }}
                           >
-                            <Text style={{ color: colorForPlayer(v.id) }}>
-                              {v.name.toUpperCase()}
+                            <Text
+                              className="font-extrabold text-center"
+                              style={{ fontSize: 18, letterSpacing: 0.5 }}
+                            >
+                              <Text style={{ color: colorForPlayer(v.id) }}>
+                                {v.name.toUpperCase()}
+                              </Text>
+                              <Text className="text-wolf-text"> HAS BEEN ELIMINATED</Text>
                             </Text>
-                            <Text className="text-wolf-text"> HAS BEEN ELIMINATED</Text>
-                          </Text>
+                            {v.role ? (
+                              <Text
+                                className="text-wolf-accent font-extrabold tracking-widest text-center"
+                                style={{ fontSize: 12, marginTop: 2 }}
+                              >
+                                WAS THE {v.role.toUpperCase()}
+                              </Text>
+                            ) : null}
+                          </View>
                         ))}
                         <Text
                           className="text-wolf-muted text-center"
@@ -1481,12 +1512,20 @@ export default function ChatPane({
                             className="text-wolf-accent text-center font-bold tracking-widest"
                             style={{
                               fontSize: 13,
-                              marginBottom: item.body ? 8 : 0,
+                              marginBottom: item.revealRole || item.body ? 8 : 0,
                             }}
                           >
                             {renderModeratorBody(item.headline, item.mentions)}
                           </Text>
                         )}
+                        {item.revealRole ? (
+                          <Text
+                            className="text-wolf-accent text-center font-extrabold tracking-widest"
+                            style={{ fontSize: 12, marginBottom: item.body ? 8 : 0 }}
+                          >
+                            WAS THE {item.revealRole.toUpperCase()}
+                          </Text>
+                        ) : null}
                         {item.body ? (
                           <Text
                             className="text-wolf-text text-center"

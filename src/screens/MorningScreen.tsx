@@ -20,6 +20,7 @@ import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import { MasonRevealModal } from '../components/MasonRevealModal';
+import RoleCard from '../components/RoleCard';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Morning'>;
 type Route = RouteProp<RootStackParamList, 'Morning'>;
@@ -173,12 +174,14 @@ export default function MorningScreen() {
             ) : (
               <View className="items-center" style={{ gap: 18 }}>
                 {deaths.map(d => (
-                  <Text
-                    key={d._id}
-                    className="text-wolf-text text-2xl font-bold tracking-widest text-center"
-                  >
-                    {d.name.toUpperCase()} HAS BEEN ELIMINATED
-                  </Text>
+                  <View key={d._id} className="items-center" style={{ gap: 8 }}>
+                    <Text className="text-wolf-text text-2xl font-bold tracking-widest text-center">
+                      {d.name.toUpperCase()} HAS BEEN ELIMINATED
+                    </Text>
+                    {d.role ? (
+                      <RoleCard role={d.role} width={200} imageHeight={140} />
+                    ) : null}
+                  </View>
                 ))}
               </View>
             )}

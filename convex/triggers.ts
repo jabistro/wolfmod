@@ -203,10 +203,23 @@ export async function postBlastReport(
   if (!game || game.mode !== 'remote') return;
   const bomber = await ctx.db.get(bomberId);
   if (!bomber) return;
-  const victims: { name: string; id: string }[] = [];
+  // Role-reveal gate: a blast cascading from a public bomber death is a
+  // day-phase event (the bomber was lynched or shot during the day), so it
+  // follows revealOnLynch. `triggersFollowUp === 'night'` marks a day cascade.
+  const revealRole =
+    game.triggersFollowUp === 'night'
+      ? game.revealOnLynch ?? false
+      : game.revealOnNightDeath ?? false;
+  const victims: { name: string; id: string; role?: string }[] = [];
   for (const vid of victimIds) {
     const p = await ctx.db.get(vid);
-    if (p) victims.push({ name: p.name, id: p._id as string });
+    if (p) {
+      victims.push({
+        name: p.name,
+        id: p._id as string,
+        ...(revealRole && p.role ? { role: p.role } : {}),
+      });
+    }
   }
   if (victims.length === 0) return;
   await ctx.db.insert('messages', {
@@ -505,6 +518,12 @@ export const submitHunterShot = mutation({
     // elimination (overnight dawn report, lynch) already lands in chat; this
     // closes the gap. Public action → shooter revealed, same as the overlay.
     if (game.mode === 'remote') {
+      // Role-reveal gate for the shot victim: a lynch-cascade shot is a
+      // day-phase death (revealOnLynch); a night-source shot follows night.
+      const revealRole =
+        game.triggersFollowUp === 'night'
+          ? game.revealOnLynch ?? false
+          : game.revealOnNightDeath ?? false;
       await ctx.db.insert('messages', {
         gameId: args.gameId,
         channel: 'village',
@@ -515,7 +534,11 @@ export const submitHunterShot = mutation({
         system: true,
         shotReport: {
           shooter: { name: me.name, id: me._id as string },
-          target: { name: target.name, id: target._id as string },
+          target: {
+            name: target.name,
+            id: target._id as string,
+            ...(revealRole && target.role ? { role: target.role } : {}),
+          },
         },
       });
     }

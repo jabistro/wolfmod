@@ -26,12 +26,14 @@ import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import PassHostPickerModal from '../components/PassHostPickerModal';
+import RoleCard from '../components/RoleCard';
+import GraveyardButton from '../components/GraveyardModal';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Day'>;
 type Route = RouteProp<RootStackParamList, 'Day'>;
 
 type Nomination = {
-  nominee: { _id: Id<'players'>; name: string } | null;
+  nominee: { _id: Id<'players'>; name: string; role: string | null } | null;
   subPhase: 'accusation' | 'defense' | 'prevote' | 'vote' | 'results';
   subPhaseEndsAt: number;
   subPhasePausedRemainingMs: number | null;
@@ -72,6 +74,8 @@ type DayGame = {
   playerCount: number;
   selectedRoles: string[];
   voteDwellEndsAt: number | null;
+  revealOnLynch: boolean;
+  revealOnNightDeath: boolean;
   pendingTriggerCount: number;
   dayEndsAt: number | null;
   dayPausedRemainingMs: number | null;
@@ -501,6 +505,7 @@ function DayHeader({
   roomCode,
   onLeavePress,
   onBuildPress,
+  gameId,
 }: {
   dayNumber: number;
   mode: string;
@@ -510,6 +515,9 @@ function DayHeader({
    *  the header so it stays reachable inside the remote split-view's header
    *  peek zone even while the chat pane is expanded. */
   onBuildPress?: () => void;
+  /** Role-reveal variant: drives the graveyard button (self-hides until the
+   *  first role is revealed). */
+  gameId?: Id<'games'>;
 }) {
   return (
     <View className="px-4 pt-10 pb-3" style={{ position: 'relative' }}>
@@ -522,6 +530,7 @@ function DayHeader({
         </Text>
       </View>
       {onLeavePress && <InGameLeaveButton onPress={onLeavePress} />}
+      {gameId && <GraveyardButton gameId={gameId} />}
       <View
         style={{
           position: 'absolute',
@@ -952,6 +961,7 @@ function DiscussionView({
         dayNumber={game.dayNumber}
         mode="DISCUSSION"
         roomCode={game.roomCode}
+        gameId={game._id}
         onLeavePress={onLeavePress}
         onBuildPress={() => setBuildOpen(true)}
       />
@@ -1101,6 +1111,10 @@ function DiscussionView({
         gameId={game._id}
         deviceClientId={deviceClientId}
         initial={game.config}
+        revealConfig={{
+          revealOnLynch: game.revealOnLynch,
+          revealOnNightDeath: game.revealOnNightDeath,
+        }}
         passHostCandidates={passHostCandidates}
         roomCode={game.roomCode}
         canEndGame
@@ -1227,6 +1241,7 @@ function TrialView({
         dayNumber={game.dayNumber}
         mode="ON TRIAL"
         roomCode={game.roomCode}
+        gameId={game._id}
         onLeavePress={onLeavePress}
         onBuildPress={() => setBuildOpen(true)}
       />
@@ -1405,6 +1420,10 @@ function TrialView({
         gameId={game._id}
         deviceClientId={deviceClientId}
         initial={game.config}
+        revealConfig={{
+          revealOnLynch: game.revealOnLynch,
+          revealOnNightDeath: game.revealOnNightDeath,
+        }}
         passHostCandidates={passHostCandidates}
         roomCode={game.roomCode}
         canEndGame
@@ -1454,6 +1473,7 @@ function RemoteTrialScreen({
         dayNumber={game.dayNumber}
         mode={mode}
         roomCode={game.roomCode}
+        gameId={game._id}
         onLeavePress={onLeavePress}
         onBuildPress={() => setBuildOpen(true)}
       />
@@ -1576,6 +1596,7 @@ function VoteView({
         dayNumber={game.dayNumber}
         mode={isPreVote ? 'GET READY TO VOTE' : 'TIME TO VOTE'}
         roomCode={game.roomCode}
+        gameId={game._id}
         onLeavePress={onLeavePress}
         onBuildPress={() => setBuildOpen(true)}
       />
@@ -1795,6 +1816,10 @@ function VoteView({
         gameId={game._id}
         deviceClientId={deviceClientId}
         initial={game.config}
+        revealConfig={{
+          revealOnLynch: game.revealOnLynch,
+          revealOnNightDeath: game.revealOnNightDeath,
+        }}
         passHostCandidates={passHostCandidates}
         roomCode={game.roomCode}
         canEndGame
@@ -1831,6 +1856,7 @@ function ResultsView({
     name: string;
     cause: string;
     shotByName: string | null;
+    role: string | null;
   }>;
   onLeavePress: () => void;
   hostMissing: boolean;
@@ -1882,6 +1908,7 @@ function ResultsView({
         dayNumber={game.dayNumber}
         mode="VOTE RESULT"
         roomCode={game.roomCode}
+        gameId={game._id}
         onLeavePress={onLeavePress}
         onBuildPress={() => setBuildOpen(true)}
       />
@@ -1985,6 +2012,18 @@ function ResultsView({
                 <Text className="text-wolf-text text-2xl font-extrabold tracking-widest text-center">
                   {nomination.nominee?.name.toUpperCase() ?? '—'}
                 </Text>
+                {/* Hold the role until the dwell/trigger window clears — a
+                    Hunter revealed mid-dwell would tip the village that a shot
+                    is coming, defeating the cloak the dwell exists for. */}
+                {!continueLocked && nomination.nominee?.role ? (
+                  <View className="items-center mt-2">
+                    <RoleCard
+                      role={nomination.nominee.role}
+                      width={200}
+                      imageHeight={150}
+                    />
+                  </View>
+                ) : null}
               </>
             ) : null}
 
@@ -2017,6 +2056,11 @@ function ResultsView({
                       <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center">
                         SHOT BY {d.shotByName.toUpperCase()}
                       </Text>
+                    ) : null}
+                    {!continueLocked && d.role ? (
+                      <View className="items-center mt-1">
+                        <RoleCard role={d.role} width={180} imageHeight={120} />
+                      </View>
                     ) : null}
                   </View>
                 ))}

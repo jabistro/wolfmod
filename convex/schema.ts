@@ -103,6 +103,16 @@ export default defineSchema({
     preVoteSec: v.optional(v.number()),
     maxNominationsPerDay: v.optional(v.number()),
     /**
+     * "Role reveal" variant toggles (snapshotted from the host's local prefs
+     * at createGame; host can retune in the lobby/in-game settings). When on,
+     * an eliminated player's CURRENT role (post-conversion — a converted
+     * Cursed reveals Werewolf) is announced to the whole table. Independent so
+     * a table can reveal lynches but keep night deaths a mystery. Optional +
+     * absent treated as false everywhere, so older games validate.
+     */
+    revealOnLynch: v.optional(v.boolean()),
+    revealOnNightDeath: v.optional(v.boolean()),
+    /**
      * Wall-clock deadline (ms) for the day clock. Set when the day begins
      * (host taps BEGIN DAY from reveal screen, or BEGIN DAY N from morning).
      * When `now > dayEndsAt`, no new nominations can be started; host can
@@ -526,6 +536,12 @@ export default defineSchema({
      */
     headline: v.optional(v.string()),
     /**
+     * Role-reveal variant: the lynched player's CURRENT role, shown as a gold
+     * "WAS THE X" line between the elimination headline and the detail body.
+     * Set only on the lynch elimination moderator card when revealOnLynch is on.
+     */
+    revealRole: v.optional(v.string()),
+    /**
      * Player names referenced in a moderator `body`, with their player _id
      * (string) — the client tints each occurrence its chat color so you can
      * tell at a glance who's being talked about.
@@ -556,7 +572,15 @@ export default defineSchema({
     dawnReport: v.optional(
       v.object({
         dayLabel: v.number(),
-        eliminated: v.array(v.object({ name: v.string(), id: v.string() })),
+        // `role` is set per victim only under the revealOnNightDeath variant
+        // (their CURRENT role); absent otherwise so the card stays name-only.
+        eliminated: v.array(
+          v.object({
+            name: v.string(),
+            id: v.string(),
+            role: v.optional(v.string()),
+          }),
+        ),
         // Players still alive as the day opens, seat-ordered — the morning
         // "who's left in the game?" roll call. Names tinted their chat color in
         // the card. Optional so dawn reports written before this field still read.
@@ -597,7 +621,13 @@ export default defineSchema({
     shotReport: v.optional(
       v.object({
         shooter: v.object({ name: v.string(), id: v.string() }),
-        target: v.object({ name: v.string(), id: v.string() }),
+        // `role` set only under the role-reveal variant (gated by the phase
+        // the shot landed in: day cascade → revealOnLynch, night → night).
+        target: v.object({
+          name: v.string(),
+          id: v.string(),
+          role: v.optional(v.string()),
+        }),
       }),
     ),
     /**
@@ -609,7 +639,14 @@ export default defineSchema({
     blastReport: v.optional(
       v.object({
         bomber: v.object({ name: v.string(), id: v.string() }),
-        victims: v.array(v.object({ name: v.string(), id: v.string() })),
+        // Per-victim `role` set only under the role-reveal variant.
+        victims: v.array(
+          v.object({
+            name: v.string(),
+            id: v.string(),
+            role: v.optional(v.string()),
+          }),
+        ),
       }),
     ),
   }).index('by_game_channel', ['gameId', 'channel']),

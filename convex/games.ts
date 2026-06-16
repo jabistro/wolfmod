@@ -88,6 +88,10 @@ export const createGame = mutation({
     maxNominationsPerDay: v.optional(v.number()),
     wolfPickerSec: v.optional(v.number()),
     nightActionSec: v.optional(v.number()),
+    // "Role reveal" variant, seeded from the host's local prefs. Snapshotted
+    // onto the game doc so every remote phone shares one value for the game.
+    revealOnLynch: v.optional(v.boolean()),
+    revealOnNightDeath: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     if (args.playerCount < MIN_PLAYERS || args.playerCount > MAX_PLAYERS) {
@@ -128,6 +132,8 @@ export const createGame = mutation({
       dayNumber: 0,
       selectedRoles: [],
       createdAt: now,
+      revealOnLynch: args.revealOnLynch ?? false,
+      revealOnNightDeath: args.revealOnNightDeath ?? false,
       ...timerSeed,
     });
 
@@ -1238,6 +1244,8 @@ export const lobbyView = query({
           game.wolfPickerSec ?? DAY_CONFIG_DEFAULTS.wolfPickerSec,
         nightActionSec:
           game.nightActionSec ?? DAY_CONFIG_DEFAULTS.nightActionSec,
+        revealOnLynch: game.revealOnLynch ?? false,
+        revealOnNightDeath: game.revealOnNightDeath ?? false,
         devRoleAssignments: game.devRoleAssignments ?? [],
       },
       players: players.map(p => ({
@@ -1968,6 +1976,101 @@ export const gameMode = query({
     const game = await ctx.db.get(args.gameId);
     if (!game) return null;
     return game.mode ?? 'local';
+  },
+});
+
+/**
+ * The "graveyard": a persistent record of eliminated players whose role has
+ * been revealed under the role-reveal variant. Each dead player is gated by
+ * the phase they died in — day deaths (lynch + day-phase Hunter/MB cascade)
+ * follow revealOnLynch, night deaths follow revealOnNightDeath — so a table
+ * that reveals lynches but not night kills sees only the lynched here.
+ * Players whose role is NOT revealed are omitted entirely (the seating ring
+ * already shows who's dead). `enabled` lets the client hide the entry point
+ * when both toggles are off.
+ */
+export const graveyardView = query({
+  args: { gameId: v.id('games') },
+  handler: async (ctx, args) => {
+    const game = await ctx.db.get(args.gameId);
+    if (!game) return null;
+    const revealOnLynch = game.revealOnLynch ?? false;
+    const revealOnNightDeath = game.revealOnNightDeath ?? false;
+    const enabled = revealOnLynch || revealOnNightDeath;
+    if (!enabled) return { enabled, entries: [] };
+
+    const players = await ctx.db
+      .query('players')
+      .withIndex('by_game', q => q.eq('gameId', args.gameId))
+      .collect();
+
+    const actions = await ctx.db
+      .query('nightActions')
+      .withIndex('by_game_night', q => q.eq('gameId', args.gameId))
+      .collect();
+    actions.sort(
+      (a, b) => a.nightNumber - b.nightNumber || a.resolvedAt - b.resolvedAt,
+    );
+
+    // First death row per player → phase + label ("d2" / "n3"), matching
+    // endGameView's classification (result.phase, falling back to night).
+    type DeathInfo = {
+      phase: 'day' | 'night';
+      label: string;
+      dayNumber: number | null;
+    };
+    const deathByPlayer = new Map<Id<'players'>, DeathInfo>();
+    for (const a of actions) {
+      if (a.actionType !== 'death' || !a.targetPlayerId) continue;
+      if (deathByPlayer.has(a.targetPlayerId)) continue;
+      const r = (a.result ?? {}) as { phase?: string; dayNumber?: number };
+      const phase: 'day' | 'night' = r.phase === 'day' ? 'day' : 'night';
+      const label =
+        phase === 'day'
+          ? `d${r.dayNumber ?? a.nightNumber + 1}`
+          : `n${a.nightNumber}`;
+      deathByPlayer.set(a.targetPlayerId, {
+        phase,
+        label,
+        dayNumber: typeof r.dayNumber === 'number' ? r.dayNumber : null,
+      });
+    }
+
+    // While a lynch is still being resolved (results showing — the post-vote
+    // dwell that cloaks whether a Hunter is about to shoot), the death is
+    // already applied but NOT yet publicly announced. Suppress this day's
+    // day-phase deaths (the lynch + any cascade) until the nomination clears,
+    // so the graveyard never leaks a role ahead of the village reveal.
+    const lynchInFlight = !!game.currentNomination?.resultsRevealed;
+
+    const entries = players
+      .filter(p => !p.alive)
+      .map(p => {
+        const death = deathByPlayer.get(p._id);
+        // No death row (shouldn't happen for a dead player) → treat as night.
+        const phase = death?.phase ?? 'night';
+        const reveal = phase === 'day' ? revealOnLynch : revealOnNightDeath;
+        if (!reveal || !p.role) return null;
+        if (
+          lynchInFlight &&
+          phase === 'day' &&
+          death?.dayNumber === game.dayNumber
+        ) {
+          return null;
+        }
+        return {
+          _id: p._id,
+          name: p.name,
+          seatPosition: p.seatPosition,
+          role: p.role,
+          phase,
+          label: death?.label ?? null,
+        };
+      })
+      .filter((e): e is NonNullable<typeof e> => e !== null)
+      .sort((a, b) => (a.seatPosition ?? 0) - (b.seatPosition ?? 0));
+
+    return { enabled, entries };
   },
 });
 

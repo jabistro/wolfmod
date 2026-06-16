@@ -1481,11 +1481,19 @@ async function postDawnReport(ctx: MutationCtx, gameId: Id<'games'>) {
     .filter(q => q.eq(q.field('actionType'), 'death'))
     .collect();
 
-  const eliminated: { name: string; id: string }[] = [];
+  // "Role reveal" variant: surface each victim's CURRENT role on the card.
+  const revealRole = game.revealOnNightDeath ?? false;
+  const eliminated: { name: string; id: string; role?: string }[] = [];
   for (const a of deathActions) {
     if (!a.targetPlayerId) continue;
     const p = await ctx.db.get(a.targetPlayerId);
-    if (p) eliminated.push({ name: p.name, id: p._id });
+    if (p) {
+      eliminated.push({
+        name: p.name,
+        id: p._id,
+        ...(revealRole && p.role ? { role: p.role } : {}),
+      });
+    }
   }
 
   const dayLabel = game.dayNumber + 1;
@@ -1516,8 +1524,12 @@ async function postDawnReport(ctx: MutationCtx, gameId: Id<'games'>) {
     players.some(
       p => p.alive && (p.role === 'Hunter' || p.role === 'Hunter Wolf'),
     );
+  // When revealing night roles, hold the dawn card on screen long enough to
+  // read the reveal — otherwise the day rolls in 0ms and the card only lives
+  // in the chat transcript. (A no-death night has nothing to reveal, so skip.)
+  const revealDwell = revealRole && eliminated.length > 0;
   await ctx.scheduler.runAfter(
-    hunterInPlay ? MORNING_READ_MS : 0,
+    hunterInPlay || revealDwell ? MORNING_READ_MS : 0,
     internal.night.autoBeginDay,
     { gameId },
   );
@@ -7305,12 +7317,14 @@ export const morningView = query({
       .collect();
 
     const playerById = new Map(players.map(p => [p._id, p]));
-    // Morning announces every overnight death. Role identities aren't
-    // surfaced — only names — so MB's mechanic stays hidden even though
+    // Morning announces every overnight death. By default role identities
+    // aren't surfaced — only names — so MB's mechanic stays hidden even though
     // their death is reported. (Hiding the death entirely was a worse
     // cloak: their seat empties in the day phase anyway, and in 1-wolf
     // games with no MB cascade victims it created a "no one died but a
-    // seat is gone" contradiction.)
+    // seat is gone" contradiction.) The "role reveal" variant
+    // (revealOnNightDeath) opts into surfacing each victim's CURRENT role.
+    const revealRole = game.revealOnNightDeath ?? false;
     const deaths = deathActions
       .map(a => (a.targetPlayerId ? playerById.get(a.targetPlayerId) : null))
       .filter((p): p is Player => !!p)
@@ -7318,6 +7332,7 @@ export const morningView = query({
         _id: p._id,
         name: p.name,
         seatPosition: p.seatPosition,
+        role: revealRole ? p.role ?? null : null,
       }));
     const triggersPending = (game.pendingDeathTriggers?.length ?? 0) > 0;
 

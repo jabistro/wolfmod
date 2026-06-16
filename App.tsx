@@ -38,6 +38,7 @@ import { ThemeProvider } from './src/contexts/ThemeContext';
 import { TimerDefaultsProvider } from './src/contexts/TimerDefaultsContext';
 import { PlayerNameProvider } from './src/contexts/PlayerNameContext';
 import { DevModeProvider } from './src/contexts/DevModeContext';
+import { RoleRevealProvider } from './src/contexts/RoleRevealContext';
 import type { RootStackParamList } from './src/navigation/types';
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -104,6 +105,7 @@ export default function App() {
       <TimerDefaultsProvider>
       <PlayerNameProvider>
       <DevModeProvider>
+      <RoleRevealProvider>
       <SafeAreaProvider>
         <GestureHandlerRootView style={{ flex: 1, backgroundColor: '#0F0F14' }}>
           <NavigationContainer theme={AppTheme}>
@@ -138,6 +140,7 @@ export default function App() {
           <AlertHost />
         </GestureHandlerRootView>
       </SafeAreaProvider>
+      </RoleRevealProvider>
       </DevModeProvider>
       </PlayerNameProvider>
       </TimerDefaultsProvider>

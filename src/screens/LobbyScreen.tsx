@@ -112,6 +112,27 @@ function BalanceLine({ roles }: { roles: string[] }) {
   );
 }
 
+// One-line summary of the role-reveal variant in the lobby SETTINGS card.
+// Only renders when at least one toggle is on — a silent absence reads as
+// "standard hidden-role game", which is the default.
+function RevealLine({
+  revealOnLynch,
+  revealOnNightDeath,
+}: {
+  revealOnLynch: boolean;
+  revealOnNightDeath: boolean;
+}) {
+  if (!revealOnLynch && !revealOnNightDeath) return null;
+  const parts: string[] = [];
+  if (revealOnLynch) parts.push('lynch');
+  if (revealOnNightDeath) parts.push('night');
+  return (
+    <Text style={{ color: '#D4A017', fontSize: 12, fontWeight: '600', marginTop: 8 }}>
+      Reveal role on: {parts.join(' + ')}
+    </Text>
+  );
+}
+
 export default function LobbyScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
@@ -786,6 +807,10 @@ export default function LobbyScreen() {
                 {game.accusationSec}s acc · {game.defenseSec}s def ·{' '}
                 {game.voteTimerSec}s vote · {game.maxNominationsPerDay} noms
               </Text>
+              <RevealLine
+                revealOnLynch={game.revealOnLynch}
+                revealOnNightDeath={game.revealOnNightDeath}
+              />
             </TouchableOpacity>
           ) : (
             <View className="bg-wolf-card rounded-xl px-4 py-4">
@@ -795,6 +820,10 @@ export default function LobbyScreen() {
                 {game.accusationSec}s acc · {game.defenseSec}s def ·{' '}
                 {game.voteTimerSec}s vote · {game.maxNominationsPerDay} noms
               </Text>
+              <RevealLine
+                revealOnLynch={game.revealOnLynch}
+                revealOnNightDeath={game.revealOnNightDeath}
+              />
             </View>
           )}
         </View>
@@ -1458,6 +1487,10 @@ export default function LobbyScreen() {
             maxNominationsPerDay: game.maxNominationsPerDay,
             wolfPickerSec: game.wolfPickerSec,
             nightActionSec: game.nightActionSec,
+          }}
+          revealConfig={{
+            revealOnLynch: game.revealOnLynch,
+            revealOnNightDeath: game.revealOnNightDeath,
           }}
           passHostCandidates={
             isHost
