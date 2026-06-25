@@ -11,9 +11,8 @@ export type TableArt = {
   backdropNight: ReturnType<typeof require>;
 };
 
-// Per-theme table art (seat avatars + day/night backdrops). Only ghibli is
-// rendered today; chibi and 16bit fall back to ghibli until their own sets
-// are generated. Add a theme here the same way new decks are added in
+// Per-theme table art (seat avatars + day/night backdrops). All three decks
+// are rendered. Add a theme here the same way new decks are added in
 // themeArt.ts — drop assets under assets/table/<theme>/ and key them below.
 const GHIBLI: TableArt = {
   avatar: require('../../assets/table/ghibli/avatar.jpg'),
@@ -22,10 +21,24 @@ const GHIBLI: TableArt = {
   backdropNight: require('../../assets/table/ghibli/night.jpg'),
 };
 
+const CHIBI: TableArt = {
+  avatar: require('../../assets/table/chibi/avatar.jpg'),
+  avatarNight: require('../../assets/table/chibi/avatar_night.jpg'),
+  backdropDay: require('../../assets/table/chibi/day.jpg'),
+  backdropNight: require('../../assets/table/chibi/night.jpg'),
+};
+
+const SIXTEEN_BIT: TableArt = {
+  avatar: require('../../assets/table/16bit/avatar.jpg'),
+  avatarNight: require('../../assets/table/16bit/avatar_night.jpg'),
+  backdropDay: require('../../assets/table/16bit/day.jpg'),
+  backdropNight: require('../../assets/table/16bit/night.jpg'),
+};
+
 const TABLE_ART: Record<Theme, TableArt> = {
   ghibli: GHIBLI,
-  chibi: GHIBLI,
-  '16bit': GHIBLI,
+  chibi: CHIBI,
+  '16bit': SIXTEEN_BIT,
 };
 
 export function getTableArt(theme: Theme): TableArt {
