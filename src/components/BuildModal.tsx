@@ -82,7 +82,7 @@ export default function BuildModal({ visible, onClose, selectedRoles }: Props) {
       visible={visible}
       animationType="slide"
       presentationStyle="overFullScreen"
-      transparent={false}
+      transparent
       onRequestClose={onClose}
     >
       <SafeAreaView style={styles.container}>
@@ -192,7 +192,7 @@ export default function BuildModal({ visible, onClose, selectedRoles }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F0F14' },
+  container: { flex: 1, backgroundColor: 'rgba(15, 15, 20, 0.7)' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
   },
-  titleIcon: { width: 22, height: 22, tintColor: '#F0EDE8' },
+  titleIcon: { width: 24, height: 24 },
   title: {
     color: '#F0EDE8',
     fontSize: 20,

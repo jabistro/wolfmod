@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, TextInput, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -126,7 +126,7 @@ export default function SettingsScreen() {
           </View>
         )}
 
-        <ScrollView className="flex-1" contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', paddingBottom: '25%' }}>
+        <View className="mt-4">
           {rows.map(row => (
             <TouchableOpacity
               key={row.label}
@@ -141,7 +141,7 @@ export default function SettingsScreen() {
               </Text>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+        </View>
       </View>
     </SafeAreaView>
   );

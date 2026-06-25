@@ -131,24 +131,43 @@ export default function RemoteGameLayout({
   if (mode !== 'remote' || !deviceClientId) return <>{children}</>;
 
   // Fixed slice of the screen kept for the game's top header when chat is
-  // expanded. One number to tune if it clips the header / shows old timer.
-  const headerPeek = insets.top + 70;
+  // expanded. Sized to reveal the whole header block — DAY N / mode subtitle,
+  // and the LEAVE / ROOM-code / BUILD stack (its lowest element, the BUILD
+  // icon, bottoms out around insets.top + ~104) — while still sitting above the
+  // background DayClockBar (~insets.top + 114), which the opaque chat overlay
+  // covers. One number to tune if it clips the header / shows the old timer.
+  const headerPeek = insets.top + 108;
 
   return (
     <View
       className="flex-1 bg-wolf-bg"
       onLayout={e => setAvailH(e.nativeEvent.layout.height)}
     >
+      {/* The game screen always lays out at FULL height — never squished into
+          the peek. Clipping a flex:1 screen down to a thin slice reflowed it
+          (the header collapsed and the DayClockBar rode up over LEAVE/ROOM)
+          and Android wouldn't reliably clip the overflow away either. Instead,
+          when expanded, the OPAQUE chat is overlaid on top of everything below
+          the header peek — so only the game's top header shows through, with no
+          clipping involved. */}
+      <View style={{ flex: 1 }}>{children}</View>
+      {/* Chat: an in-flow bar at the bottom when collapsed; an absolute overlay
+          covering from the header peek down when expanded. ChatPane stays
+          mounted across the toggle (only its container's position changes) so
+          its scroll/read state isn't reset. */}
       <View
         style={
           expanded
-            ? { height: headerPeek, overflow: 'hidden' }
-            : { flex: 1, overflow: 'hidden' }
+            ? {
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                top: headerPeek,
+                bottom: 0,
+              }
+            : undefined
         }
       >
-        {children}
-      </View>
-      <View style={expanded ? { flex: 1 } : undefined}>
         <ChatPane
           gameId={gameId}
           deviceClientId={deviceClientId}

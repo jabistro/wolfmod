@@ -1,5 +1,6 @@
 import React from 'react';
 import { TouchableOpacity, Text } from 'react-native';
+import { SCENE_TEXT_SHADOW, HUD_CHROME } from '../theme/hud';
 
 /**
  * Top-left LEAVE button for in-game screens. Position is absolute so it
@@ -21,10 +22,11 @@ export function InGameLeaveButton({ onPress }: { onPress: () => void }) {
     >
       <Text
         style={{
-          color: '#8A8590',
+          color: HUD_CHROME,
           fontSize: 12,
           fontWeight: '700',
           letterSpacing: 2,
+          ...SCENE_TEXT_SHADOW,
         }}
       >
         LEAVE

@@ -5,8 +5,12 @@ import {
   TouchableOpacity,
   Dimensions,
   Animated,
+  StyleSheet,
 } from 'react-native';
+import { Image } from 'expo-image';
 import type { Id } from '../../convex/_generated/dataModel';
+import { useTheme } from '../contexts/ThemeContext';
+import { getTableArt } from '../data/tableArt';
 
 export type SeatingPlayer = {
   _id: Id<'players'>;
@@ -108,6 +112,13 @@ interface SeatingCircleProps {
    * "me" — layout then falls back to seat 0 at 12 o'clock.
    */
   viewerSeatIndex?: number;
+  /**
+   * Which lighting variant of the seat avatar to show. 'day' = sunlit
+   * cloaked villager, 'night' = moonlit. Defaults to 'day'. The scene
+   * itself is now a full-screen backdrop owned by the screen (PhaseScreen),
+   * not the ring.
+   */
+  phase?: 'day' | 'night';
 }
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -164,10 +175,13 @@ export function SeatingCircle({
   centerOverlay,
   selectedVariant = 'neutral',
   viewerSeatIndex,
+  phase = 'day',
 }: SeatingCircleProps) {
+  const { theme } = useTheme();
+  const tableArt = getTableArt(theme);
+  const seatAvatar = phase === 'night' ? tableArt.avatarNight : tableArt.avatar;
   const isDanger = selectedVariant === 'danger';
   const selectedBorder = isDanger ? '#B03A2E' : '#F0EDE8';
-  const selectedBackground = isDanger ? '#3A1614' : '#33333F';
   const playerBySeat = new Map<number, SeatingPlayer>();
   for (const p of players) {
     if (typeof p.seatPosition === 'number') {
@@ -187,15 +201,21 @@ export function SeatingCircle({
     }
   }
   const tapBorder = isDanger ? '#B03A2E' : '#F0EDE8';
-  const tapBackground = isDanger ? '#3A1614' : '#33333F';
   const tapLabelColor = isDanger ? '#E07566' : '#F0EDE8';
   const tapLabelFontSize = seatSize >= 56 ? 10 : seatSize >= 44 ? 9 : 8;
 
-  // Pending-trial fill animation. 0 = tap-highlight state, 1 = solid
-  // white fill with inverted text. Restarted whenever the pending target
-  // id changes (a new trial confirmation began) or the server's dwell
-  // deadline updates — both are stable per pending trial, so the effect
-  // doesn't churn every tick.
+  // Color veil painted over a seat's avatar to signal state. Selected /
+  // tap highlights use a fixed-opacity veil; the pending-trial seat
+  // animates the same veil toward near-solid so the table gets a beat to
+  // register who was picked before the screen switches. White (neutral)
+  // for day-phase trials, red (danger) for the wolves' kill.
+  const veilRgb = isDanger ? '176, 58, 46' : '240, 237, 232';
+  const SELECTED_VEIL = 0.34;
+
+  // Pending-trial fill animation. Restarted whenever the pending target id
+  // changes (a new trial confirmation began) or the server's dwell deadline
+  // updates — both are stable per pending trial, so the effect doesn't
+  // churn every tick.
   const pendingAnim = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (pendingTrialTargetId && pendingTrialDwellEndsAt != null) {
@@ -210,17 +230,9 @@ export function SeatingCircle({
       pendingAnim.setValue(0);
     }
   }, [pendingTrialTargetId, pendingTrialDwellEndsAt, pendingAnim]);
-  const pendingBg = pendingAnim.interpolate({
+  const pendingVeilColor = pendingAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: isDanger
-      ? ['rgba(58, 22, 20, 1)', 'rgba(176, 58, 46, 1)']
-      : ['rgba(51, 51, 63, 1)', 'rgba(240, 237, 232, 1)'],
-  });
-  const pendingTextColor = pendingAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: isDanger
-      ? ['rgba(240, 237, 232, 1)', 'rgba(240, 237, 232, 1)']
-      : ['rgba(240, 237, 232, 1)', 'rgba(15, 15, 20, 1)'],
+    outputRange: [`rgba(${veilRgb}, ${SELECTED_VEIL})`, `rgba(${veilRgb}, 0.85)`],
   });
   const pendingBorder = isDanger ? '#B03A2E' : '#F0EDE8';
 
@@ -286,82 +298,98 @@ export function SeatingCircle({
       );
     }
 
-    // Pending-trial seat renders as Animated.View so its background and
-    // text color can morph over the dwell window. Other seats use the
-    // regular static style.
-    if (isPending) {
-      const animatedSeatStyle = {
-        position: 'absolute' as const,
-        left: pos.left,
-        top: pos.top,
-        width: seatSize,
-        height: seatSize,
-        borderRadius: seatSize / 2,
-        backgroundColor: pendingBg,
-        borderWidth: 2,
-        borderColor: pendingBorder,
-        alignItems: 'center' as const,
-        justifyContent: 'center' as const,
-        paddingHorizontal: 2,
-        opacity: 1,
-      };
-      seatNodes.push(
-        <Animated.View key={i} style={animatedSeatStyle} pointerEvents="none">
-          <Animated.Text
-            style={{
-              color: pendingTextColor,
-              fontSize,
-              fontWeight: '700',
-              textAlign: 'center',
-            }}
-            numberOfLines={2}
-          >
-            {occupant.name}
-          </Animated.Text>
-        </Animated.View>,
-      );
-      continue;
-    }
-
-    // Tap-highlight wins over `selected` and the gold self-ring so the
-    // village always sees who's been nominated, even on seats that
-    // happen to also be the viewer's own.
+    // The seat is now filled with the shared cloaked-villager avatar, so
+    // the border ring carries the primary state signal. Tap-highlight wins
+    // over `selected` and the gold self-ring so the village always sees
+    // who's been nominated, even on the viewer's own seat.
     const borderColor = isDead
       ? '#2A2A38'
       : hasTap
         ? tapBorder
         : isSelected
           ? selectedBorder
-          : isMe
-            ? '#D4A017'
-            : isSelectable
-              ? '#3A3A48'
-              : '#2A2A38';
-    const backgroundColor = hasTap
-      ? tapBackground
-      : isSelected
-        ? selectedBackground
-        : '#22222F';
-    const textColor = isDead
-      ? '#5A5560'
-      : isSelectable
-        ? '#F0EDE8'
-        : '#5A5560';
-    const seatOpacity = isDead ? 0.35 : isSelectable ? 1 : 0.5;
-    const content = (
-      <Text
-        style={{
-          color: textColor,
-          fontSize,
-          fontWeight: hasTap || isSelected || isMe ? '700' : '600',
-          textAlign: 'center',
-          textDecorationLine: isDead ? 'line-through' : 'none',
-        }}
-        numberOfLines={2}
-      >
-        {occupant.name}
-      </Text>
+          : isPending
+            ? pendingBorder
+            : isMe
+              ? '#D4A017'
+              : isSelectable
+                ? '#5A5560'
+                : '#2A2A38';
+    const borderWidth =
+      isPending || hasTap || isSelected || (isMe && !isDead) ? 2 : 1;
+    const seatOpacity = isDead ? 0.4 : isSelectable ? 1 : 0.6;
+    // Static color veil over the avatar for selected / tap highlights. The
+    // pending seat animates its own veil (below) toward near-solid instead.
+    const staticVeil =
+      !isPending && (hasTap || isSelected)
+        ? `rgba(${veilRgb}, ${SELECTED_VEIL})`
+        : null;
+    const interactive = tappable && !isPending;
+
+    const seatChildren = (
+      <>
+        <Image
+          source={seatAvatar}
+          style={{ width: '100%', height: '100%' }}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+        />
+        {isDead ? (
+          <View
+            pointerEvents="none"
+            style={{
+              ...StyleSheet.absoluteFillObject,
+              backgroundColor: 'rgba(15, 15, 20, 0.55)',
+            }}
+          />
+        ) : null}
+        {staticVeil ? (
+          <View
+            pointerEvents="none"
+            style={{
+              ...StyleSheet.absoluteFillObject,
+              backgroundColor: staticVeil,
+            }}
+          />
+        ) : null}
+        {isPending ? (
+          <Animated.View
+            pointerEvents="none"
+            style={{
+              ...StyleSheet.absoluteFillObject,
+              backgroundColor: pendingVeilColor,
+            }}
+          />
+        ) : null}
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            backgroundColor: 'rgba(10, 10, 14, 0.62)',
+            paddingVertical: 1,
+            paddingHorizontal: 2,
+            alignItems: 'center',
+          }}
+        >
+          <Text
+            style={{
+              color: isDead ? '#8A8590' : '#F0EDE8',
+              fontSize,
+              fontWeight: hasTap || isSelected || isMe ? '700' : '600',
+              textAlign: 'center',
+              textDecorationLine: isDead ? 'line-through' : 'none',
+            }}
+            numberOfLines={1}
+          >
+            {occupant.name}
+          </Text>
+        </View>
+      </>
     );
+
     const sharedStyle = {
       position: 'absolute' as const,
       left: pos.left,
@@ -369,29 +397,27 @@ export function SeatingCircle({
       width: seatSize,
       height: seatSize,
       borderRadius: seatSize / 2,
-      backgroundColor,
-      borderWidth: hasTap || isSelected || (isMe && !isDead) ? 2 : 1,
+      borderWidth,
       borderColor,
-      alignItems: 'center' as const,
-      justifyContent: 'center' as const,
-      paddingHorizontal: 2,
+      overflow: 'hidden' as const,
+      backgroundColor: '#22222F',
       opacity: seatOpacity,
     };
-    if (tappable) {
+    if (interactive) {
       seatNodes.push(
         <TouchableOpacity
           key={i}
-          activeOpacity={0.6}
+          activeOpacity={0.7}
           onPress={() => onPress!(occupant)}
           style={sharedStyle}
         >
-          {content}
+          {seatChildren}
         </TouchableOpacity>,
       );
     } else {
       seatNodes.push(
         <View key={i} style={sharedStyle}>
-          {content}
+          {seatChildren}
         </View>,
       );
     }

@@ -82,7 +82,11 @@ export default function TimersConfigModal({
   const [passing, setPassing] = useState<Id<'players'> | null>(null);
   const [ending, setEnding] = useState(false);
 
-  // Re-seed when the modal opens so it always reflects the latest config.
+  // Re-seed only when the modal OPENS so it reflects the latest config. We
+  // intentionally depend on `visible` alone, not on `initial`/`revealConfig`:
+  // callers pass those as fresh object literals every render, and the host
+  // screens re-render ~5×/sec (ticking clock). Including them here re-fired
+  // this effect constantly and wiped each edit the instant it was made.
   useEffect(() => {
     if (visible) {
       setValues(initial);
@@ -90,7 +94,8 @@ export default function TimersConfigModal({
       setRevealNight(!!revealConfig?.revealOnNightDeath);
       setMode('main');
     }
-  }, [visible, initial, revealConfig]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   function update(key: keyof TimerConfigValues, next: number) {
     setValues(v => ({ ...v, [key]: next }));

@@ -334,6 +334,7 @@ export default function RoleRevealScreen() {
           style={{ flex: 1 }}
         >
           <SeatingCircle
+            phase="day"
             totalSeats={game.playerCount}
             players={seatingPlayers}
             meId={me._id}
@@ -442,6 +443,7 @@ export default function RoleRevealScreen() {
           style={{ flex: 1 }}
         >
           <SeatingCircle
+            phase="day"
             totalSeats={game.playerCount}
             players={seatingPlayers}
             meId={me._id}

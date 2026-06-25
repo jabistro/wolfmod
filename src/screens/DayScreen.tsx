@@ -9,6 +9,7 @@ import {
   Pressable,
   ActivityIndicator,
   Image,
+  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -23,6 +24,8 @@ import TimersConfigModal from '../components/TimersConfigModal';
 import BuildModal from '../components/BuildModal';
 import { showAlert } from '../components/ThemedAlert';
 import { InGameLeaveButton } from '../components/InGameLeaveButton';
+import { PhaseScreen } from '../components/PhaseScreen';
+import { SCENE_TEXT_SHADOW, HUD_CHROME, SCENE_ICON_SHADOW } from '../theme/hud';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import PassHostPickerModal from '../components/PassHostPickerModal';
@@ -103,7 +106,10 @@ type DayGame = {
 function AccusationCredit({ nomination }: { nomination: Nomination }) {
   if (!nomination.accuser && !nomination.seconder) return null;
   return (
-    <Text className="text-wolf-muted text-xs tracking-widest text-center mt-1">
+    <Text
+      className="text-xs tracking-widest text-center mt-1"
+      style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+    >
       ACCUSED BY {(nomination.accuser?.name ?? '???').toUpperCase()}
       {nomination.seconder
         ? ` · SECONDED BY ${nomination.seconder.name.toUpperCase()}`
@@ -522,10 +528,16 @@ function DayHeader({
   return (
     <View className="px-4 pt-10 pb-3" style={{ position: 'relative' }}>
       <View className="items-center">
-        <Text className="text-wolf-muted text-lg font-bold tracking-widest">
+        <Text
+          className="text-lg font-bold tracking-widest"
+          style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+        >
           DAY {dayNumber}
         </Text>
-        <Text className="text-wolf-accent text-3xl font-extrabold tracking-widest mt-1">
+        <Text
+          className="text-wolf-accent text-3xl font-extrabold tracking-widest mt-1"
+          style={SCENE_TEXT_SHADOW}
+        >
           {mode}
         </Text>
       </View>
@@ -542,10 +554,11 @@ function DayHeader({
       >
         <Text
           style={{
-            color: '#8A8590',
+            color: HUD_CHROME,
             fontSize: 10,
             fontWeight: '700',
             letterSpacing: 2,
+            ...SCENE_TEXT_SHADOW,
           }}
         >
           ROOM
@@ -557,6 +570,7 @@ function DayHeader({
             fontWeight: '800',
             letterSpacing: 3,
             marginTop: 1,
+            ...SCENE_TEXT_SHADOW,
           }}
         >
           {roomCode}
@@ -567,11 +581,21 @@ function DayHeader({
             hitSlop={8}
             style={{ paddingTop: 2, marginRight: 6 }}
           >
-            <Image
-              source={require('../../assets/images/build.png')}
-              style={{ width: 24, height: 24, tintColor: '#8A8590' }}
-              resizeMode="contain"
-            />
+            <View style={{ width: 26, height: 26 }}>
+              {/* Dark offset copy behind the icon = drop shadow that follows
+                  the icon shape (Images can't use textShadow), so it lifts off
+                  the scene like the cog/text chrome does. */}
+              <Image
+                source={require('../../assets/images/build.png')}
+                style={{ width: 26, height: 26, ...SCENE_ICON_SHADOW }}
+                resizeMode="contain"
+              />
+              <Image
+                source={require('../../assets/images/build.png')}
+                style={{ width: 26, height: 26 }}
+                resizeMode="contain"
+              />
+            </View>
           </TouchableOpacity>
         )}
       </View>
@@ -634,7 +658,7 @@ function DayCogRow({
       style={{ paddingHorizontal: 16, gap: 14 }}
     >
       <TouchableOpacity onPress={onPress} hitSlop={8} style={{ padding: 4 }}>
-        <Text style={{ color: '#8A8590', fontSize: 26 }}>⚙</Text>
+        <Text style={{ color: HUD_CHROME, fontSize: 26, ...SCENE_TEXT_SHADOW }}>⚙</Text>
       </TouchableOpacity>
       {onNomToggle && (
         <TouchableOpacity
@@ -645,15 +669,15 @@ function DayCogRow({
             paddingHorizontal: 12,
             paddingVertical: 6,
             borderRadius: 8,
-            backgroundColor: nomArmed ? '#D4A017' : 'transparent',
+            backgroundColor: nomArmed ? '#D4A017' : 'rgba(26, 26, 36, 0.78)',
             borderWidth: 1,
-            borderColor: nomArmed ? '#D4A017' : '#3A3A48',
+            borderColor: nomArmed ? '#D4A017' : 'rgba(218, 214, 206, 0.45)',
             opacity: nomDisabled ? 0.35 : 1,
           }}
         >
           <Text
             style={{
-              color: nomArmed ? '#0F0F14' : '#8A8590',
+              color: nomArmed ? '#0F0F14' : HUD_CHROME,
               fontSize: 14,
               fontWeight: '800',
               letterSpacing: 2,
@@ -762,7 +786,7 @@ function DayClockBar({
   return (
     <View
       className="mx-4 mb-3 bg-wolf-card rounded-xl flex-row items-center"
-      style={{ paddingVertical: 12, paddingHorizontal: 16 }}
+      style={{ paddingVertical: 12, paddingHorizontal: 16, marginTop: 12 }}
     >
       <View style={{ width: 52, alignItems: 'flex-start' }}>
         {showHostButtons && (
@@ -871,6 +895,9 @@ function DiscussionView({
   const hostForceNominate = useMutation(api.day.hostForceNominate);
   const [cogOpen, setCogOpen] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
+  // Measured height of the seating area so the ring is sized to always fit
+  // (ring + caption) without scrolling — see the seat-area block below.
+  const [seatAreaH, setSeatAreaH] = useState(0);
   // Host override: when armed, the host's next seat tap fires a trial
   // directly (bypasses the 2-tap consensus). Solo-test escape hatch. The
   // toggle is silent — other phones see only the resulting trial, with
@@ -955,8 +982,20 @@ function DiscussionView({
       )
     : undefined;
 
+  // Keep the ring at its full default size (≤320, the established look); the
+  // surrounding flex container just centers it and the caption so the dead
+  // whitespace above/below is absorbed instead of forcing a scroll. The
+  // height-based term is only a safety net: it shrinks the ring solely on a
+  // screen too short to hold the full ring + caption, never on normal devices.
+  const screenW = Dimensions.get('window').width;
+  const SEAT_CAPTION_RESERVE = 72;
+  const circleSize = Math.max(
+    220,
+    Math.min(320, screenW - 32, (seatAreaH || 420) - SEAT_CAPTION_RESERVE),
+  );
+
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <PhaseScreen phase="day">
       <DayHeader
         dayNumber={game.dayNumber}
         mode="DISCUSSION"
@@ -983,16 +1022,16 @@ function DiscussionView({
       <DayActionRow
         left={
           <Text
-            className="text-wolf-muted font-bold tracking-widest"
-            style={{ fontSize: 14 }}
+            className="font-bold tracking-widest"
+            style={{ fontSize: 14, color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
           >
             {alive.length} ALIVE
           </Text>
         }
         center={
           <Text
-            className="text-wolf-muted font-bold tracking-widest"
-            style={{ fontSize: 14 }}
+            className="font-bold tracking-widest"
+            style={{ fontSize: 14, color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
           >
             NOMS LEFT: {game.nominationsRemaining}/{game.maxNominationsPerDay}
           </Text>
@@ -1008,8 +1047,19 @@ function DiscussionView({
         />
       )}
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24, alignItems: 'center' }}>
+      <View
+        style={{
+          flex: 1,
+          paddingHorizontal: 16,
+          paddingBottom: 12,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        onLayout={e => setSeatAreaH(e.nativeEvent.layout.height)}
+      >
         <SeatingCircle
+          size={circleSize}
+          phase="day"
           totalSeats={game.playerCount}
           players={players}
           meId={meId}
@@ -1033,8 +1083,8 @@ function DiscussionView({
           centerOverlay={
             dayPaused ? (
               <Text
-                className="text-wolf-muted font-extrabold tracking-widest"
-                style={{ fontSize: 22 }}
+                className="font-extrabold tracking-widest"
+                style={{ fontSize: 22, color: '#F0EDE8', ...SCENE_TEXT_SHADOW }}
               >
                 PAUSED
               </Text>
@@ -1044,13 +1094,22 @@ function DiscussionView({
         />
         {pendingTrial ? (
           <View className="mt-6 items-center">
-            <Text className="text-wolf-accent text-2xl font-extrabold tracking-widest text-center">
+            <Text
+              className="text-wolf-accent text-2xl font-extrabold tracking-widest text-center"
+              style={SCENE_TEXT_SHADOW}
+            >
               {pendingTrial.target.name.toUpperCase()}
             </Text>
-            <Text className="text-wolf-muted text-xs tracking-widest text-center mt-1">
+            <Text
+              className="text-xs tracking-widest text-center mt-1"
+              style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+            >
               IS ON THE STAND
             </Text>
-            <Text className="text-wolf-muted text-xs tracking-widest text-center mt-3">
+            <Text
+              className="text-xs tracking-widest text-center mt-3"
+              style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+            >
               ACCUSED BY {(pendingTrial.accuser?.name ?? '???').toUpperCase()}
               {pendingTrial.seconder
                 ? ` · SECONDED BY ${pendingTrial.seconder.name.toUpperCase()}`
@@ -1080,17 +1139,23 @@ function DiscussionView({
             HOST OVERRIDE — TAP A PLAYER TO PUT THEM ON TRIAL
           </Text>
         ) : meAlive ? (
-          <Text className="text-wolf-muted text-xs text-center mt-4">
+          <Text
+            className="text-xs text-center mt-4"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
             Tap a player to nominate them. A second tap by anyone puts them
             on trial.
           </Text>
         ) : null}
         {!pendingTrial && !meAlive && !(nomArmed && isHost) && (
-          <Text className="text-wolf-muted text-xs text-center mt-4 italic">
+          <Text
+            className="text-xs text-center mt-4 italic"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
             You are out of the game — spectating.
           </Text>
         )}
-      </ScrollView>
+      </View>
 
       {!isHost && !pending && (
         <View
@@ -1125,7 +1190,7 @@ function DiscussionView({
         onClose={() => setBuildOpen(false)}
         selectedRoles={game.selectedRoles}
       />
-    </SafeAreaView>
+    </PhaseScreen>
   );
 }
 
@@ -1236,7 +1301,7 @@ function TrialView({
   const dayRemMs = dayRemainingMs(game, now);
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <PhaseScreen phase="day">
       <DayHeader
         dayNumber={game.dayNumber}
         mode="ON TRIAL"
@@ -1273,11 +1338,17 @@ function TrialView({
         onPress={isHost ? toggleClock : undefined}
         className="flex-1 items-center justify-center px-6"
       >
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+        <Text
+          className="text-xs font-bold tracking-widest"
+          style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+        >
           {phaseLabel}
         </Text>
         {isHost && (
-          <Text className="text-wolf-muted text-xs tracking-widest mt-1">
+          <Text
+            className="text-xs tracking-widest mt-1"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
             {paused
               ? remaining === (isAccusation ? game.config.accusationSec : game.config.defenseSec) * 1000
                 ? 'TAP TO START'
@@ -1292,6 +1363,7 @@ function TrialView({
             fontSize: 100,
             fontVariant: ['tabular-nums'],
             marginTop: 12,
+            ...SCENE_TEXT_SHADOW,
           }}
         >
           {formatTime(remaining)}
@@ -1349,13 +1421,19 @@ function TrialView({
               disabled={busy !== null}
               className="py-3 mt-1"
             >
-              <Text className="text-wolf-muted text-xs tracking-widest text-center">
+              <Text
+                className="text-xs tracking-widest text-center"
+                style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+              >
                 CANCEL NOMINATION
               </Text>
             </TouchableOpacity>
           </>
         ) : (
-          <Text className="text-wolf-muted text-xs tracking-widest text-center">
+          <Text
+            className="text-xs tracking-widest text-center"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
             {isAccusation ? 'ACCUSER IS SPEAKING' : 'ACCUSED IS DEFENDING'}
           </Text>
         )}
@@ -1434,7 +1512,7 @@ function TrialView({
         onClose={() => setBuildOpen(false)}
         selectedRoles={game.selectedRoles}
       />
-    </SafeAreaView>
+    </PhaseScreen>
   );
 }
 
@@ -1468,7 +1546,7 @@ function RemoteTrialScreen({
           ? 'GET READY TO VOTE'
           : 'VOTE RESULT';
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <PhaseScreen phase="day">
       <DayHeader
         dayNumber={game.dayNumber}
         mode={mode}
@@ -1493,7 +1571,7 @@ function RemoteTrialScreen({
         onClose={() => setBuildOpen(false)}
         selectedRoles={game.selectedRoles}
       />
-    </SafeAreaView>
+    </PhaseScreen>
   );
 }
 
@@ -1591,7 +1669,7 @@ function VoteView({
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <PhaseScreen phase="day">
       <DayHeader
         dayNumber={game.dayNumber}
         mode={isPreVote ? 'GET READY TO VOTE' : 'TIME TO VOTE'}
@@ -1626,10 +1704,16 @@ function VoteView({
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
+        <Text
+          className="text-xs font-bold tracking-widest mb-2"
+          style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+        >
           VOTE ON
         </Text>
-        <Text className="text-wolf-text text-4xl font-extrabold tracking-widest mb-2 text-center">
+        <Text
+          className="text-wolf-text text-4xl font-extrabold tracking-widest mb-2 text-center"
+          style={SCENE_TEXT_SHADOW}
+        >
           {nomination.nominee?.name.toUpperCase() ?? '—'}
         </Text>
         <View className="mb-6">
@@ -1642,11 +1726,14 @@ function VoteView({
         >
           <Text
             className="text-wolf-accent font-extrabold"
-            style={{ fontSize: 72, fontVariant: ['tabular-nums'] }}
+            style={{ fontSize: 72, fontVariant: ['tabular-nums'], ...SCENE_TEXT_SHADOW }}
           >
             {Math.ceil(remaining / 1000)}
           </Text>
-          <Text className="text-wolf-muted text-xs tracking-widest mt-1">
+          <Text
+            className="text-xs tracking-widest mt-1"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
             {isPreVote
               ? 'UNTIL VOTING'
               : paused
@@ -1689,7 +1776,10 @@ function VoteView({
         )}
 
         {!isPreVote && (
-          <Text className="text-wolf-muted text-xs tracking-widest mb-2">
+          <Text
+            className="text-xs tracking-widest mb-2"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
             {nomination.votedCount} / {nomination.eligibleCount} VOTED
           </Text>
         )}
@@ -1830,7 +1920,7 @@ function VoteView({
         onClose={() => setBuildOpen(false)}
         selectedRoles={game.selectedRoles}
       />
-    </SafeAreaView>
+    </PhaseScreen>
   );
 }
 
@@ -1903,7 +1993,7 @@ function ResultsView({
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <PhaseScreen phase="day">
       <DayHeader
         dayNumber={game.dayNumber}
         mode="VOTE RESULT"
@@ -1935,12 +2025,16 @@ function ResultsView({
         }}
       >
         <View className="mt-2 mb-6 items-center">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1">
+          <Text
+            className="text-xs font-bold tracking-widest mb-1"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
             VOTED ON
           </Text>
           <Text
             className="text-wolf-text text-2xl font-extrabold tracking-widest text-center"
             numberOfLines={2}
+            style={SCENE_TEXT_SHADOW}
           >
             {nomination.nominee?.name.toUpperCase() ?? '—'}
           </Text>
@@ -2118,7 +2212,7 @@ function ResultsView({
         onClose={() => setBuildOpen(false)}
         selectedRoles={game.selectedRoles}
       />
-    </SafeAreaView>
+    </PhaseScreen>
   );
 }
 
@@ -2243,6 +2337,7 @@ function HunterModal({
           SECONDS
         </Text>
         <SeatingCircle
+          phase="day"
           totalSeats={totalSeats}
           players={targetables}
           meId={myId}

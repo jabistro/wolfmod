@@ -11,7 +11,6 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -27,11 +26,13 @@ import {
 } from '../components/SeatingCircle';
 import { showAlert } from '../components/ThemedAlert';
 import { InGameLeaveButton } from '../components/InGameLeaveButton';
+import { PhaseScreen } from '../components/PhaseScreen';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import { MasonRevealModal } from '../components/MasonRevealModal';
 import { isWolfTeam } from '../data/v1Roles';
 import { getRoleDescription } from '../data/roleDescriptions';
+import { SCENE_TEXT_SHADOW } from '../theme/hud';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Night'>;
 type Route = RouteProp<RootStackParamList, 'Night'>;
@@ -402,7 +403,7 @@ export default function NightScreen() {
   );
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <PhaseScreen phase="night">
       <InGameLeaveButton onPress={confirmLeave} />
       <View
         style={{
@@ -439,6 +440,7 @@ export default function NightScreen() {
         nightNumber={game.nightNumber}
         stepLabel={me.alive ? null : stepLabel}
         dead={!me.alive}
+        role={me.alive ? me.role : undefined}
       />
 
       {view.hostMissing && (
@@ -460,7 +462,7 @@ export default function NightScreen() {
             {!isMyStep &&
               !cursedConversionState &&
               !alphaConversionState &&
-              !doppelgangerRevealState && <WaitingView role={me.role} />}
+              !doppelgangerRevealState && <WaitingView />}
           </>
         )
       ) : activeStepNames.length === 0 ? (
@@ -490,7 +492,7 @@ export default function NightScreen() {
         submitting={ackingMason}
       />
 
-    </SafeAreaView>
+    </PhaseScreen>
   );
 }
 
@@ -584,14 +586,21 @@ function NightHeader({
   nightNumber,
   stepLabel,
   dead,
+  role,
 }: {
   nightNumber: number;
   stepLabel: string | null;
   dead?: boolean;
+  /** The local (living) player's own role — a persistent reminder of who they
+   *  are, shown big + white under the NIGHT N line. Omitted for spectators. */
+  role?: string;
 }) {
   return (
     <View className="px-4 pt-10 pb-3 items-center">
-      <Text className="text-wolf-muted text-lg font-bold tracking-widest">
+      <Text
+        className="text-wolf-muted text-lg font-bold tracking-widest"
+        style={SCENE_TEXT_SHADOW}
+      >
         NIGHT {nightNumber}
       </Text>
       {dead && (
@@ -599,11 +608,110 @@ function NightHeader({
           SPECTATING
         </Text>
       )}
+      {role ? (
+        <Text
+          className="text-wolf-text font-extrabold tracking-widest mt-1 text-center"
+          style={{ fontSize: 22, ...SCENE_TEXT_SHADOW }}
+        >
+          {role.toUpperCase()}
+        </Text>
+      ) : null}
       {stepLabel ? (
-        <Text className="text-wolf-text text-base font-bold tracking-widest mt-1 text-center">
+        <Text
+          className="text-wolf-text text-base font-bold tracking-widest mt-1 text-center"
+          style={SCENE_TEXT_SHADOW}
+        >
           {stepLabel.toUpperCase()}
         </Text>
       ) : null}
+    </View>
+  );
+}
+
+// ───── Shared confirmation overlay ─────────────────────────────────────────
+//
+// A dim backdrop with a content-hugging card for the night pickers' "Are you
+// sure?" step. The card sizes to its children (it does NOT stretch to the
+// screen), so the dark surface only frames the actual prompt + buttons rather
+// than blacking out the whole screen. Each picker passes its own body (label /
+// name / subtitle) as children; this owns the card chrome and the NO/YES row.
+
+function ConfirmOverlay({
+  children,
+  onCancel,
+  onConfirm,
+  submitting,
+  confirmLabel = 'YES',
+  cancelLabel = 'NO',
+  confirmTone = 'accent',
+}: {
+  children: React.ReactNode;
+  onCancel: () => void;
+  onConfirm: () => void;
+  submitting?: boolean;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  /** 'accent' = gold YES (default); 'danger' = red YES for lethal actions. */
+  confirmTone?: 'accent' | 'danger';
+}) {
+  const danger = confirmTone === 'danger';
+  return (
+    <View
+      style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
+        backgroundColor: 'transparent',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+      }}
+    >
+      <View
+        className="bg-wolf-surface rounded-3xl"
+        style={{
+          alignItems: 'center',
+          alignSelf: 'center',
+          maxWidth: 360,
+          paddingTop: 26,
+          paddingBottom: 22,
+          paddingHorizontal: 26,
+          borderWidth: 1,
+          borderColor: '#2C2C3A',
+        }}
+      >
+        {children}
+        <View className="flex-row" style={{ gap: 14, marginTop: 24 }}>
+          <TouchableOpacity
+            onPress={onCancel}
+            disabled={submitting}
+            className="bg-wolf-card rounded-xl py-4 px-10"
+            style={{ borderWidth: 1, borderColor: '#3A3A48' }}
+          >
+            <Text className="text-wolf-text text-base font-extrabold tracking-widest">
+              {cancelLabel}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onConfirm}
+            disabled={submitting}
+            style={{ opacity: submitting ? 0.4 : 1 }}
+            className={`rounded-xl py-4 px-10 ${danger ? 'bg-wolf-red' : 'bg-wolf-accent'}`}
+          >
+            {submitting ? (
+              <ActivityIndicator color={danger ? '#F0EDE8' : '#0F0F14'} />
+            ) : (
+              <Text
+                className={`text-base font-extrabold tracking-widest ${danger ? 'text-wolf-text' : 'text-wolf-bg'}`}
+              >
+                {confirmLabel}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </View>
     </View>
   );
 }
@@ -1330,6 +1438,7 @@ function WolvesPicker({
             RNG picks first bounce the highlight through the candidates. */}
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -1551,6 +1660,7 @@ function SeerPicker({
 
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -1571,18 +1681,10 @@ function SeerPicker({
           information is given. Uses the same dark backdrop as the result
           overlay for visual consistency. */}
       {pendingTarget && !pendingResult && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={handleCancel}
+          onConfirm={handleConfirm}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             INVESTIGATE
@@ -1590,36 +1692,10 @@ function SeerPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {pendingTarget.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10">
+          <Text className="text-wolf-muted text-sm text-center">
             Are you sure?
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={handleCancel}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
 
       {/* Result overlay — blocks until the player taps OK, so they have time
@@ -1830,6 +1906,7 @@ function PIPicker({
 
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -1868,18 +1945,10 @@ function PIPicker({
 
       {/* Confirmation overlay */}
       {pendingTarget && !pendingResult && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={handleCancel}
+          onConfirm={handleConfirm}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             INVESTIGATE
@@ -1887,36 +1956,10 @@ function PIPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {pendingTarget.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10">
+          <Text className="text-wolf-muted text-sm text-center">
             Your only investigation. Are you sure?
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={handleCancel}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
 
       {/* Result overlay */}
@@ -2187,6 +2230,7 @@ function MentalistPicker({
 
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -2233,18 +2277,10 @@ function MentalistPicker({
 
       {/* Confirmation overlay */}
       {confirmOpen && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={handleConfirm}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             COMPARE
@@ -2253,36 +2289,10 @@ function MentalistPicker({
             {picks[0]?.name.toUpperCase()}
           </Text>
           <Text className="text-wolf-muted text-base text-center my-2">vs</Text>
-          <Text className="text-wolf-text text-2xl font-extrabold text-center mb-10">
+          <Text className="text-wolf-text text-2xl font-extrabold text-center">
             {picks[1]?.name.toUpperCase()}
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={() => setConfirmOpen(false)}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
 
       {/* Result overlay */}
@@ -2643,18 +2653,10 @@ function WitchPicker({
 
       {/* Save confirmation */}
       {confirmSave && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={() => setConfirmSave(null)}
+          onConfirm={handleSave}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             SAVE
@@ -2662,36 +2664,10 @@ function WitchPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {confirmSave.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10">
+          <Text className="text-wolf-muted text-sm text-center">
             This is your only save potion.
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={() => setConfirmSave(null)}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleSave}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
 
       {/* Poison picker */}
@@ -2721,6 +2697,7 @@ function WitchPicker({
             </Text>
             <View style={{ alignItems: 'center', paddingVertical: 8 }}>
               <SeatingCircle
+            phase="night"
                 totalSeats={totalSeats}
                 players={alivePlayers}
                 meId={meId}
@@ -2741,18 +2718,11 @@ function WitchPicker({
 
       {/* Poison confirmation */}
       {confirmPoison && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={() => setConfirmPoison(null)}
+          onConfirm={handlePoison}
+          submitting={submitting}
+          confirmTone="danger"
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             POISON
@@ -2760,36 +2730,10 @@ function WitchPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {confirmPoison.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10">
+          <Text className="text-wolf-muted text-sm text-center">
             This is your only poison potion.
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={() => setConfirmPoison(null)}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handlePoison}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-red rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#F0EDE8" />
-              ) : (
-                <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
     </View>
   );
@@ -3030,60 +2974,25 @@ function LeprechaunPicker({
 
       {/* Confirmation overlay — only when the move is actually a choice. */}
       {confirmOpen && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={() => setConfirmOpen(false)}
+          onConfirm={confirmedSubmit}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             {selection === 'target' ? 'LEAVE KILL' : 'MOVE KILL'}
           </Text>
-          <Text className="text-wolf-text text-2xl font-extrabold text-center mb-3">
+          <Text className="text-wolf-text text-2xl font-extrabold text-center">
             {selection === 'target'
               ? `Leave the kill on ${selectedName}?`
               : `Move the kill to ${selectedName}?`}
           </Text>
           {selection !== 'target' && (
-            <Text className="text-wolf-muted text-sm text-center mb-10">
+            <Text className="text-wolf-muted text-sm text-center mt-3">
               You won't be able to move a kill off {targetName} again later.
             </Text>
           )}
-          {selection === 'target' && <View style={{ height: 24 }} />}
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={() => setConfirmOpen(false)}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={confirmedSubmit}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
     </View>
   );
@@ -3212,18 +3121,26 @@ function BodyguardPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text
+            className="text-wolf-text text-sm text-center mt-6 px-4"
+            style={SCENE_TEXT_SHADOW}
+          >
             {isGhost
               ? "The Bodyguard's protection is in. Waiting for the night to settle…"
               : 'Your protection is in. Waiting for the night to settle…'}
           </Text>
           {bgState.tonightProtected && (
-            <Text className="text-wolf-text text-sm text-center mt-4 px-4">
-              <Text style={{ color: '#5BA0E5' }} className="font-bold">
-                PROTECTED:
-              </Text>{' '}
-              {bgState.tonightProtected.name}
-            </Text>
+            <View className="bg-wolf-card rounded-xl px-5 py-3 mt-5 flex-row items-center">
+              <Text
+                style={{ color: '#5BA0E5' }}
+                className="text-xs font-bold tracking-widest"
+              >
+                PROTECTED
+              </Text>
+              <Text className="text-wolf-text text-base font-bold ml-3">
+                {bgState.tonightProtected.name}
+              </Text>
+            </View>
           )}
         </View>
       </View>
@@ -3257,6 +3174,7 @@ function BodyguardPicker({
 
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -3274,18 +3192,10 @@ function BodyguardPicker({
       </ScrollView>
 
       {pendingTarget && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={handleCancel}
+          onConfirm={handleConfirm}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             PROTECT
@@ -3293,36 +3203,10 @@ function BodyguardPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {pendingTarget.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10">
+          <Text className="text-wolf-muted text-sm text-center">
             Are you sure?
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={handleCancel}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
     </View>
   );
@@ -3443,6 +3327,7 @@ function HuntressPicker({
         </Text>
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -3478,18 +3363,10 @@ function HuntressPicker({
       )}
 
       {pendingTarget && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={handleCancel}
+          onConfirm={handleConfirm}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             SHOOT
@@ -3497,36 +3374,10 @@ function HuntressPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {pendingTarget.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10">
+          <Text className="text-wolf-muted text-sm text-center">
             Your only shot. Are you sure?
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={handleCancel}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
     </View>
   );
@@ -3651,6 +3502,7 @@ function WarlockPicker({
         </Text>
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -3686,18 +3538,10 @@ function WarlockPicker({
       )}
 
       {pendingTarget && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={handleCancel}
+          onConfirm={handleConfirm}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             REDIRECT KILL ONTO
@@ -3705,37 +3549,11 @@ function WarlockPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {pendingTarget.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10 px-4">
+          <Text className="text-wolf-muted text-sm text-center px-4">
             Tonight's wolf kill will land on them instead. Your power will
             be considered used for the rest of the game.
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={handleCancel}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
     </View>
   );
@@ -3838,6 +3656,7 @@ function ChupacabraPicker({
         </Text>
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -3855,18 +3674,10 @@ function ChupacabraPicker({
       </ScrollView>
 
       {pendingTarget && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={handleCancel}
+          onConfirm={handleConfirm}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             HUNT
@@ -3874,37 +3685,11 @@ function ChupacabraPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {pendingTarget.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10 px-4">
+          <Text className="text-wolf-muted text-sm text-center px-4">
             If they’re a wolf — or the pack is already gone — they die by dawn.
             Otherwise the hunt draws no blood tonight.
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={handleCancel}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
     </View>
   );
@@ -4024,6 +3809,7 @@ function RevealerPicker({
         </Text>
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -4059,18 +3845,10 @@ function RevealerPicker({
       )}
 
       {pendingTarget && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={handleCancel}
+          onConfirm={handleConfirm}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             REVEAL
@@ -4078,36 +3856,10 @@ function RevealerPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {pendingTarget.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10 px-4">
+          <Text className="text-wolf-muted text-sm text-center px-4">
             If they aren't a wolf, you die. Are you sure?
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={handleCancel}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
     </View>
   );
@@ -4227,6 +3979,7 @@ function RevilerPicker({
         </Text>
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -4262,18 +4015,10 @@ function RevilerPicker({
       )}
 
       {pendingTarget && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={handleCancel}
+          onConfirm={handleConfirm}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             REVILE
@@ -4281,36 +4026,10 @@ function RevilerPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {pendingTarget.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10 px-4">
+          <Text className="text-wolf-muted text-sm text-center px-4">
             If they aren't a special villager, you die. Are you sure?
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={handleCancel}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
     </View>
   );
@@ -4455,6 +4174,7 @@ function NightmareWolfPicker({
         )}
         <View style={{ alignItems: 'center' }}>
           <SeatingCircle
+            phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
             meId={meId}
@@ -4490,18 +4210,10 @@ function NightmareWolfPicker({
       )}
 
       {pendingTarget && (
-        <View
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            top: 0,
-            bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 32,
-          }}
+        <ConfirmOverlay
+          onCancel={handleCancel}
+          onConfirm={handleConfirm}
+          submitting={submitting}
         >
           <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
             PUT TO SLEEP
@@ -4509,37 +4221,11 @@ function NightmareWolfPicker({
           <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
             {pendingTarget.name.toUpperCase()}
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mb-10 px-4">
+          <Text className="text-wolf-muted text-sm text-center px-4">
             They cannot use their night power tonight. You only have two of
             these, ever.
           </Text>
-          <View className="flex-row" style={{ gap: 14 }}>
-            <TouchableOpacity
-              onPress={handleCancel}
-              disabled={submitting}
-              className="bg-wolf-card rounded-xl py-4 px-10"
-              style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-            >
-              <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                NO
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleConfirm}
-              disabled={submitting}
-              style={{ opacity: submitting ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-4 px-10"
-            >
-              {submitting ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                  YES
-                </Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
+        </ConfirmOverlay>
       )}
     </View>
   );
@@ -4600,16 +4286,26 @@ function NightDecisionCountdown({ endsAt }: { endsAt: number }) {
   const sec = Math.max(0, Math.ceil((endsAt - now) / 1000));
   const low = sec <= 10;
   const color =
-    sec === 0 || (low && sec % 2 === 0) ? '#B03A2E' : low ? '#F0EDE8' : '#8A8590';
+    sec === 0 || (low && sec % 2 === 0) ? '#B03A2E' : '#F0EDE8';
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return (
-    <View className="flex-row items-center justify-center" style={{ gap: 8, marginTop: 4, marginBottom: 2 }}>
-      <Text className="text-wolf-muted text-[11px] font-bold tracking-widest">
+    <View className="items-center" style={{ marginTop: 2, marginBottom: 4 }}>
+      <Text
+        className="text-wolf-muted text-[11px] font-bold tracking-widest"
+        style={SCENE_TEXT_SHADOW}
+      >
         TIME TO DECIDE
       </Text>
       <Text
-        style={{ color, fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] }}
+        style={{
+          color,
+          fontSize: 44,
+          fontWeight: '800',
+          fontVariant: ['tabular-nums'],
+          lineHeight: 50,
+          ...SCENE_TEXT_SHADOW,
+        }}
       >
         {m}:{String(s).padStart(2, '0')}
       </Text>
@@ -4617,7 +4313,7 @@ function NightDecisionCountdown({ endsAt }: { endsAt: number }) {
   );
 }
 
-function WaitingView({ role }: { role?: string }) {
+function WaitingView() {
   const [lineIndex, setLineIndex] = useState(() =>
     Math.floor(Math.random() * NIGHT_WHISPERS.length),
   );
@@ -4646,24 +4342,11 @@ function WaitingView({ role }: { role?: string }) {
     <View className="flex-1 pb-8">
       <View className="flex-1 items-center justify-center">
         <Animated.Text
-          style={{ opacity: fade }}
-          className="text-wolf-muted text-sm tracking-widest text-center mb-6 px-6"
+          style={{ opacity: fade, ...SCENE_TEXT_SHADOW }}
+          className="text-wolf-text text-base tracking-widest text-center mb-6 px-8"
         >
           {NIGHT_WHISPERS[lineIndex]}
         </Animated.Text>
-        <View style={{ width: '100%', height: 200 }}>
-          <Image
-            source={require('../../assets/images/night-bg.webp')}
-            style={{ width: '100%', height: '100%' }}
-            contentFit="contain"
-            cachePolicy="memory-disk"
-          />
-        </View>
-        {role && (
-          <Text className="text-wolf-muted text-xs tracking-widest mt-6 px-6">
-            YOU ARE THE {role.toUpperCase()}
-          </Text>
-        )}
       </View>
 
     </View>
