@@ -91,9 +91,7 @@ export default function BuildModal({ visible, onClose, selectedRoles }: Props) {
             <Text style={styles.closeText}>Close</Text>
           </TouchableOpacity>
           <View style={styles.titleWrap}>
-            <Image source={require('../../assets/images/build.png')} style={styles.titleIcon} resizeMode="contain" />
             <Text style={styles.title}>BUILD</Text>
-            <Image source={require('../../assets/images/build.png')} style={styles.titleIcon} resizeMode="contain" />
           </View>
           <View style={styles.balancePill}>
             <Text style={[styles.balanceText, { color: balanceColor }]}>
@@ -209,7 +207,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
   },
-  titleIcon: { width: 24, height: 24 },
   title: {
     color: '#F0EDE8',
     fontSize: 20,

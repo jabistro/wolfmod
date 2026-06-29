@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   Modal,
-  ScrollView,
   View,
   Text,
   TouchableOpacity,
@@ -15,6 +14,7 @@ import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { showAlert } from './ThemedAlert';
 import TimerSteppers, { type TimerConfigValues } from './TimerSteppers';
+import HintedScrollView from './HintedScrollView';
 
 type PassHostCandidate = { _id: Id<'players'>; name: string };
 
@@ -223,7 +223,7 @@ export default function TimersConfigModal({
           </View>
 
           {isPicking ? (
-            <ScrollView
+            <HintedScrollView
               style={{ maxHeight: 360 }}
               contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 12 }}
             >
@@ -249,12 +249,12 @@ export default function TimersConfigModal({
                   </TouchableOpacity>
                 ))
               )}
-            </ScrollView>
+            </HintedScrollView>
           ) : (
             // Cap the scroll area so a tall config (timers + role-reveal +
             // end-game) can never push the fixed Save header off the top of
             // the screen — the content scrolls instead.
-            <ScrollView
+            <HintedScrollView
               style={{ maxHeight: windowHeight * 0.62 }}
               contentContainerStyle={{
                 paddingHorizontal: 24,
@@ -358,7 +358,7 @@ export default function TimersConfigModal({
                   )}
                 </TouchableOpacity>
               )}
-            </ScrollView>
+            </HintedScrollView>
           )}
         </View>
       </View>

@@ -450,7 +450,7 @@ function TrialStatusBar({
   maxNominationsPerDay: number;
 }) {
   return (
-    <View className="mx-4 mb-4 flex-row" style={{ gap: 10 }}>
+    <View className="mx-4 mt-3 mb-4 flex-row" style={{ gap: 10 }}>
       <View
         className="flex-1 bg-wolf-card rounded-xl flex-row items-center justify-between"
         style={{ paddingVertical: 8, paddingHorizontal: 14 }}
@@ -1120,7 +1120,10 @@ function DiscussionView({
             </Text>
           </View>
         ) : nomArmed && isHost ? (
-          <Text className="text-wolf-accent text-xs text-center mt-4 font-bold tracking-widest">
+          <Text
+            className="text-wolf-accent text-xs text-center mt-4 font-bold tracking-widest"
+            style={SCENE_TEXT_SHADOW}
+          >
             HOST OVERRIDE — TAP A PLAYER TO PUT THEM ON TRIAL
           </Text>
         ) : meAlive ? (
@@ -1149,7 +1152,10 @@ function DiscussionView({
             paddingBottom: Math.max(insets.bottom, 16) + 16,
           }}
         >
-          <Text className="text-wolf-muted text-xs tracking-widest text-center">
+          <Text
+            className="text-xs tracking-widest text-center"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
             HOST CONTROLS THE FLOOR
           </Text>
         </View>
@@ -1863,36 +1869,43 @@ function VoteView({
             You are out of the game — spectating.
           </Text>
         )}
+
+        {/* Host's BEGIN VOTE flows below the (dimmed) ballot inside the scroll
+            so it always sits clearly under LIVES/DIES — never overlapping a
+            bottom-pinned bar. Once the clock starts, this disappears and the
+            pause/reset controls by the timer take over. */}
+        {!isPreVote && isHost && notStartedYet && game.mode !== 'remote' && (
+          <TouchableOpacity
+            onPress={toggleClock}
+            disabled={busy !== null}
+            style={{ opacity: busy === 'toggle' ? 0.4 : 1, alignSelf: 'stretch' }}
+            className="bg-wolf-accent rounded-xl py-5 items-center mt-10"
+          >
+            {busy === 'toggle' ? (
+              <ActivityIndicator color="#0F0F14" />
+            ) : (
+              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                BEGIN VOTE
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
-      {!isPreVote && game.mode !== 'remote' && (notStartedYet || !isHost) && (
+      {!isPreVote && game.mode !== 'remote' && !isHost && (
         <View
           style={{
             paddingHorizontal: 24,
             paddingBottom: Math.max(insets.bottom, 16) + 16,
-            alignItems: isHost && notStartedYet ? 'stretch' : 'center',
+            alignItems: 'center',
           }}
         >
-          {isHost && notStartedYet ? (
-            <TouchableOpacity
-              onPress={toggleClock}
-              disabled={busy !== null}
-              style={{ opacity: busy === 'toggle' ? 0.4 : 1 }}
-              className="bg-wolf-accent rounded-xl py-5 items-center"
-            >
-              {busy === 'toggle' ? (
-                <ActivityIndicator color="#0F0F14" />
-              ) : (
-                <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-                  BEGIN VOTE
-                </Text>
-              )}
-            </TouchableOpacity>
-          ) : (
-            <Text className="text-wolf-muted text-xs tracking-widest">
-              {paused ? 'WAITING FOR HOST' : 'WAITING FOR TIMER'}
-            </Text>
-          )}
+          <Text
+            className="text-xs tracking-widest"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
+            {paused ? 'WAITING FOR HOST' : 'WAITING FOR TIMER'}
+          </Text>
         </View>
       )}
 
@@ -2188,7 +2201,10 @@ function ResultsView({
             )}
           </TouchableOpacity>
         ) : (
-          <Text className="text-wolf-muted text-xs tracking-widest text-center">
+          <Text
+            className="text-xs tracking-widest text-center"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
             {continueLocked
               ? 'TALLYING…'
               : 'WAITING FOR HOST TO CONTINUE'}
