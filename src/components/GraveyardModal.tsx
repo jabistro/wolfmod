@@ -11,6 +11,7 @@ import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import RoleCard from './RoleCard';
+import { SCENE_TEXT_SHADOW, HUD_CHROME } from '../theme/hud';
 
 type Entry = {
   _id: Id<'players'>;
@@ -52,9 +53,9 @@ export default function GraveyardButton({ gameId }: { gameId: Id<'games'> }) {
           gap: 4,
         }}
       >
-        <Text style={{ fontSize: 14 }}>⚰️</Text>
+        <Text style={{ fontSize: 24, ...SCENE_TEXT_SHADOW }}>⚰️</Text>
         <Text
-          style={{ color: '#8A8590', fontSize: 12, fontWeight: '700', letterSpacing: 2 }}
+          style={{ color: HUD_CHROME, fontSize: 16, fontWeight: '800', letterSpacing: 2, ...SCENE_TEXT_SHADOW }}
         >
           {entries.length}
         </Text>
