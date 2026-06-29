@@ -97,26 +97,6 @@ type DayGame = {
   };
 };
 
-// Small attribution line shown under the nominee name on the Trial /
-// Vote screens. Surfaces who pushed the highlight tap and who tipped it
-// into a trial — important strategic info (a wolf railroading a trial
-// looks different from a villager calling out a known wolf). Renders
-// nothing when both fields are absent (legacy in-flight rows from before
-// the player-driven flow).
-function AccusationCredit({ nomination }: { nomination: Nomination }) {
-  if (!nomination.accuser && !nomination.seconder) return null;
-  return (
-    <Text
-      className="text-xs tracking-widest text-center mt-1"
-      style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
-    >
-      ACCUSED BY {(nomination.accuser?.name ?? '???').toUpperCase()}
-      {nomination.seconder
-        ? ` · SECONDED BY ${nomination.seconder.name.toUpperCase()}`
-        : ''}
-    </Text>
-  );
-}
 
 // Two-block row matching TrialStatusBar's visual rhythm: ACCUSED / name
 // on the left, SECONDED / name on the right. If only one is present
@@ -1704,31 +1684,26 @@ function VoteView({
         contentContainerStyle={{
           flexGrow: 1,
           paddingHorizontal: 24,
+          paddingBottom: 28,
           justifyContent: 'center',
           alignItems: 'center',
         }}
         keyboardShouldPersistTaps="handled"
       >
         <Text
-          className="text-xs font-bold tracking-widest mb-2"
+          className="text-base font-bold tracking-widest mb-2"
           style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
         >
           VOTE ON
         </Text>
         <Text
-          className="text-wolf-text text-4xl font-extrabold tracking-widest mb-2 text-center"
+          className="text-wolf-text text-4xl font-extrabold tracking-widest mb-8 text-center"
           style={SCENE_TEXT_SHADOW}
         >
           {nomination.nominee?.name.toUpperCase() ?? '—'}
         </Text>
-        <View className="mb-6">
-          <AccusationCredit nomination={nomination} />
-        </View>
 
-        <Pressable
-          onPress={isHost && !notStartedYet ? toggleClock : undefined}
-          className="items-center mb-8"
-        >
+        <View className="items-center mb-8">
           <Text
             className="text-wolf-accent font-extrabold"
             style={{ fontSize: 72, fontVariant: ['tabular-nums'], ...SCENE_TEXT_SHADOW }}
@@ -1741,20 +1716,40 @@ function VoteView({
           >
             {isPreVote
               ? 'UNTIL VOTING'
-              : paused
-                ? notStartedYet
-                  ? 'SECONDS'
-                  : isHost
-                    ? 'TAP TO RESUME'
-                    : 'WAITING FOR HOST'
-                : isHost
-                  ? 'TAP TO PAUSE'
-                  : 'SECONDS'}
+              : paused && !notStartedYet
+                ? isHost
+                  ? 'PAUSED'
+                  : 'WAITING FOR HOST'
+                : 'SECONDS'}
           </Text>
-        </Pressable>
+        </View>
 
         {isHost && (
           <View className="flex-row mb-4" style={{ gap: 12 }}>
+            {!notStartedYet && (
+              <TouchableOpacity
+                onPress={toggleClock}
+                disabled={busy !== null}
+                style={{ opacity: busy === 'toggle' ? 0.4 : 1 }}
+                className="bg-wolf-card rounded-full items-center justify-center"
+              >
+                <View
+                  style={{
+                    width: 40,
+                    height: 40,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text
+                    className="text-wolf-text text-lg"
+                    style={{ lineHeight: 18, marginTop: -2, includeFontPadding: false }}
+                  >
+                    {paused ? '▶' : '❚❚'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               onPress={reset}
               disabled={busy !== null}
@@ -1782,7 +1777,7 @@ function VoteView({
 
         {!isPreVote && (
           <Text
-            className="text-xs tracking-widest mb-2"
+            className="text-base font-bold tracking-widest mb-2"
             style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
           >
             {nomination.votedCount} / {nomination.eligibleCount} VOTED
@@ -1870,7 +1865,7 @@ function VoteView({
         )}
       </ScrollView>
 
-      {!isPreVote && game.mode !== 'remote' && (
+      {!isPreVote && game.mode !== 'remote' && (notStartedYet || !isHost) && (
         <View
           style={{
             paddingHorizontal: 24,
@@ -1895,11 +1890,7 @@ function VoteView({
             </TouchableOpacity>
           ) : (
             <Text className="text-wolf-muted text-xs tracking-widest">
-              {paused
-                ? 'WAITING FOR HOST'
-                : isHost
-                  ? 'RESULTS POST WHEN TIMER ENDS'
-                  : 'WAITING FOR TIMER'}
+              {paused ? 'WAITING FOR HOST' : 'WAITING FOR TIMER'}
             </Text>
           )}
         </View>
