@@ -927,10 +927,10 @@ function DiscussionView({
   async function handleSeatPress(p: { _id: Id<'players'>; alive?: boolean }) {
     if (dayOver) return; // client-side disabled below; belt + braces
     if (p.alive === false) return;
-    if (p._id === meId) return;
 
     // Host force-nominate path. Allowed even when the host is dead, since
-    // the host can keep moderating after elimination.
+    // the host can keep moderating after elimination — and allowed on the
+    // host's own seat, so the moderator can put themselves on trial.
     if (nomArmed && isHost) {
       try {
         await hostForceNominate({
@@ -949,7 +949,9 @@ function DiscussionView({
       return;
     }
 
-    // Regular player-tap path. Dead spectators can't tap.
+    // Regular player-tap path. Players can't nominate themselves, and dead
+    // spectators can't tap.
+    if (p._id === meId) return;
     if (!meAlive) return;
     try {
       await toggleNomTap({
@@ -974,10 +976,13 @@ function DiscussionView({
   const dayPaused = game.dayPausedRemainingMs !== null;
   const canTap =
     !dayOver && !pending && !dayPaused && (meAlive || (isHost && nomArmed));
+  // With the host override armed, every alive seat is a valid target —
+  // including the host's own. Otherwise self is excluded (no self-nominate).
+  const hostOverride = isHost && nomArmed;
   const selectableIds: ReadonlySet<string> | undefined = canTap
     ? new Set(
         alive
-          .filter(p => p._id !== meId)
+          .filter(p => hostOverride || p._id !== meId)
           .map(p => p._id as unknown as string),
       )
     : undefined;

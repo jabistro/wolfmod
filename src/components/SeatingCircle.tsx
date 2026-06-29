@@ -317,7 +317,7 @@ export function SeatingCircle({
                 : '#2A2A38';
     const borderWidth =
       isPending || hasTap || isSelected || (isMe && !isDead) ? 2 : 1;
-    const seatOpacity = isDead ? 0.4 : isSelectable ? 1 : 0.6;
+    const seatOpacity = isDead ? 0.4 : isSelectable || isMe ? 1 : 0.6;
     // Static color veil over the avatar for selected / tap highlights. The
     // pending seat animates its own veil (below) toward near-solid instead.
     const staticVeil =

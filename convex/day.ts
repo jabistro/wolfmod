@@ -773,9 +773,9 @@ export const hostForceNominate = mutation({
       throw new Error('No nominations remain for today.');
     }
 
-    if (host._id === args.targetPlayerId) {
-      throw new Error('You cannot nominate yourself.');
-    }
+    // No self-nominate guard here: the host override is a deliberate
+    // moderator action, so the host may put anyone on trial — including
+    // themselves. (The accused still can't vote on themselves; see castVote.)
     const target = await ctx.db.get(args.targetPlayerId);
     if (!target || target.gameId !== args.gameId) {
       throw new Error('Invalid target.');
