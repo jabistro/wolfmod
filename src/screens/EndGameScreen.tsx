@@ -16,6 +16,8 @@ import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { teamForRole, type Team } from '../data/v1Roles';
 import { SeatingCircle } from '../components/SeatingCircle';
+import { PhaseScreen } from '../components/PhaseScreen';
+import { SCENE_TEXT_SHADOW, HUD_CHROME } from '../theme/hud';
 import { useAndroidBack } from '../hooks/useAndroidBack';
 
 type Nav = StackNavigationProp<RootStackParamList, 'EndGame'>;
@@ -483,7 +485,7 @@ export default function EndGameScreen() {
           : '#22222F';
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <PhaseScreen phase="day">
       <TouchableOpacity
         onPress={() => navigation.popToTop()}
         hitSlop={8}
@@ -497,17 +499,23 @@ export default function EndGameScreen() {
       >
         <Text
           style={{
-            color: '#8A8590',
+            color: HUD_CHROME,
             fontSize: 12,
             fontWeight: '700',
             letterSpacing: 2,
+            ...SCENE_TEXT_SHADOW,
           }}
         >
           DONE
         </Text>
       </TouchableOpacity>
       <View className="px-4 pt-10 pb-2 items-center">
-        <Text className="text-wolf-muted text-xs tracking-widest">GAME OVER</Text>
+        <Text
+          className="text-xs tracking-widest"
+          style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+        >
+          GAME OVER
+        </Text>
       </View>
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
@@ -529,7 +537,10 @@ export default function EndGameScreen() {
           />
         </View>
 
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2 mt-2">
+        <Text
+          className="text-xs font-bold tracking-widest mb-2 mt-2"
+          style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+        >
           ROLES REVEALED
         </Text>
         <View className="gap-y-2">
@@ -699,6 +710,6 @@ export default function EndGameScreen() {
           })}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </PhaseScreen>
   );
 }

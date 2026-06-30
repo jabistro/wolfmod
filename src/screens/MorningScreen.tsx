@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,8 +6,13 @@ import {
   SafeAreaView,
   ActivityIndicator,
   Animated,
+  StyleSheet,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
+import { SafeAreaView as SafeAreaViewCtx, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTheme } from '../contexts/ThemeContext';
+import { getTableArt } from '../data/tableArt';
+import { SCENE_TEXT_SHADOW, HUD_CHROME } from '../theme/hud';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useMutation, useQuery } from 'convex/react';
@@ -128,7 +133,7 @@ export default function MorningScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <MorningBackdrop>
       <MasonRevealModal
         state={masonRevealState ?? null}
         onAck={handleMasonAck}
@@ -136,10 +141,16 @@ export default function MorningScreen() {
       />
       <InGameLeaveButton onPress={confirmLeave} />
       <View className="px-4 pt-10 pb-3 items-center">
-        <Text className="text-wolf-muted text-xs tracking-widest">
+        <Text
+          className="text-xs tracking-widest"
+          style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+        >
           DAWN OF DAY {game.dayNumber + 1}
         </Text>
-        <Text className="text-wolf-accent text-3xl font-extrabold tracking-widest mt-1">
+        <Text
+          className="text-wolf-accent text-3xl font-extrabold tracking-widest mt-1"
+          style={SCENE_TEXT_SHADOW}
+        >
           MORNING
         </Text>
       </View>
@@ -162,29 +173,39 @@ export default function MorningScreen() {
             style={{ flex: 1, opacity: fade }}
             className="px-6 items-center justify-center"
           >
-            {deaths.length === 0 ? (
-              <View className="items-center">
-                <Text className="text-wolf-text text-2xl font-bold tracking-widest text-center">
-                  NO ONE HAS DIED
-                </Text>
-                <Text className="text-wolf-muted text-sm text-center mt-3">
-                  The village wakes safe — for now.
-                </Text>
-              </View>
-            ) : (
-              <View className="items-center" style={{ gap: 18 }}>
-                {deaths.map(d => (
-                  <View key={d._id} className="items-center" style={{ gap: 8 }}>
-                    <Text className="text-wolf-text text-2xl font-bold tracking-widest text-center">
-                      {d.name.toUpperCase()} HAS BEEN ELIMINATED
-                    </Text>
-                    {d.role ? (
-                      <RoleCard role={d.role} width={200} imageHeight={140} />
-                    ) : null}
-                  </View>
-                ))}
-              </View>
-            )}
+            {/* Dark "report" panel keeps the dawn announcement legible over the
+                brightening day scene — mirrors the night-trigger panel. */}
+            <View style={REPORT_PANEL}>
+              {deaths.length === 0 ? (
+                <View className="items-center">
+                  <Text
+                    className="text-wolf-text text-2xl font-bold tracking-widest text-center"
+                    style={SCENE_TEXT_SHADOW}
+                  >
+                    NO ONE HAS DIED
+                  </Text>
+                  <Text className="text-wolf-muted text-sm text-center mt-3">
+                    The village wakes safe — for now.
+                  </Text>
+                </View>
+              ) : (
+                <View className="items-center" style={{ gap: 18 }}>
+                  {deaths.map(d => (
+                    <View key={d._id} className="items-center" style={{ gap: 8 }}>
+                      <Text
+                        className="text-wolf-text text-2xl font-bold tracking-widest text-center"
+                        style={SCENE_TEXT_SHADOW}
+                      >
+                        {d.name.toUpperCase()} HAS BEEN ELIMINATED
+                      </Text>
+                      {d.role ? (
+                        <RoleCard role={d.role} width={200} imageHeight={140} />
+                      ) : null}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
 
             {gameOver && (
               <View
@@ -231,7 +252,10 @@ export default function MorningScreen() {
                 )}
               </TouchableOpacity>
             ) : (
-              <Text className="text-wolf-muted text-xs tracking-widest text-center">
+              <Text
+                className="text-xs tracking-widest text-center"
+                style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+              >
                 {gameOver
                   ? 'WAITING FOR HOST TO REVEAL'
                   : 'WAITING FOR HOST TO BEGIN DAY'}
@@ -240,6 +264,62 @@ export default function MorningScreen() {
           </View>
         </>
       )}
-    </SafeAreaView>
+    </MorningBackdrop>
   );
 }
+
+// Night→morning backdrop: starts on the moonlit night scene, then crossfades
+// to the daylight meadow ("dawn breaking") after a short beat. Settling on the
+// day backdrop also makes the cut into the Day phase (same scene) seamless.
+function MorningBackdrop({ children }: { children: React.ReactNode }) {
+  const { theme } = useTheme();
+  const art = getTableArt(theme);
+  const dayIn = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(dayIn, {
+      toValue: 1,
+      duration: 1500,
+      delay: 350,
+      useNativeDriver: true,
+    }).start();
+  }, [dayIn]);
+  return (
+    <View style={{ flex: 1, backgroundColor: '#0F0F14' }}>
+      <Image
+        source={art.backdropNight}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+      />
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: dayIn }]}>
+        <Image
+          source={art.backdropDay}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+        />
+      </Animated.View>
+      {/* Light scrim, tuned to the day tone we settle on — keeps chrome legible
+          without dulling the scene. */}
+      <View
+        style={{
+          ...StyleSheet.absoluteFillObject,
+          backgroundColor: 'rgba(15, 15, 20, 0.28)',
+        }}
+      />
+      <SafeAreaViewCtx style={{ flex: 1 }}>{children}</SafeAreaViewCtx>
+    </View>
+  );
+}
+
+const REPORT_PANEL = {
+  alignSelf: 'stretch' as const,
+  maxWidth: 460,
+  paddingVertical: 26,
+  paddingHorizontal: 24,
+  borderRadius: 22,
+  backgroundColor: 'rgba(15, 15, 20, 0.82)',
+  borderWidth: 1,
+  borderColor: 'rgba(212, 160, 23, 0.45)',
+  alignItems: 'center' as const,
+};

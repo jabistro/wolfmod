@@ -20,6 +20,8 @@ import { showAlert } from '../components/ThemedAlert';
 import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
+import { PhaseScreen } from '../components/PhaseScreen';
+import { SCENE_TEXT_SHADOW, HUD_CHROME } from '../theme/hud';
 import { TRIGGER_DWELL_MS } from '../../convex/triggers';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Triggers'>;
@@ -83,6 +85,14 @@ export default function TriggersScreen() {
   const announcementActive =
     announcement != null && Date.now() < announcement.endsAt;
 
+  // Pick the scene backdrop that matches where this trigger flow returns to:
+  // a day-lynch cascade ('day') stays on the day meadow, while the far more
+  // common night/morning resolution ('night'/'morning'/unset) sits on the
+  // moonlit night scene. Announcements + resolving states then read as part
+  // of the scene instead of floating on flat black.
+  const scenePhase: 'day' | 'night' =
+    view.game.triggersFollowUp === 'day' ? 'day' : 'night';
+
   const withLeave = (child: React.ReactNode) => (
     <View style={{ flex: 1 }}>
       <InGameLeaveButton onPress={confirmLeave} />
@@ -102,14 +112,16 @@ export default function TriggersScreen() {
   // same lines for the duration so the village can read the result before
   // the next trigger fires.
   if (announcementActive && announcement) {
-    return withLeave(<AnnouncementView lines={announcement.lines} />);
+    return withLeave(
+      <AnnouncementView lines={announcement.lines} phase={scenePhase} />,
+    );
   }
 
   // Queue empty but still in 'triggers' phase: brief gap while finalize
   // transitions us elsewhere. Show a neutral "Resolving..." rather than a
   // blank screen.
   if (!head) {
-    return withLeave(<ResolvingView label="RESOLVING NIGHT…" />);
+    return withLeave(<ResolvingView label="RESOLVING NIGHT…" phase={scenePhase} />);
   }
 
   // Caller is the trigger actor. Show their private prompt.
@@ -129,13 +141,13 @@ export default function TriggersScreen() {
       );
     }
     // Shouldn't reach here but render the resolving view defensively.
-    return withLeave(<ResolvingView label="RESOLVING NIGHT…" />);
+    return withLeave(<ResolvingView label="RESOLVING NIGHT…" phase={scenePhase} />);
   }
 
   // Caller is NOT the actor. We deliberately do NOT show the head's
   // name because naming the actor would leak who's holding a trigger
   // role.
-  return withLeave(<ResolvingView label="MORNING UNFOLDS…" />);
+  return withLeave(<ResolvingView label="MORNING UNFOLDS…" phase={scenePhase} />);
 }
 
 // ───── Sub-views ────────────────────────────────────────────────────────────
@@ -143,37 +155,78 @@ export default function TriggersScreen() {
 function ResolvingView({
   label,
   sublabel,
+  phase,
 }: {
   label: string;
   sublabel?: string;
+  phase: 'day' | 'night';
 }) {
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center px-8">
-      <ActivityIndicator color="#D4A017" />
-      <Text className="text-wolf-muted text-xs tracking-widest mt-6 text-center">
-        {label}
-      </Text>
-      {sublabel ? (
-        <Text className="text-wolf-text text-sm text-center mt-2">{sublabel}</Text>
-      ) : null}
-    </SafeAreaView>
+    <PhaseScreen phase={phase}>
+      <View className="flex-1 items-center justify-center px-8">
+        <ActivityIndicator color="#D4A017" />
+        <Text
+          className="text-xs tracking-widest mt-6 text-center"
+          style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+        >
+          {label}
+        </Text>
+        {sublabel ? (
+          <Text
+            className="text-wolf-text text-sm text-center mt-2"
+            style={SCENE_TEXT_SHADOW}
+          >
+            {sublabel}
+          </Text>
+        ) : null}
+      </View>
+    </PhaseScreen>
   );
 }
 
-function AnnouncementView({ lines }: { lines: readonly string[] }) {
+// The night/dawn report sits in a dark translucent "moderator scroll" panel
+// over the scene. The panel guarantees the lines stay legible no matter how
+// busy the backdrop is, while the scene still reads around it — far better
+// than raw text fighting the image. Shadowed text adds a second safety net.
+function AnnouncementView({
+  lines,
+  phase,
+}: {
+  lines: readonly string[];
+  phase: 'day' | 'night';
+}) {
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center px-6">
-      <View style={{ gap: 18 }}>
-        {lines.map((line, i) => (
-          <Text
-            key={i}
-            className="text-wolf-text text-2xl font-bold tracking-widest text-center"
-          >
-            {line}
-          </Text>
-        ))}
+    <PhaseScreen phase={phase}>
+      <View className="flex-1 items-center justify-center px-6">
+        <View
+          style={{
+            alignSelf: 'stretch',
+            maxWidth: 460,
+            gap: 18,
+            paddingVertical: 30,
+            paddingHorizontal: 26,
+            borderRadius: 22,
+            backgroundColor: 'rgba(15, 15, 20, 0.82)',
+            borderWidth: 1,
+            borderColor: 'rgba(212, 160, 23, 0.45)',
+            shadowColor: '#000',
+            shadowOpacity: 0.5,
+            shadowRadius: 18,
+            shadowOffset: { width: 0, height: 8 },
+          }}
+        >
+          {lines.map((line, i) => (
+            <Text
+              key={i}
+              className="text-wolf-text text-2xl font-bold tracking-widest text-center"
+              style={SCENE_TEXT_SHADOW}
+            >
+              {line}
+            </Text>
+          ))}
+        </View>
       </View>
-    </SafeAreaView>
+    </PhaseScreen>
   );
 }
 
