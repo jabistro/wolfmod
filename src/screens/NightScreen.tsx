@@ -431,7 +431,7 @@ export default function NightScreen() {
             fontSize: 16,
             fontWeight: '800',
             letterSpacing: 3,
-            marginTop: 1,
+            marginTop: 5,
           }}
         >
           {game.roomCode}
@@ -4339,6 +4339,10 @@ function WaitingView() {
     return () => clearInterval(id);
   }, [fade]);
 
+  // Themed (and 16bit-scaled) font for the whisper; derive a generous
+  // lineHeight from the resolved size so wrapped whispers don't bunch up.
+  const whisperFont = themedFont(undefined, 16);
+
   return (
     <View className="flex-1 pb-8">
       <View className="flex-1 items-center justify-center">
@@ -4353,7 +4357,8 @@ function WaitingView() {
             letterSpacing: 2,
             marginBottom: 24,
             paddingHorizontal: 32,
-            ...themedFont(undefined, 16),
+            ...whisperFont,
+            lineHeight: (whisperFont.fontSize ?? 16) * 1.6,
             ...SCENE_TEXT_SHADOW,
           }}
         >

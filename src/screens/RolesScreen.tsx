@@ -12,7 +12,7 @@ export default function RolesScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>‹ Back</Text>
+          <Text style={styles.backText} numberOfLines={1}>‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Roles</Text>
         <TouchableOpacity
@@ -41,7 +41,9 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   backBtn: {
-    width: 60,
+    // Wide enough for "‹ Back" in the wide 16bit pixel font without wrapping;
+    // kept equal to sortBtn so the centered title stays centered.
+    width: 84,
   },
   backText: {
     color: '#F0EDE8',
@@ -55,7 +57,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   sortBtn: {
-    width: 60,
+    width: 84,
     alignItems: 'flex-end',
     justifyContent: 'center',
   },

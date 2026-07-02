@@ -46,15 +46,29 @@ export const FONT_SCALE: Record<Theme, number> = {
 };
 
 // Module-level current theme, kept in sync by ThemeProvider. The global Text
-// patch reads this at render time (it can't use React context/hooks).
+// patch reads this at render time (it can't use React context/hooks). It also
+// exposes a subscribe/getSnapshot pair so the patched Text/TextInput wrappers
+// can hook it via useSyncExternalStore — that way a theme change repaints ALL
+// text in the app immediately, even on screens that don't consume useTheme.
 let currentTheme: Theme = 'ghibli';
+const themeListeners = new Set<() => void>();
 
 export function setFontTheme(theme: Theme): void {
+  if (theme === currentTheme) return;
   currentTheme = theme;
+  themeListeners.forEach(listener => listener());
 }
 
 export function getFontTheme(): Theme {
   return currentTheme;
+}
+
+// Stable subscribe fn for useSyncExternalStore; returns an unsubscribe.
+export function subscribeFontTheme(listener: () => void): () => void {
+  themeListeners.add(listener);
+  return () => {
+    themeListeners.delete(listener);
+  };
 }
 
 // Convenience for the rare text node the global patch can't reach (e.g.

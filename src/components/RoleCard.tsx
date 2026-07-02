@@ -163,6 +163,11 @@ const styles = StyleSheet.create({
     color: '#F0EDE8',
     fontSize: 14,
     fontWeight: '800',
+    // The pixel font rides high in a tall line box; kill Android's font padding
+    // and center on both axes so the number sits dead-center in the circle.
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   name: {
     flex: 1,
@@ -180,6 +185,6 @@ const styles = StyleSheet.create({
     color: '#F0EDE8',
     fontSize: 13,
     lineHeight: 18,
-    textAlign: 'center',
+    textAlign: 'left',
   },
 });

@@ -22,9 +22,13 @@ function isValidTheme(value: unknown): value is Theme {
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>('ghibli');
 
-  // Keep the module-level font theme (read by the global Text patch) in sync
-  // with the active theme so text repaints with the right family on re-render.
-  setFontTheme(theme);
+  // Keep the font-theme store (read by the global Text patch, and subscribed to
+  // by every Text/TextInput) in sync with the active theme. Done in an effect,
+  // not during render, because setFontTheme now notifies subscribers — updating
+  // them mid-render would warn.
+  useEffect(() => {
+    setFontTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     let cancelled = false;

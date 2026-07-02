@@ -1,7 +1,12 @@
-import { createElement, forwardRef } from 'react';
+import { createElement, forwardRef, useSyncExternalStore } from 'react';
 import { StyleSheet } from 'react-native';
 import { cssInterop } from 'nativewind';
-import { familyForWeight, FONT_SCALE, getFontTheme } from './fonts';
+import {
+  familyForWeight,
+  FONT_SCALE,
+  getFontTheme,
+  subscribeFontTheme,
+} from './fonts';
 
 /**
  * Roll the themed fonts across the whole app without editing hundreds of call
@@ -54,6 +59,14 @@ if (!RN.__wolfFontPatched) {
       fontStyle: undefined,
     };
 
+    // Kill Android's metric-derived font padding app-wide. Our pixel/rounded
+    // fonts ride high in a tall line box, so the default padding pushes text
+    // off-center inside circles, pills, and fixed-height rows. Only set it when
+    // a call site hasn't chosen its own value.
+    if (flat.includeFontPadding === undefined) {
+      override.includeFontPadding = false;
+    }
+
     const scale = FONT_SCALE[getFontTheme()] ?? 1;
     if (scale !== 1) {
       const base = typeof flat.fontSize === 'number' ? flat.fontSize : 14;
@@ -63,16 +76,22 @@ if (!RN.__wolfFontPatched) {
     return [style, override];
   };
 
+  // Subscribing to the font-theme store re-renders every Text/TextInput the
+  // instant the theme changes — no matter which screen it's on — so the whole
+  // app repaints its fonts at once instead of only on screens that happen to
+  // re-render for another reason.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ThemedText = forwardRef<any, any>((props, ref) =>
-    createElement(OriginalText, { ...props, ref, style: themedStyle(props.style) }),
-  );
+  const ThemedText = forwardRef<any, any>((props, ref) => {
+    useSyncExternalStore(subscribeFontTheme, getFontTheme);
+    return createElement(OriginalText, { ...props, ref, style: themedStyle(props.style) });
+  });
   ThemedText.displayName = 'ThemedText';
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ThemedTextInput = forwardRef<any, any>((props, ref) =>
-    createElement(OriginalTextInput, { ...props, ref, style: themedStyle(props.style) }),
-  );
+  const ThemedTextInput = forwardRef<any, any>((props, ref) => {
+    useSyncExternalStore(subscribeFontTheme, getFontTheme);
+    return createElement(OriginalTextInput, { ...props, ref, style: themedStyle(props.style) });
+  });
   ThemedTextInput.displayName = 'ThemedTextInput';
 
   // Keep NativeWind's className -> style mapping working for the wrappers.

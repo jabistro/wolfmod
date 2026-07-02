@@ -184,7 +184,7 @@ export default function MorningScreen() {
                   >
                     NO ONE HAS DIED
                   </Text>
-                  <Text className="text-wolf-muted text-sm text-center mt-3">
+                  <Text className="text-wolf-text text-sm text-center mt-3">
                     The village wakes safe — for now.
                   </Text>
                 </View>
@@ -318,8 +318,6 @@ const REPORT_PANEL = {
   paddingVertical: 26,
   paddingHorizontal: 24,
   borderRadius: 22,
-  backgroundColor: 'rgba(15, 15, 20, 0.82)',
-  borderWidth: 1,
-  borderColor: 'rgba(212, 160, 23, 0.45)',
+  backgroundColor: '#3A3A47',
   alignItems: 'center' as const,
 };

@@ -1096,7 +1096,13 @@ export default function LobbyScreen() {
                     )}
                     <Text
                       className="text-wolf-text font-bold"
-                      style={{ fontSize: 11, letterSpacing: 0.5 }}
+                      style={{
+                        fontSize: 11,
+                        letterSpacing: 0.5,
+                        textAlign: 'center',
+                        textAlignVertical: 'center',
+                        includeFontPadding: false,
+                      }}
                     >
                       {tab.label}
                     </Text>
@@ -1205,7 +1211,19 @@ export default function LobbyScreen() {
                                   marginRight: 12,
                                 }}
                               >
-                                <Text style={{ color, fontSize: 12, fontWeight: '700' }}>
+                                <Text
+                                  style={{
+                                    color,
+                                    fontSize: 12,
+                                    fontWeight: '700',
+                                    // Center in the pill; kill Android font
+                                    // padding so the pixel font doesn't ride
+                                    // high/left inside the badge.
+                                    textAlign: 'center',
+                                    textAlignVertical: 'center',
+                                    includeFontPadding: false,
+                                  }}
+                                >
                                   {val > 0 ? `+${val}` : `${val}`}
                                 </Text>
                               </View>
@@ -1215,7 +1233,12 @@ export default function LobbyScreen() {
                                 style={{ opacity: count === 0 ? 0.3 : 1 }}
                                 className="w-9 h-9 bg-wolf-card rounded-full items-center justify-center"
                               >
-                                <Text className="text-wolf-text text-lg">−</Text>
+                                <Text
+                                  className="text-wolf-text text-lg"
+                                  style={{ textAlign: 'center', textAlignVertical: 'center', includeFontPadding: false }}
+                                >
+                                  −
+                                </Text>
                               </TouchableOpacity>
                               <Text
                                 className="text-wolf-text mx-3 text-center"
@@ -1229,7 +1252,12 @@ export default function LobbyScreen() {
                                 style={{ opacity: canIncrement ? 1 : 0.3 }}
                                 className="w-9 h-9 bg-wolf-card rounded-full items-center justify-center"
                               >
-                                <Text className="text-wolf-text text-lg">+</Text>
+                                <Text
+                                  className="text-wolf-text text-lg"
+                                  style={{ textAlign: 'center', textAlignVertical: 'center', includeFontPadding: false }}
+                                >
+                                  +
+                                </Text>
                               </TouchableOpacity>
                             </View>
                           );

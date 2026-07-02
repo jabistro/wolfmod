@@ -262,6 +262,9 @@ const styles = StyleSheet.create({
     color: '#F0EDE8',
     fontSize: 11,
     fontWeight: '600',
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   pager: {
     flex: 1,
@@ -312,6 +315,11 @@ const styles = StyleSheet.create({
   valueBadgeText: {
     fontSize: 9,
     fontWeight: '700',
+    // Center the value in the pill; kill Android font padding so the pixel
+    // font doesn't sit high/left inside the badge.
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    includeFontPadding: false,
   },
   modalOverlay: {
     flex: 1,

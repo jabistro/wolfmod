@@ -1,7 +1,7 @@
 import './global.css';
 import './src/theme/applyGlobalFont';
 import { useState, type ComponentType } from 'react';
-import { LogBox } from 'react-native';
+import { Easing, LogBox } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
   Quicksand_400Regular,
@@ -20,6 +20,36 @@ import { PressStart2P_400Regular } from '@expo-google-fonts/press-start-2p';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DefaultTheme, useRoute } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
+
+// Pure opacity cross-fade transition. Screens that share a full-bleed backdrop
+// (e.g. Morning → Day both show the day scene) stay visually static — the
+// content swaps with no slide/reveal "wipe" and no black gap; screens with
+// different backdrops simply dissolve between them.
+//
+// Two speeds:
+//  - FAST (300ms) is the navigator default — snappy for menus AND every
+//    non-core game hop (e.g. morning→day stays a quick no-wipe dissolve).
+//  - SLOW (1500ms) is opted into by just the Night and Morning screens,
+//    mirroring MorningScreen's night→day backdrop crossfade (same 1500ms +
+//    ease-in-out). Those are the only two beats — Day→Night and Night→Morning
+//    (plus the dawn arrival from Triggers) — that get the cinematic dissolve.
+const makeCrossFade = (duration: number) => ({
+  // Required for opacity-based card transitions: without it React Navigation
+  // detaches the screen below the top card during the transition, so the
+  // fading-in card reveals the black navigator background instead of the
+  // previous screen — which reads as an abrupt cut, not a cross-fade.
+  detachPreviousScreen: false,
+  transitionSpec: {
+    open: { animation: 'timing' as const, config: { duration, easing: Easing.inOut(Easing.ease) } },
+    close: { animation: 'timing' as const, config: { duration, easing: Easing.inOut(Easing.ease) } },
+  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cardStyleInterpolator: ({ current }: any) => ({
+    cardStyle: { opacity: current.progress },
+  }),
+});
+const crossFadeFast = makeCrossFade(300);
+const crossFadeSlow = makeCrossFade(1500);
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ConvexProvider, ConvexReactClient, useQuery } from 'convex/react';
@@ -147,6 +177,9 @@ export default function App() {
                 headerShown: false,
                 cardStyle: { backgroundColor: '#0F0F14' },
                 gestureEnabled: true,
+                // Default (fast) cross-fade for menu/utility screens; in-game
+                // phase screens below opt into the slow cinematic dissolve.
+                ...crossFadeFast,
               }}
             >
               <Stack.Screen name="Home" component={HomeScreen} />
@@ -155,15 +188,18 @@ export default function App() {
               <Stack.Screen name="Themes" component={ThemesScreen} />
               <Stack.Screen name="TimerDefaults" component={TimerDefaultsScreen} />
               <Stack.Screen name="ClockSetup" component={ClockSetupScreen} />
-              <Stack.Screen name="Clock" component={ClockScreen} options={{ gestureEnabled: false, animation: 'none' }} />
+              <Stack.Screen name="Clock" component={ClockScreen} options={{ gestureEnabled: false }} />
               <Stack.Screen name="PlayMenu" component={PlayMenuScreen} />
               <Stack.Screen name="CreateGame" component={CreateGameScreen} />
               <Stack.Screen name="JoinGame" component={JoinGameScreen} />
               <Stack.Screen name="Lobby" component={LobbyWithChat} options={{ gestureEnabled: false }} />
               <Stack.Screen name="RoleReveal" component={RoleRevealScreen} options={{ gestureEnabled: false }} />
-              <Stack.Screen name="Night" component={NightWithChat} options={{ gestureEnabled: false }} />
+              {/* Slow cinematic dissolve into Night (from Day) and Morning
+                  (from Night/dawn) — the two core day↔night beats. Every other
+                  screen keeps the snappy default cross-fade. */}
+              <Stack.Screen name="Night" component={NightWithChat} options={{ gestureEnabled: false, ...crossFadeSlow }} />
               <Stack.Screen name="Triggers" component={TriggersWithChat} options={{ gestureEnabled: false }} />
-              <Stack.Screen name="Morning" component={MorningWithChat} options={{ gestureEnabled: false }} />
+              <Stack.Screen name="Morning" component={MorningWithChat} options={{ gestureEnabled: false, ...crossFadeSlow }} />
               <Stack.Screen name="Day" component={DayWithChat} options={{ gestureEnabled: false }} />
               <Stack.Screen name="EndGame" component={EndGameWithChat} options={{ gestureEnabled: false }} />
             </Stack.Navigator>

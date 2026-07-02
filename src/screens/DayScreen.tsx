@@ -549,7 +549,7 @@ function DayHeader({
             fontSize: 16,
             fontWeight: '800',
             letterSpacing: 3,
-            marginTop: 1,
+            marginTop: 5,
             ...SCENE_TEXT_SHADOW,
           }}
         >
@@ -559,7 +559,7 @@ function DayHeader({
           <TouchableOpacity
             onPress={onBuildPress}
             hitSlop={8}
-            style={{ paddingTop: 2, marginRight: 6 }}
+            style={{ marginTop: 10, marginRight: 6 }}
           >
             <View style={{ width: 26, height: 26 }}>
               {/* Dark offset copy behind the icon = drop shadow that follows
@@ -603,7 +603,9 @@ function DayActionRow({
       style={{ paddingHorizontal: 16, minHeight: 36 }}
     >
       <View style={{ flex: 1, alignItems: 'flex-start' }}>{left}</View>
-      <View style={{ flex: 1, alignItems: 'center' }}>{center}</View>
+      {/* Wider center so "NOMS LEFT: N/N" fits on one line under the wide pixel
+          font; left/right stay equal so the middle stays screen-centered. */}
+      <View style={{ flex: 2, alignItems: 'center' }}>{center}</View>
       <View style={{ flex: 1 }} />
     </View>
   );
@@ -638,7 +640,7 @@ function DayCogRow({
       style={{ paddingHorizontal: 16, gap: 14 }}
     >
       <TouchableOpacity onPress={onPress} hitSlop={8} style={{ padding: 4 }}>
-        <Text style={{ color: HUD_CHROME, fontSize: 26, ...SCENE_TEXT_SHADOW }}>⚙</Text>
+        <Text style={{ color: HUD_CHROME, fontSize: 32, ...SCENE_TEXT_SHADOW }}>⚙</Text>
       </TouchableOpacity>
       {onNomToggle && (
         <TouchableOpacity
@@ -799,7 +801,7 @@ function DayClockBar({
             color,
             fontSize: 40,
             fontVariant: ['tabular-nums'],
-            marginTop: 2,
+            textAlignVertical: 'center',
           }}
         >
           {formatTime(remaining)}
@@ -816,9 +818,9 @@ function DayClockBar({
             <Text
               className="text-wolf-text"
               style={{
-                fontSize: 22,
-                lineHeight: 22,
-                marginTop: -2,
+                fontSize: 34,
+                lineHeight: 36,
+                textAlignVertical: 'center',
                 includeFontPadding: false,
               }}
             >
@@ -1016,6 +1018,7 @@ function DiscussionView({
         center={
           <Text
             className="font-bold tracking-widest"
+            numberOfLines={1}
             style={{ fontSize: 14, color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
           >
             NOMS LEFT: {game.nominationsRemaining}/{game.maxNominationsPerDay}
@@ -2050,10 +2053,7 @@ function ResultsView({
         </View>
 
         <View className="flex-row self-stretch" style={{ gap: 12 }}>
-          <View
-            className="flex-1 bg-wolf-card rounded-xl px-4 py-3"
-            style={{ borderWidth: 1, borderColor: '#1F4E80' }}
-          >
+          <View className="flex-1 bg-wolf-card rounded-xl px-4 py-3">
             <Text className="text-xs font-bold tracking-widest mb-2" style={{ color: '#5BA0E5' }}>
               LIVES ({livesCount})
             </Text>
@@ -2063,10 +2063,7 @@ function ResultsView({
               </Text>
             ))}
           </View>
-          <View
-            className="flex-1 bg-wolf-card rounded-xl px-4 py-3"
-            style={{ borderWidth: 1, borderColor: '#8B1818' }}
-          >
+          <View className="flex-1 bg-wolf-card rounded-xl px-4 py-3">
             <Text className="text-xs font-bold tracking-widest mb-2" style={{ color: '#E07070' }}>
               DIES ({diesCount})
             </Text>
@@ -2080,13 +2077,8 @@ function ResultsView({
 
         {!lynch ? (
           <View
-            className="mt-6 rounded-2xl px-5 py-5 self-stretch"
-            style={{
-              backgroundColor: '#22222F',
-              borderWidth: 2,
-              borderColor: '#8A8590',
-              gap: 12,
-            }}
+            className="mt-6 rounded-2xl px-5 py-5 self-stretch bg-wolf-card"
+            style={{ gap: 12 }}
           >
             <Text className="text-wolf-text text-2xl font-extrabold tracking-widest text-center">
               LIVES
@@ -2096,13 +2088,8 @@ function ResultsView({
 
         {lynch || cascadeDeaths.length > 0 ? (
           <View
-            className="mt-6 rounded-2xl px-5 py-5 self-stretch"
-            style={{
-              backgroundColor: '#22222F',
-              borderWidth: 2,
-              borderColor: '#D4A017',
-              gap: 12,
-            }}
+            className="mt-6 rounded-2xl px-5 py-5 self-stretch bg-wolf-card"
+            style={{ gap: 12 }}
           >
             {lynch ? (
               <>
