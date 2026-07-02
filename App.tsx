@@ -1,16 +1,20 @@
 import './global.css';
+import './src/theme/applyGlobalFont';
 import { useState, type ComponentType } from 'react';
 import { LogBox } from 'react-native';
 import { useFonts } from 'expo-font';
 import {
+  Quicksand_400Regular,
   Quicksand_500Medium,
   Quicksand_600SemiBold,
   Quicksand_700Bold,
 } from '@expo-google-fonts/quicksand';
 import {
+  Baloo2_400Regular,
   Baloo2_500Medium,
   Baloo2_600SemiBold,
   Baloo2_700Bold,
+  Baloo2_800ExtraBold,
 } from '@expo-google-fonts/baloo-2';
 import { PressStart2P_400Regular } from '@expo-google-fonts/press-start-2p';
 import { StatusBar } from 'expo-status-bar';
@@ -111,12 +115,15 @@ const convex = new ConvexReactClient(convexUrl);
 export default function App() {
   const [splashDone, setSplashDone] = useState(false);
   const [fontsLoaded] = useFonts({
+    Quicksand_400Regular,
     Quicksand_500Medium,
     Quicksand_600SemiBold,
     Quicksand_700Bold,
+    Baloo2_400Regular,
     Baloo2_500Medium,
     Baloo2_600SemiBold,
     Baloo2_700Bold,
+    Baloo2_800ExtraBold,
     PressStart2P_400Regular,
   });
 

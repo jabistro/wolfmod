@@ -27,6 +27,7 @@ import {
 import { showAlert } from '../components/ThemedAlert';
 import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { PhaseScreen } from '../components/PhaseScreen';
+import { themedFont } from '../theme/fonts';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import { MasonRevealModal } from '../components/MasonRevealModal';
@@ -4342,8 +4343,19 @@ function WaitingView() {
     <View className="flex-1 pb-8">
       <View className="flex-1 items-center justify-center">
         <Animated.Text
-          style={{ opacity: fade, ...SCENE_TEXT_SHADOW }}
-          className="text-wolf-text text-base tracking-widest text-center mb-6 px-8"
+          // Styled inline (not className): the global font patch makes
+          // Animated.Text wrap the themed Text, which NativeWind no longer maps
+          // className onto — so color/align/spacing must be set directly here.
+          style={{
+            opacity: fade,
+            color: '#F0EDE8', // wolf-text
+            textAlign: 'center',
+            letterSpacing: 2,
+            marginBottom: 24,
+            paddingHorizontal: 32,
+            ...themedFont(undefined, 16),
+            ...SCENE_TEXT_SHADOW,
+          }}
         >
           {NIGHT_WHISPERS[lineIndex]}
         </Animated.Text>

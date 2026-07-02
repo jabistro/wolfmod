@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Theme } from '../data/themeArt';
+import { setFontTheme } from '../theme/fonts';
 
 const STORAGE_KEY = 'wolfmod.theme';
 
@@ -20,6 +21,10 @@ function isValidTheme(value: unknown): value is Theme {
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>('ghibli');
+
+  // Keep the module-level font theme (read by the global Text patch) in sync
+  // with the active theme so text repaints with the right family on re-render.
+  setFontTheme(theme);
 
   useEffect(() => {
     let cancelled = false;
