@@ -9,6 +9,8 @@ export type TableArt = {
   backdropDay: ReturnType<typeof require>;
   /** Full-screen backdrop behind the table at night. */
   backdropNight: ReturnType<typeof require>;
+  /** Full-screen backdrop behind the home screen. */
+  home: ReturnType<typeof require>;
 };
 
 // Per-theme table art (seat avatars + day/night backdrops). All three decks
@@ -19,6 +21,7 @@ const GHIBLI: TableArt = {
   avatarNight: require('../../assets/table/ghibli/avatar_night.jpg'),
   backdropDay: require('../../assets/table/ghibli/day.jpg'),
   backdropNight: require('../../assets/table/ghibli/night.jpg'),
+  home: require('../../assets/table/ghibli/home.jpg'),
 };
 
 const CHIBI: TableArt = {
@@ -26,6 +29,7 @@ const CHIBI: TableArt = {
   avatarNight: require('../../assets/table/chibi/avatar_night.jpg'),
   backdropDay: require('../../assets/table/chibi/day.jpg'),
   backdropNight: require('../../assets/table/chibi/night.jpg'),
+  home: require('../../assets/table/chibi/home.jpg'),
 };
 
 const SIXTEEN_BIT: TableArt = {
@@ -33,6 +37,7 @@ const SIXTEEN_BIT: TableArt = {
   avatarNight: require('../../assets/table/16bit/avatar_night.jpg'),
   backdropDay: require('../../assets/table/16bit/day.jpg'),
   backdropNight: require('../../assets/table/16bit/night.jpg'),
+  home: require('../../assets/table/16bit/home.jpg'),
 };
 
 const TABLE_ART: Record<Theme, TableArt> = {

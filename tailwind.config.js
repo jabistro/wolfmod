@@ -11,7 +11,7 @@ module.exports = {
         wolf: {
           bg: '#0F0F14',
           surface: '#1A1A24',
-          card: '#22222F',
+          card: '#3A3A47',
           accent: '#D4A017',
           red: '#B03A2E',
           text: '#F0EDE8',

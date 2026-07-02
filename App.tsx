@@ -1,6 +1,18 @@
 import './global.css';
 import { useState, type ComponentType } from 'react';
 import { LogBox } from 'react-native';
+import { useFonts } from 'expo-font';
+import {
+  Quicksand_500Medium,
+  Quicksand_600SemiBold,
+  Quicksand_700Bold,
+} from '@expo-google-fonts/quicksand';
+import {
+  Baloo2_500Medium,
+  Baloo2_600SemiBold,
+  Baloo2_700Bold,
+} from '@expo-google-fonts/baloo-2';
+import { PressStart2P_400Regular } from '@expo-google-fonts/press-start-2p';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DefaultTheme, useRoute } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
@@ -98,6 +110,20 @@ const convex = new ConvexReactClient(convexUrl);
 
 export default function App() {
   const [splashDone, setSplashDone] = useState(false);
+  const [fontsLoaded] = useFonts({
+    Quicksand_500Medium,
+    Quicksand_600SemiBold,
+    Quicksand_700Bold,
+    Baloo2_500Medium,
+    Baloo2_600SemiBold,
+    Baloo2_700Bold,
+    PressStart2P_400Regular,
+  });
+
+  // Hold render until the themed fonts are ready so the home screen doesn't
+  // flash the system font and reflow. The custom SplashScreen still plays once
+  // this returns.
+  if (!fontsLoaded) return null;
 
   return (
     <ConvexProvider client={convex}>

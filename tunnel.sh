@@ -20,6 +20,10 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# Sweep any stale cloudflared from prior runs that leaked (see note on the
+# expo start line below) so we don't pile up dead tunnels / mismatched hosts.
+pkill -f "cloudflared tunnel --url http://localhost:8081" 2>/dev/null || true
+
 echo "Starting Cloudflare tunnel -> http://localhost:8081 ..."
 cloudflared tunnel --url http://localhost:8081 > "$CF_LOG" 2>&1 &
 CF_PID=$!
@@ -47,4 +51,8 @@ echo ""
 
 # EXPO_PACKAGER_PROXY_URL makes Metro advertise the tunnel host in its
 # manifest, so the bundle + assets load over the tunnel instead of localhost.
-EXPO_PACKAGER_PROXY_URL="$TUNNEL_URL" exec npx expo start
+# NOTE: do NOT `exec` here — exec replaces this shell, which would discard the
+# cleanup trap above and orphan cloudflared on Ctrl+C (that's what piled up
+# ~48 zombie tunnels). Running it as a normal child keeps the trap alive so
+# the tunnel is torn down when Expo exits.
+EXPO_PACKAGER_PROXY_URL="$TUNNEL_URL" npx expo start
