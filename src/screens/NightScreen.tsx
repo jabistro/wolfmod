@@ -33,7 +33,7 @@ import { HostMissingBanner } from '../components/HostMissingBanner';
 import { MasonRevealModal } from '../components/MasonRevealModal';
 import { isWolfTeam } from '../data/v1Roles';
 import { getRoleDescription } from '../data/roleDescriptions';
-import { SCENE_TEXT_SHADOW } from '../theme/hud';
+import { SCENE_TEXT_SHADOW, RING_SIZE, ringAnchorStyle } from '../theme/hud';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Night'>;
 type Route = RouteProp<RootStackParamList, 'Night'>;
@@ -225,6 +225,7 @@ export default function NightScreen() {
           targetables={targetables}
           totalSeats={game.playerCount}
           meId={me._id}
+          meSeatPosition={me.seatPosition}
           history={seerHistory}
           nightNumber={game.nightNumber}
           isGhost={isGhost}
@@ -239,6 +240,7 @@ export default function NightScreen() {
           targetables={targetables}
           totalSeats={game.playerCount}
           meId={me._id}
+          meSeatPosition={me.seatPosition}
           piState={piState}
           isGhost={isGhost}
         />
@@ -252,6 +254,7 @@ export default function NightScreen() {
           targetables={targetables}
           totalSeats={game.playerCount}
           meId={me._id}
+          meSeatPosition={me.seatPosition}
           mentalistState={mentalistState}
           nightNumber={game.nightNumber}
           isGhost={isGhost}
@@ -266,6 +269,7 @@ export default function NightScreen() {
           targetables={targetables}
           totalSeats={game.playerCount}
           meId={me._id}
+          meSeatPosition={me.seatPosition}
           witchState={witchState}
           isGhost={isGhost}
         />
@@ -289,6 +293,7 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           warlockState={warlockState}
           meId={me._id}
+          meSeatPosition={me.seatPosition}
           isGhost={isGhost}
         />
       )}
@@ -316,6 +321,7 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           bgState={bgState}
           meId={me._id}
+          meSeatPosition={me.seatPosition}
           isGhost={isGhost}
         />
       )}
@@ -329,6 +335,7 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           huntressState={huntressState}
           meId={me._id}
+          meSeatPosition={me.seatPosition}
           isGhost={isGhost}
         />
       )}
@@ -342,6 +349,7 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           revealerState={revealerState}
           meId={me._id}
+          meSeatPosition={me.seatPosition}
           isGhost={isGhost}
         />
       )}
@@ -355,6 +363,7 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           revilerState={revilerState}
           meId={me._id}
+          meSeatPosition={me.seatPosition}
           isGhost={isGhost}
         />
       )}
@@ -396,6 +405,7 @@ export default function NightScreen() {
           totalSeats={game.playerCount}
           nightmareState={nightmareWolfState}
           meId={me._id}
+          meSeatPosition={me.seatPosition}
           isGhost={isGhost}
         />
       )}
@@ -713,6 +723,53 @@ function ConfirmOverlay({
           </TouchableOpacity>
         </View>
       </View>
+    </View>
+  );
+}
+
+// Shared layout for every night picker. The ring is pinned to the SAME
+// absolute screen anchor the day phase uses (ringAnchorStyle), so it occupies
+// the exact same on-screen coordinates on every screen — day, night, and all
+// pickers — with no jump. The ring is out of flow, so the info panels simply
+// flow at the top and the controls at the bottom; neither affects where the
+// ring sits. Panels are the picker's responsibility to keep compact (e.g. the
+// wolves' collapsible pack) since anything tall will float over the ring's top.
+function NightPickerLayout({
+  children,
+  ring,
+  footer,
+}: {
+  /** Info panels — flow at the top, above the ring. */
+  children?: React.ReactNode;
+  /** Render-prop given the (fixed) circle size for the anchored ring. */
+  ring: (circleSize: number) => React.ReactNode;
+  /** Optional controls pinned at the bottom, below the ring. */
+  footer?: React.ReactNode;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={{ flex: 1 }}>
+      {/* Ring pinned to the shared absolute anchor. box-none lets taps reach
+          the seats but not this wrapper. */}
+      <View pointerEvents="box-none" style={ringAnchorStyle}>
+        {ring(RING_SIZE)}
+      </View>
+      {children != null && (
+        <View style={{ paddingHorizontal: 24, paddingTop: 8 }}>{children}</View>
+      )}
+      {footer != null && (
+        <View
+          style={{
+            marginTop: 'auto',
+            paddingHorizontal: 24,
+            // Sit just above the safe-area edge (no extra top padding) so the
+            // buttons drop clear of the fixed, low-sitting ring above them.
+            paddingBottom: Math.max(insets.bottom, 12),
+          }}
+        >
+          {footer}
+        </View>
+      )}
     </View>
   );
 }
@@ -1197,6 +1254,9 @@ function WolvesPicker({
     pendingKill.candidatePlayerIds.length > 1;
   const [bounceId, setBounceId] = useState<Id<'players'> | null>(null);
   const [bouncing, setBouncing] = useState(false);
+  // Pack panel starts collapsed to a single row so it doesn't cover the ring;
+  // the wolf can expand it (dropping over the ring) and collapse it back.
+  const [packOpen, setPackOpen] = useState(false);
   // Keyed on dwellEndsAt so vengeance kill #2's RNG round (new pendingKill
   // with a new deadline) restarts the bounce cleanly.
   const bounceKey = isRngPick ? pendingKill!.dwellEndsAt : null;
@@ -1331,7 +1391,33 @@ function WolvesPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
+      <NightPickerLayout
+        ring={circleSize => (
+          <SeatingCircle
+            size={circleSize}
+            phase="night"
+            totalSeats={totalSeats}
+            players={alivePlayers}
+            meId={meId}
+            viewerSeatIndex={meSeatPosition}
+            selectedId={seatSelectedId}
+            selectedVariant="danger"
+            selectableIds={selectableForThisKill}
+            nomTaps={seatTaps}
+            pendingTrialTargetId={
+              showPendingFill ? pendingKill!.targetPlayerId : null
+            }
+            pendingTrialDwellEndsAt={
+              showPendingFill ? pendingKill!.dwellEndsAt : null
+            }
+            onPress={
+              !submitting && !consensus && !allKillsLocked && !pendingKill
+                ? p => handleVote(p._id)
+                : undefined
+            }
+          />
+        )}
+      >
         {convertActive ? (
           <View className="bg-wolf-card rounded-xl px-4 py-3 mb-3 border border-wolf-red">
             <Text className="text-wolf-red text-xs font-bold tracking-widest text-center">
@@ -1401,67 +1487,52 @@ function WolvesPicker({
           </View>
         )}
 
-        {/* Wolf-pack awareness panel */}
+        {/* Wolf-pack awareness panel — collapsible so it can fold to one row
+            and leave the ring visible. */}
         <View className="bg-wolf-card rounded-xl px-4 py-3 mb-5">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-            {isGhost ? 'THE PACK' : 'YOUR PACK'}
-          </Text>
-          {wolves.map(w => {
-            const targetName = w.currentVote
-              ? targetables.find(t => t._id === w.currentVote)?.name ?? '—'
-              : null;
-            return (
-              <View
-                key={w._id}
-                className="flex-row items-center justify-between py-1"
-              >
-                <Text className="text-wolf-text text-sm">
-                  {w.isMe ? 'You' : w.name}{' '}
-                  <Text className="text-wolf-muted text-xs">({w.role})</Text>
-                </Text>
-                <Text
-                  className={
-                    targetName ? 'text-wolf-red text-sm' : 'text-wolf-muted text-sm'
-                  }
-                >
-                  {targetName ?? 'no vote'}
-                </Text>
-              </View>
-            );
-          })}
+          <TouchableOpacity
+            onPress={() => setPackOpen(o => !o)}
+            activeOpacity={0.7}
+            className="flex-row items-center justify-between"
+          >
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+              {isGhost ? 'THE PACK' : 'YOUR PACK'}
+            </Text>
+            <Text className="text-wolf-muted text-xs font-bold">
+              {packOpen ? '▲' : '▼'}
+            </Text>
+          </TouchableOpacity>
+          {packOpen && (
+            <View className="mt-2">
+              {wolves.map(w => {
+                const targetName = w.currentVote
+                  ? targetables.find(t => t._id === w.currentVote)?.name ?? '—'
+                  : null;
+                return (
+                  <View
+                    key={w._id}
+                    className="flex-row items-center justify-between py-1"
+                  >
+                    <Text className="text-wolf-text text-sm">
+                      {w.isMe ? 'You' : w.name}{' '}
+                      <Text className="text-wolf-muted text-xs">({w.role})</Text>
+                    </Text>
+                    <Text
+                      className={
+                        targetName
+                          ? 'text-wolf-red text-sm'
+                          : 'text-wolf-muted text-sm'
+                      }
+                    >
+                      {targetName ?? 'no vote'}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          )}
         </View>
-
-        {/* Seating circle — selectable seats are any alive players (wolves
-            may target each other, including themselves; this keeps the
-            Leprechaun from confirming every kill target as a villager).
-            Live wolf votes render as red tap labels under each target.
-            Once a pick is locked, `pendingKill` triggers the red-fill;
-            RNG picks first bounce the highlight through the candidates. */}
-        <View style={{ alignItems: 'center' }}>
-          <SeatingCircle
-            phase="night"
-            totalSeats={totalSeats}
-            players={alivePlayers}
-            meId={meId}
-            viewerSeatIndex={meSeatPosition}
-            selectedId={seatSelectedId}
-            selectedVariant="danger"
-            selectableIds={selectableForThisKill}
-            nomTaps={seatTaps}
-            pendingTrialTargetId={
-              showPendingFill ? pendingKill!.targetPlayerId : null
-            }
-            pendingTrialDwellEndsAt={
-              showPendingFill ? pendingKill!.dwellEndsAt : null
-            }
-            onPress={
-              !submitting && !consensus && !allKillsLocked && !pendingKill
-                ? p => handleVote(p._id)
-                : undefined
-            }
-          />
-        </View>
-      </ScrollView>
+      </NightPickerLayout>
     </View>
   );
 }
@@ -1631,7 +1702,26 @@ function SeerPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
+      <NightPickerLayout
+        ring={circleSize => (
+          <SeatingCircle
+            size={circleSize}
+            phase="night"
+            totalSeats={totalSeats}
+            players={alivePlayers}
+            meId={meId}
+            viewerSeatIndex={meSeatPosition}
+            selectableIds={
+              new Set(targetables.map(t => t._id as unknown as string))
+            }
+            onPress={
+              submitting || pendingTarget || pendingResult
+                ? undefined
+                : p => handlePickTarget(p._id, p.name)
+            }
+          />
+        )}
+      >
         <Text className="text-wolf-text text-base text-center mt-2 mb-4">
           {isGhost
             ? 'The Seer is investigating…'
@@ -1639,7 +1729,7 @@ function SeerPicker({
         </Text>
 
         {history.length > 0 && (
-          <View className="bg-wolf-card rounded-xl px-4 py-3 mb-5">
+          <View className="bg-wolf-card rounded-xl px-4 py-3">
             <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
               {isGhost ? "THE SEER'S CHECKS" : 'YOUR CHECKS'}
             </Text>
@@ -1658,25 +1748,7 @@ function SeerPicker({
             ))}
           </View>
         )}
-
-        <View style={{ alignItems: 'center' }}>
-          <SeatingCircle
-            phase="night"
-            totalSeats={totalSeats}
-            players={alivePlayers}
-            meId={meId}
-            viewerSeatIndex={meSeatPosition}
-            selectableIds={
-              new Set(targetables.map(t => t._id as unknown as string))
-            }
-            onPress={
-              submitting || pendingTarget || pendingResult
-                ? undefined
-                : p => handlePickTarget(p._id, p.name)
-            }
-          />
-        </View>
-      </ScrollView>
+      </NightPickerLayout>
 
       {/* Confirmation overlay — guards against misclicks before the role
           information is given. Uses the same dark backdrop as the result
@@ -1778,7 +1850,6 @@ function PIPicker({
   };
   isGhost?: boolean;
 }) {
-  const insets = useSafeAreaInsets();
   const submitCheck = useMutation(api.night.submitPICheck);
   const submitSkip = useMutation(api.night.submitPISkip);
   const tickNight = useMutation(api.night.tickNight);
@@ -1898,15 +1969,10 @@ function PIPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
-        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          {isGhost
-            ? 'The PI is reading a player + their two neighbors as a group.'
-            : 'One-time investigation. Pick a target to read them and their two neighbors as a group.'}
-        </Text>
-
-        <View style={{ alignItems: 'center' }}>
+      <NightPickerLayout
+        ring={circleSize => (
           <SeatingCircle
+            size={circleSize}
             phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
@@ -1921,28 +1987,31 @@ function PIPicker({
                 : p => handlePickTarget(p._id, p.name)
             }
           />
-        </View>
-      </ScrollView>
+        )}
+        footer={
+          !isGhost ? (
+            <TouchableOpacity
+              onPress={handleSkip}
+              disabled={submitting || !!pendingTarget || !!pendingResult}
+              style={{
+                opacity: submitting || pendingTarget || pendingResult ? 0.4 : 1,
+              }}
+              className="bg-wolf-card rounded-xl py-4 items-center"
+            >
+              <Text className="text-wolf-text text-base font-bold tracking-widest">
+                SAVE FOR LATER
+              </Text>
+            </TouchableOpacity>
+          ) : undefined
+        }
+      >
+        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
+          {isGhost
+            ? 'The PI is reading a player + their two neighbors as a group.'
+            : 'One-time investigation. Pick a target to read them and their two neighbors as a group.'}
+        </Text>
 
-      {!isGhost && (
-        <View
-          className="px-6"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-        >
-          <TouchableOpacity
-            onPress={handleSkip}
-            disabled={submitting || !!pendingTarget || !!pendingResult}
-            style={{
-              opacity: submitting || pendingTarget || pendingResult ? 0.4 : 1,
-            }}
-            className="bg-wolf-card rounded-xl py-4 items-center"
-          >
-            <Text className="text-wolf-muted text-base font-bold tracking-widest">
-              SAVE FOR LATER
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      </NightPickerLayout>
 
       {/* Confirmation overlay */}
       {pendingTarget && !pendingResult && (
@@ -2043,7 +2112,6 @@ function MentalistPicker({
   nightNumber: number;
   isGhost?: boolean;
 }) {
-  const insets = useSafeAreaInsets();
   const submitCheck = useMutation(api.night.submitMentalistCheck);
   const tickNight = useMutation(api.night.tickNight);
 
@@ -2186,7 +2254,49 @@ function MentalistPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
+      <NightPickerLayout
+        ring={circleSize => (
+          <SeatingCircle
+            size={circleSize}
+            phase="night"
+            totalSeats={totalSeats}
+            players={alivePlayers}
+            meId={meId}
+            viewerSeatIndex={meSeatPosition}
+            selectedIds={selectedSet}
+            selectableIds={selectableSet}
+            onPress={
+              submitting || confirmOpen || pendingResult ? undefined : handleTap
+            }
+          />
+        )}
+        footer={
+          !isGhost ? (
+            <>
+              <View className="bg-wolf-card rounded-xl px-4 py-3">
+                <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
+                  {`YOUR PICKS (${picks.length} / 2)`}
+                </Text>
+                <Text className="text-wolf-text text-sm">
+                  {picks.length === 0
+                    ? 'Tap a player to select them.'
+                    : picks.map(p => p.name).join(' & ')}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setConfirmOpen(true)}
+                disabled={picks.length !== 2 || submitting}
+                style={{ opacity: picks.length === 2 ? 1 : 0.4, marginTop: 12 }}
+                className="bg-wolf-accent rounded-xl py-5 items-center"
+              >
+                <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                  CONFIRM
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : undefined
+        }
+      >
         <Text className="text-wolf-text text-base text-center mt-2 mb-2">
           {isGhost
             ? 'The Mentalist is comparing two players to see if they share a team.'
@@ -2229,52 +2339,7 @@ function MentalistPicker({
           </View>
         )}
 
-        <View style={{ alignItems: 'center' }}>
-          <SeatingCircle
-            phase="night"
-            totalSeats={totalSeats}
-            players={alivePlayers}
-            meId={meId}
-            viewerSeatIndex={meSeatPosition}
-            selectedIds={selectedSet}
-            selectableIds={selectableSet}
-            onPress={
-              submitting || confirmOpen || pendingResult ? undefined : handleTap
-            }
-          />
-        </View>
-
-        {!isGhost && (
-          <View className="bg-wolf-card rounded-xl px-4 py-3 mt-4">
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-              {`YOUR PICKS (${picks.length} / 2)`}
-            </Text>
-            <Text className="text-wolf-text text-sm">
-              {picks.length === 0
-                ? 'Tap a player to select them.'
-                : picks.map(p => p.name).join(' & ')}
-            </Text>
-          </View>
-        )}
-      </ScrollView>
-
-      {!isGhost && (
-        <View
-          className="px-6"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-        >
-          <TouchableOpacity
-            onPress={() => setConfirmOpen(true)}
-            disabled={picks.length !== 2 || submitting}
-            style={{ opacity: picks.length === 2 ? 1 : 0.4 }}
-            className="bg-wolf-accent rounded-xl py-5 items-center"
-          >
-            <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-              CONFIRM
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      </NightPickerLayout>
 
       {/* Confirmation overlay */}
       {confirmOpen && (
@@ -2698,7 +2763,7 @@ function WitchPicker({
             </Text>
             <View style={{ alignItems: 'center', paddingVertical: 8 }}>
               <SeatingCircle
-            phase="night"
+                phase="night"
                 totalSeats={totalSeats}
                 players={alivePlayers}
                 meId={meId}
@@ -3150,7 +3215,26 @@ function BodyguardPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
+      <NightPickerLayout
+        ring={circleSize => (
+          <SeatingCircle
+            size={circleSize}
+            phase="night"
+            totalSeats={totalSeats}
+            players={alivePlayers}
+            meId={meId}
+            viewerSeatIndex={meSeatPosition}
+            selectableIds={
+              new Set(targetables.map(t => t._id as unknown as string))
+            }
+            onPress={
+              submitting || pendingTarget
+                ? undefined
+                : p => handlePickTarget(p._id, p.name)
+            }
+          />
+        )}
+      >
         <Text className="text-wolf-text text-base text-center mt-2 mb-2">
           {isGhost
             ? 'The Bodyguard is choosing who to protect tonight.'
@@ -3172,25 +3256,7 @@ function BodyguardPicker({
                 : 'You may protect yourself once per game.'}
           </Text>
         </View>
-
-        <View style={{ alignItems: 'center' }}>
-          <SeatingCircle
-            phase="night"
-            totalSeats={totalSeats}
-            players={alivePlayers}
-            meId={meId}
-            viewerSeatIndex={meSeatPosition}
-            selectableIds={
-              new Set(targetables.map(t => t._id as unknown as string))
-            }
-            onPress={
-              submitting || pendingTarget
-                ? undefined
-                : p => handlePickTarget(p._id, p.name)
-            }
-          />
-        </View>
-      </ScrollView>
+      </NightPickerLayout>
 
       {pendingTarget && (
         <ConfirmOverlay
@@ -3245,7 +3311,6 @@ function HuntressPicker({
   meSeatPosition?: number;
   isGhost?: boolean;
 }) {
-  const insets = useSafeAreaInsets();
   const submitShot = useMutation(api.night.submitHuntressShot);
   const submitSkip = useMutation(api.night.submitHuntressSkip);
   const [submitting, setSubmitting] = useState(false);
@@ -3320,14 +3385,10 @@ function HuntressPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
-        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          {isGhost
-            ? 'The Huntress is deciding whether to take her one shot.'
-            : 'One-time shot. Pick a target to shoot, or save it for later.'}
-        </Text>
-        <View style={{ alignItems: 'center' }}>
+      <NightPickerLayout
+        ring={circleSize => (
           <SeatingCircle
+            size={circleSize}
             phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
@@ -3342,26 +3403,28 @@ function HuntressPicker({
                 : p => handlePickTarget(p._id, p.name)
             }
           />
-        </View>
-      </ScrollView>
-
-      {!isGhost && (
-        <View
-          className="px-6"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-        >
-          <TouchableOpacity
-            onPress={handleSkip}
-            disabled={submitting || !!pendingTarget}
-            style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
-            className="bg-wolf-card rounded-xl py-4 items-center"
-          >
-            <Text className="text-wolf-muted text-base font-bold tracking-widest">
-              SAVE FOR LATER
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        )}
+        footer={
+          !isGhost ? (
+            <TouchableOpacity
+              onPress={handleSkip}
+              disabled={submitting || !!pendingTarget}
+              style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+              className="bg-wolf-card rounded-xl py-4 items-center"
+            >
+              <Text className="text-wolf-text text-base font-bold tracking-widest">
+                SAVE FOR LATER
+              </Text>
+            </TouchableOpacity>
+          ) : undefined
+        }
+      >
+        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
+          {isGhost
+            ? 'The Huntress is deciding whether to take her one shot.'
+            : 'One-time shot. Pick a target to shoot, or save it for later.'}
+        </Text>
+      </NightPickerLayout>
 
       {pendingTarget && (
         <ConfirmOverlay
@@ -3417,7 +3480,6 @@ function WarlockPicker({
   meSeatPosition?: number;
   isGhost?: boolean;
 }) {
-  const insets = useSafeAreaInsets();
   const submitKill = useMutation(api.night.submitWarlockKill);
   const submitPass = useMutation(api.night.submitWarlockPass);
   const [submitting, setSubmitting] = useState(false);
@@ -3495,14 +3557,10 @@ function WarlockPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
-        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          {isGhost
-            ? 'The Warlock is deciding whether to redirect tonight’s kill.'
-            : 'Redirect the wolves’ kill onto any player, or pass.'}
-        </Text>
-        <View style={{ alignItems: 'center' }}>
+      <NightPickerLayout
+        ring={circleSize => (
           <SeatingCircle
+            size={circleSize}
             phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
@@ -3517,26 +3575,28 @@ function WarlockPicker({
                 : p => handlePickTarget(p._id, p.name)
             }
           />
-        </View>
-      </ScrollView>
-
-      {!isGhost && (
-        <View
-          className="px-6"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-        >
-          <TouchableOpacity
-            onPress={handleSkip}
-            disabled={submitting || !!pendingTarget}
-            style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
-            className="bg-wolf-card rounded-xl py-4 items-center"
-          >
-            <Text className="text-wolf-muted text-base font-bold tracking-widest">
-              SAVE FOR LATER
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        )}
+        footer={
+          !isGhost ? (
+            <TouchableOpacity
+              onPress={handleSkip}
+              disabled={submitting || !!pendingTarget}
+              style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+              className="bg-wolf-card rounded-xl py-4 items-center"
+            >
+              <Text className="text-wolf-text text-base font-bold tracking-widest">
+                SAVE FOR LATER
+              </Text>
+            </TouchableOpacity>
+          ) : undefined
+        }
+      >
+        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
+          {isGhost
+            ? 'The Warlock is deciding whether to redirect tonight’s kill.'
+            : 'Redirect the wolves’ kill onto any player, or pass.'}
+        </Text>
+      </NightPickerLayout>
 
       {pendingTarget && (
         <ConfirmOverlay
@@ -3649,14 +3709,10 @@ function ChupacabraPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
-        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          {isGhost
-            ? 'The Chupacabra is choosing tonight’s prey.'
-            : 'Choose tonight’s prey. While wolves prowl, only a wolf falls — once the pack is gone, any prey dies.'}
-        </Text>
-        <View style={{ alignItems: 'center' }}>
+      <NightPickerLayout
+        ring={circleSize => (
           <SeatingCircle
+            size={circleSize}
             phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
@@ -3671,8 +3727,14 @@ function ChupacabraPicker({
                 : p => handlePickTarget(p._id, p.name)
             }
           />
-        </View>
-      </ScrollView>
+        )}
+      >
+        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
+          {isGhost
+            ? 'The Chupacabra is choosing tonight’s prey.'
+            : 'Choose tonight’s prey. While wolves prowl, only a wolf falls — once the pack is gone, any prey dies.'}
+        </Text>
+      </NightPickerLayout>
 
       {pendingTarget && (
         <ConfirmOverlay
@@ -3727,7 +3789,6 @@ function RevealerPicker({
   meSeatPosition?: number;
   isGhost?: boolean;
 }) {
-  const insets = useSafeAreaInsets();
   const submitShot = useMutation(api.night.submitRevealerShot);
   const submitSkip = useMutation(api.night.submitRevealerSkip);
   const [submitting, setSubmitting] = useState(false);
@@ -3802,14 +3863,10 @@ function RevealerPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
-        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          {isGhost
-            ? "The Revealer is choosing whether to reveal a wolf. They die if they miss."
-            : "Pick a wolf to reveal them. If they aren't a wolf, you die instead."}
-        </Text>
-        <View style={{ alignItems: 'center' }}>
+      <NightPickerLayout
+        ring={circleSize => (
           <SeatingCircle
+            size={circleSize}
             phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
@@ -3824,26 +3881,28 @@ function RevealerPicker({
                 : p => handlePickTarget(p._id, p.name)
             }
           />
-        </View>
-      </ScrollView>
-
-      {!isGhost && (
-        <View
-          className="px-6"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-        >
-          <TouchableOpacity
-            onPress={handleSkip}
-            disabled={submitting || !!pendingTarget}
-            style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
-            className="bg-wolf-card rounded-xl py-4 items-center"
-          >
-            <Text className="text-wolf-muted text-base font-bold tracking-widest">
-              PASS TONIGHT
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        )}
+        footer={
+          !isGhost ? (
+            <TouchableOpacity
+              onPress={handleSkip}
+              disabled={submitting || !!pendingTarget}
+              style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+              className="bg-wolf-card rounded-xl py-4 items-center"
+            >
+              <Text className="text-wolf-text text-base font-bold tracking-widest">
+                PASS TONIGHT
+              </Text>
+            </TouchableOpacity>
+          ) : undefined
+        }
+      >
+        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
+          {isGhost
+            ? "The Revealer is choosing whether to reveal a wolf. They die if they miss."
+            : "Pick a wolf to reveal them. If they aren't a wolf, you die instead."}
+        </Text>
+      </NightPickerLayout>
 
       {pendingTarget && (
         <ConfirmOverlay
@@ -3897,7 +3956,6 @@ function RevilerPicker({
   meSeatPosition?: number;
   isGhost?: boolean;
 }) {
-  const insets = useSafeAreaInsets();
   const submitShot = useMutation(api.night.submitRevilerShot);
   const submitSkip = useMutation(api.night.submitRevilerSkip);
   const [submitting, setSubmitting] = useState(false);
@@ -3972,14 +4030,10 @@ function RevilerPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
-        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
-          {isGhost
-            ? "The Reviler is choosing whether to revile a special villager. They die if they miss."
-            : "Pick a special villager to revile them. If they aren't one, you die instead."}
-        </Text>
-        <View style={{ alignItems: 'center' }}>
+      <NightPickerLayout
+        ring={circleSize => (
           <SeatingCircle
+            size={circleSize}
             phase="night"
             totalSeats={totalSeats}
             players={alivePlayers}
@@ -3994,26 +4048,28 @@ function RevilerPicker({
                 : p => handlePickTarget(p._id, p.name)
             }
           />
-        </View>
-      </ScrollView>
-
-      {!isGhost && (
-        <View
-          className="px-6"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-        >
-          <TouchableOpacity
-            onPress={handleSkip}
-            disabled={submitting || !!pendingTarget}
-            style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
-            className="bg-wolf-card rounded-xl py-4 items-center"
-          >
-            <Text className="text-wolf-muted text-base font-bold tracking-widest">
-              PASS TONIGHT
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        )}
+        footer={
+          !isGhost ? (
+            <TouchableOpacity
+              onPress={handleSkip}
+              disabled={submitting || !!pendingTarget}
+              style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+              className="bg-wolf-card rounded-xl py-4 items-center"
+            >
+              <Text className="text-wolf-text text-base font-bold tracking-widest">
+                PASS TONIGHT
+              </Text>
+            </TouchableOpacity>
+          ) : undefined
+        }
+      >
+        <Text className="text-wolf-text text-base text-center mt-2 mb-2">
+          {isGhost
+            ? "The Reviler is choosing whether to revile a special villager. They die if they miss."
+            : "Pick a special villager to revile them. If they aren't one, you die instead."}
+        </Text>
+      </NightPickerLayout>
 
       {pendingTarget && (
         <ConfirmOverlay
@@ -4070,7 +4126,6 @@ function NightmareWolfPicker({
   meSeatPosition?: number;
   isGhost?: boolean;
 }) {
-  const insets = useSafeAreaInsets();
   const submitPut = useMutation(api.night.submitNightmarePut);
   const submitSkip = useMutation(api.night.submitNightmareSkip);
   const [submitting, setSubmitting] = useState(false);
@@ -4155,7 +4210,40 @@ function NightmareWolfPicker({
 
   return (
     <View className="flex-1">
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 16 }}>
+      <NightPickerLayout
+        ring={circleSize => (
+          <SeatingCircle
+            size={circleSize}
+            phase="night"
+            totalSeats={totalSeats}
+            players={alivePlayers}
+            meId={meId}
+            viewerSeatIndex={meSeatPosition}
+            selectableIds={
+              new Set(targetables.map(t => t._id as unknown as string))
+            }
+            onPress={
+              submitting || pendingTarget
+                ? undefined
+                : p => handlePickTarget(p._id, p.name)
+            }
+          />
+        )}
+        footer={
+          !isGhost ? (
+            <TouchableOpacity
+              onPress={handleSkip}
+              disabled={submitting || !!pendingTarget}
+              style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
+              className="bg-wolf-card rounded-xl py-4 items-center"
+            >
+              <Text className="text-wolf-text text-base font-bold tracking-widest">
+                SAVE FOR LATER
+              </Text>
+            </TouchableOpacity>
+          ) : undefined
+        }
+      >
         <Text
           style={{ color: '#B68AD9' }}
           className="text-base text-center mt-2 mb-1"
@@ -4173,42 +4261,7 @@ function NightmareWolfPicker({
             {nightmareState.prevTargets.map(t => t.name).join(', ')}
           </Text>
         )}
-        <View style={{ alignItems: 'center' }}>
-          <SeatingCircle
-            phase="night"
-            totalSeats={totalSeats}
-            players={alivePlayers}
-            meId={meId}
-            viewerSeatIndex={meSeatPosition}
-            selectableIds={
-              new Set(targetables.map(t => t._id as unknown as string))
-            }
-            onPress={
-              submitting || pendingTarget
-                ? undefined
-                : p => handlePickTarget(p._id, p.name)
-            }
-          />
-        </View>
-      </ScrollView>
-
-      {!isGhost && (
-        <View
-          className="px-6"
-          style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}
-        >
-          <TouchableOpacity
-            onPress={handleSkip}
-            disabled={submitting || !!pendingTarget}
-            style={{ opacity: submitting || pendingTarget ? 0.4 : 1 }}
-            className="bg-wolf-card rounded-xl py-4 items-center"
-          >
-            <Text className="text-wolf-muted text-base font-bold tracking-widest">
-              SAVE FOR LATER
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      </NightPickerLayout>
 
       {pendingTarget && (
         <ConfirmOverlay

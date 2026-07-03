@@ -1,9 +1,42 @@
+import { Dimensions } from 'react-native';
+
 /**
  * Shared styling for HUD/chrome that floats directly over the full-screen
  * phase scenery (PhaseScreen). Plain dark text vanishes on the bright day
  * meadow, so scene-level text uses a brightened tone + a soft drop shadow
  * that keeps it legible over both the day and night backdrops.
  */
+
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+
+/** Seating-ring diameter, shared by the day phase and every night picker. */
+export const RING_SIZE = Math.min(320, SCREEN_W - 32);
+
+/**
+ * The seating ring's vertical center, measured as a distance up from the
+ * bottom of the screen. The day phase and all night pickers position the ring
+ * ABSOLUTELY at this exact spot (see `ringAnchorStyle`), so it occupies the
+ * same on-screen coordinates on every screen — no jump moving between day,
+ * night, and the various pickers, regardless of how much other chrome each
+ * screen shows. Tune this one number to raise/lower the ring everywhere.
+ */
+export const RING_CENTER_FROM_BOTTOM = Math.round(SCREEN_H * 0.33);
+
+/** Distance from the screen bottom to the ring's bottom edge. */
+export const RING_BOTTOM_EDGE = RING_CENTER_FROM_BOTTOM - RING_SIZE / 2;
+
+/**
+ * Absolute style that pins a RING_SIZE-tall ring so its center sits at
+ * RING_CENTER_FROM_BOTTOM. Apply to the ring's wrapper; the wrapper's parent
+ * must reach the bottom of the screen (true for both PhaseScreen bodies).
+ */
+export const ringAnchorStyle = {
+  position: 'absolute' as const,
+  left: 0,
+  right: 0,
+  bottom: RING_BOTTOM_EDGE,
+  alignItems: 'center' as const,
+};
 
 /** Drop shadow for any text laid directly over the scene (no panel behind). */
 export const SCENE_TEXT_SHADOW = {

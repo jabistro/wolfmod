@@ -25,7 +25,6 @@ import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import { MasonRevealModal } from '../components/MasonRevealModal';
-import RoleCard from '../components/RoleCard';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Morning'>;
 type Route = RouteProp<RootStackParamList, 'Morning'>;
@@ -199,7 +198,12 @@ export default function MorningScreen() {
                         {d.name.toUpperCase()} HAS BEEN ELIMINATED
                       </Text>
                       {d.role ? (
-                        <RoleCard role={d.role} width={200} imageHeight={140} />
+                        <Text
+                          className="text-wolf-text text-base text-center"
+                          style={SCENE_TEXT_SHADOW}
+                        >
+                          ({d.role})
+                        </Text>
                       ) : null}
                     </View>
                   ))}

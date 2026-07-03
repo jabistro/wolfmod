@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,6 @@ import {
   Pressable,
   ActivityIndicator,
   Image,
-  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -25,11 +24,17 @@ import BuildModal from '../components/BuildModal';
 import { showAlert } from '../components/ThemedAlert';
 import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { PhaseScreen } from '../components/PhaseScreen';
-import { SCENE_TEXT_SHADOW, HUD_CHROME, SCENE_ICON_SHADOW } from '../theme/hud';
+import {
+  SCENE_TEXT_SHADOW,
+  HUD_CHROME,
+  SCENE_ICON_SHADOW,
+  RING_SIZE,
+  RING_BOTTOM_EDGE,
+  ringAnchorStyle,
+} from '../theme/hud';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import PassHostPickerModal from '../components/PassHostPickerModal';
-import RoleCard from '../components/RoleCard';
 import GraveyardButton from '../components/GraveyardModal';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Day'>;
@@ -556,30 +561,43 @@ function DayHeader({
           {roomCode}
         </Text>
         {onBuildPress && (
-          <TouchableOpacity
+          <BuildButton
             onPress={onBuildPress}
-            hitSlop={8}
             style={{ marginTop: 10, marginRight: 6 }}
-          >
-            <View style={{ width: 26, height: 26 }}>
-              {/* Dark offset copy behind the icon = drop shadow that follows
-                  the icon shape (Images can't use textShadow), so it lifts off
-                  the scene like the cog/text chrome does. */}
-              <Image
-                source={require('../../assets/images/build.png')}
-                style={{ width: 26, height: 26, ...SCENE_ICON_SHADOW }}
-                resizeMode="contain"
-              />
-              <Image
-                source={require('../../assets/images/build.png')}
-                style={{ width: 26, height: 26 }}
-                resizeMode="contain"
-              />
-            </View>
-          </TouchableOpacity>
+          />
         )}
       </View>
     </View>
+  );
+}
+
+// The 🛠 tools button that opens the BuildModal. Extracted so it can live in
+// the header (remote mode, where it must stay reachable in the split-view's
+// header peek zone under the chat pane) or on the action / cog rows (local).
+// The dark offset copy behind the icon is its drop shadow (Images can't use
+// textShadow), matching the cog/text scene chrome.
+function BuildButton({
+  onPress,
+  style,
+}: {
+  onPress: () => void;
+  style?: object;
+}) {
+  return (
+    <TouchableOpacity onPress={onPress} hitSlop={8} style={style}>
+      <View style={{ width: 26, height: 26 }}>
+        <Image
+          source={require('../../assets/images/build.png')}
+          style={{ width: 26, height: 26, ...SCENE_ICON_SHADOW }}
+          resizeMode="contain"
+        />
+        <Image
+          source={require('../../assets/images/build.png')}
+          style={{ width: 26, height: 26 }}
+          resizeMode="contain"
+        />
+      </View>
+    </TouchableOpacity>
   );
 }
 
@@ -593,9 +611,12 @@ function DayHeader({
 function DayActionRow({
   left,
   center,
+  right,
 }: {
   left?: React.ReactNode;
   center?: React.ReactNode;
+  /** Far-right slot (e.g. the BUILD button on the Discussion sub-screen). */
+  right?: React.ReactNode;
 }) {
   return (
     <View
@@ -606,7 +627,7 @@ function DayActionRow({
       {/* Wider center so "NOMS LEFT: N/N" fits on one line under the wide pixel
           font; left/right stay equal so the middle stays screen-centered. */}
       <View style={{ flex: 2, alignItems: 'center' }}>{center}</View>
-      <View style={{ flex: 1 }} />
+      <View style={{ flex: 1, alignItems: 'flex-end' }}>{right}</View>
     </View>
   );
 }
@@ -622,8 +643,11 @@ function DayCogRow({
   onNomToggle,
   nomDisabled,
   onBeginNight,
+  onBuildPress,
+  center,
 }: {
-  onPress: () => void;
+  /** Host-only settings cog. Omit (non-host) to render the row without it. */
+  onPress?: () => void;
   /** If set, render a NOM toggle next to the cog (host-only override that
    *  bypasses the 2-tap requirement). Omit on non-discussion views. */
   onNomToggle?: () => void;
@@ -633,15 +657,40 @@ function DayCogRow({
   /** If set, render a BEGIN NIGHT pill pushed to the right of this row
    *  (host-only, discussion view). Same height as the NOM toggle. */
   onBeginNight?: () => void;
+  /** If set, render the BUILD button pushed to the far right of this row
+   *  (trial / vote / results sub-screens, local mode). */
+  onBuildPress?: () => void;
+  /** Screen-centered content between the cog and BUILD (e.g. the VOTE RESULT
+   *  "VOTED ON NAME" block), so it shares this row instead of taking its own. */
+  center?: React.ReactNode;
 }) {
   return (
     <View
       className="mb-2 flex-row items-center"
-      style={{ paddingHorizontal: 16, gap: 14 }}
+      style={{ paddingHorizontal: 16, gap: 14, minHeight: center ? 54 : 40 }}
     >
-      <TouchableOpacity onPress={onPress} hitSlop={8} style={{ padding: 4 }}>
-        <Text style={{ color: HUD_CHROME, fontSize: 32, ...SCENE_TEXT_SHADOW }}>⚙</Text>
-      </TouchableOpacity>
+      {center != null && (
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: 0,
+            bottom: 0,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingHorizontal: 48,
+          }}
+        >
+          {center}
+        </View>
+      )}
+      {onPress && (
+        <TouchableOpacity onPress={onPress} hitSlop={8} style={{ padding: 4 }}>
+          <Text style={{ color: HUD_CHROME, fontSize: 32, ...SCENE_TEXT_SHADOW }}>⚙</Text>
+        </TouchableOpacity>
+      )}
       {onNomToggle && (
         <TouchableOpacity
           onPress={onNomToggle}
@@ -693,6 +742,9 @@ function DayCogRow({
             BEGIN NIGHT
           </Text>
         </TouchableOpacity>
+      )}
+      {onBuildPress && (
+        <BuildButton onPress={onBuildPress} style={{ marginLeft: 'auto' }} />
       )}
     </View>
   );
@@ -789,9 +841,15 @@ function DayClockBar({
           </TouchableOpacity>
         )}
       </View>
-      <View className="flex-1 items-center">
+      <View className="flex-1 items-center justify-center">
+        {/* Absolutely positioned so it overlays the panel's top padding rather
+            than adding height — the panel stays the same size whether or not the
+            TIME UP / PAUSED label is showing, so BEGIN NIGHT never shifts. */}
         {(dayOver || paused) && (
-          <Text className="text-wolf-muted text-xs tracking-widest">
+          <Text
+            className="text-wolf-muted text-xs tracking-widest"
+            style={{ position: 'absolute', top: -4, left: 0, right: 0, textAlign: 'center' }}
+          >
             {dayOver ? 'TIME UP' : 'PAUSED'}
           </Text>
         )}
@@ -969,17 +1027,6 @@ function DiscussionView({
       )
     : undefined;
 
-  // Keep the ring at its full default size (≤320, the established look); the
-  // surrounding flex container just centers it and the caption so the dead
-  // whitespace above/below is absorbed instead of forcing a scroll. The
-  // height-based term is only a safety net: it shrinks the ring solely on a
-  // screen too short to hold the full ring + caption, never on normal devices.
-  const screenW = Dimensions.get('window').width;
-  const SEAT_CAPTION_RESERVE = 72;
-  const circleSize = Math.max(
-    220,
-    Math.min(320, screenW - 32, (seatAreaH || 420) - SEAT_CAPTION_RESERVE),
-  );
 
   return (
     <PhaseScreen phase="day">
@@ -989,7 +1036,11 @@ function DiscussionView({
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}
-        onBuildPress={() => setBuildOpen(true)}
+        // Local: BUILD sits on the stats row below. Remote: keep it in the
+        // header so it stays reachable in the chat split-view's peek zone.
+        onBuildPress={
+          game.mode === 'remote' ? () => setBuildOpen(true) : undefined
+        }
       />
 
       {hostMissing && (
@@ -1024,6 +1075,11 @@ function DiscussionView({
             NOMS LEFT: {game.nominationsRemaining}/{game.maxNominationsPerDay}
           </Text>
         }
+        right={
+          game.mode !== 'remote' ? (
+            <BuildButton onPress={() => setBuildOpen(true)} />
+          ) : undefined
+        }
       />
       {isHost && (
         <DayCogRow
@@ -1036,51 +1092,60 @@ function DiscussionView({
       )}
 
       <View
-        style={{
-          flex: 1,
-          paddingHorizontal: 16,
-          paddingBottom: 12,
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+        style={{ flex: 1 }}
         onLayout={e => setSeatAreaH(e.nativeEvent.layout.height)}
       >
-        <SeatingCircle
-          size={circleSize}
-          phase="day"
-          totalSeats={game.playerCount}
-          players={players}
-          meId={meId}
-          viewerSeatIndex={meSeatPosition}
-          selectableIds={selectableIds}
-          nomTaps={
-            pending
-              ? []
-              : nomTaps.map(t => ({
-                  targetPlayerId: t.targetPlayerId as unknown as string,
-                  nominatorName: t.nominatorName,
-                  isMe: t.isMe,
-                }))
-          }
-          pendingTrialTargetId={pendingTrial?.target._id ?? null}
-          // Pass the absolute server deadline so the animation duration is
-          // computed once at effect-start time. Passing a derived `now`-
-          // dependent ms here causes the effect to re-fire every tick →
-          // setValue(0) flashes mid-fill.
-          pendingTrialDwellEndsAt={pendingTrial?.dwellEndsAt ?? null}
-          centerOverlay={
-            dayPaused ? (
-              <Text
-                className="font-extrabold tracking-widest"
-                style={{ fontSize: 22, color: '#F0EDE8', ...SCENE_TEXT_SHADOW }}
-              >
-                PAUSED
-              </Text>
-            ) : undefined
-          }
-          onPress={canTap ? handleSeatPress : undefined}
-        />
-        {pendingTrial ? (
+        <View pointerEvents="box-none" style={ringAnchorStyle}>
+          <SeatingCircle
+            size={RING_SIZE}
+            phase="day"
+            totalSeats={game.playerCount}
+            players={players}
+            meId={meId}
+            viewerSeatIndex={meSeatPosition}
+            selectableIds={selectableIds}
+            nomTaps={
+              pending
+                ? []
+                : nomTaps.map(t => ({
+                    targetPlayerId: t.targetPlayerId as unknown as string,
+                    nominatorName: t.nominatorName,
+                    isMe: t.isMe,
+                  }))
+            }
+            pendingTrialTargetId={pendingTrial?.target._id ?? null}
+            // Pass the absolute server deadline so the animation duration is
+            // computed once at effect-start time. Passing a derived `now`-
+            // dependent ms here causes the effect to re-fire every tick →
+            // setValue(0) flashes mid-fill.
+            pendingTrialDwellEndsAt={pendingTrial?.dwellEndsAt ?? null}
+            centerOverlay={
+              dayPaused ? (
+                <Text
+                  className="font-extrabold tracking-widest"
+                  style={{ fontSize: 22, color: '#F0EDE8', ...SCENE_TEXT_SHADOW }}
+                >
+                  PAUSED
+                </Text>
+              ) : undefined
+            }
+            onPress={canTap ? handleSeatPress : undefined}
+          />
+        </View>
+        {/* Caption sits directly below the anchored ring (positioned relative
+            to the measured ring area so it never clips or overlaps). */}
+        <View
+          pointerEvents="box-none"
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top: Math.max(0, seatAreaH - RING_BOTTOM_EDGE + 8),
+            paddingHorizontal: 16,
+            alignItems: 'center',
+          }}
+        >
+          {pendingTrial ? (
           <View className="mt-6 items-center">
             <Text
               className="text-wolf-accent text-2xl font-extrabold tracking-widest text-center"
@@ -1105,10 +1170,7 @@ function DiscussionView({
             </Text>
           </View>
         ) : dayOver ? (
-          <View
-            className="mt-6 rounded-xl px-5 py-4"
-            style={{ borderWidth: 1, borderColor: '#3A3A48', backgroundColor: '#1A1A24' }}
-          >
+          <View className="mt-6 rounded-xl px-5 py-4 bg-wolf-card">
             <Text className="text-wolf-accent text-sm font-extrabold tracking-widest text-center">
               {dayExpired && noNomsLeft
                 ? 'DAY OVER — TIME AND NOMINATIONS UP'
@@ -1146,6 +1208,7 @@ function DiscussionView({
             You are out of the game — spectating.
           </Text>
         )}
+        </View>
       </View>
 
       {!isHost && !pending && (
@@ -1302,7 +1365,6 @@ function TrialView({
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}
-        onBuildPress={() => setBuildOpen(true)}
       />
 
       {hostMissing && (
@@ -1326,11 +1388,15 @@ function TrialView({
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
 
-      {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
+      <DayCogRow
+        onPress={isHost ? () => setCogOpen(true) : undefined}
+        onBuildPress={() => setBuildOpen(true)}
+      />
 
       <Pressable
         onPress={isHost ? toggleClock : undefined}
         className="flex-1 items-center justify-center px-6"
+        style={{ paddingBottom: 48 }}
       >
         <Text
           className="text-xs font-bold tracking-widest"
@@ -1366,7 +1432,7 @@ function TrialView({
           <TouchableOpacity
             onPress={reset}
             disabled={busy !== null}
-            style={{ marginTop: 22, opacity: busy === 'reset' ? 0.4 : 1 }}
+            style={{ marginTop: 12, opacity: busy === 'reset' ? 0.4 : 1 }}
             className="bg-wolf-card rounded-full items-center justify-center"
           >
             <View
@@ -1670,7 +1736,9 @@ function VoteView({
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}
-        onBuildPress={() => setBuildOpen(true)}
+        onBuildPress={
+          game.mode === 'remote' ? () => setBuildOpen(true) : undefined
+        }
       />
 
       {hostMissing && (
@@ -1686,7 +1754,14 @@ function VoteView({
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
 
-      {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
+      {(isHost || game.mode !== 'remote') && (
+        <DayCogRow
+          onPress={isHost ? () => setCogOpen(true) : undefined}
+          onBuildPress={
+            game.mode !== 'remote' ? () => setBuildOpen(true) : undefined
+          }
+        />
+      )}
 
       <ScrollView
         className="flex-1"
@@ -1706,13 +1781,13 @@ function VoteView({
           VOTE ON
         </Text>
         <Text
-          className="text-wolf-text text-4xl font-extrabold tracking-widest mb-8 text-center"
+          className="text-wolf-text text-4xl font-extrabold tracking-widest mb-4 text-center"
           style={SCENE_TEXT_SHADOW}
         >
           {nomination.nominee?.name.toUpperCase() ?? '—'}
         </Text>
 
-        <View className="items-center mb-8">
+        <View className="items-center mb-4">
           <Text
             className="text-wolf-accent font-extrabold"
             style={{ fontSize: 72, fontVariant: ['tabular-nums'], ...SCENE_TEXT_SHADOW }}
@@ -1827,11 +1902,11 @@ function VoteView({
             const expired = remaining <= 0 && !paused;
             const locked = !!submitting || paused || expired;
             return (
-              <View className="flex-row mt-6" style={{ gap: 14 }}>
+              <View className="flex-row mt-3" style={{ gap: 14 }}>
                 <TouchableOpacity
                   onPress={() => handleVote('lives')}
                   disabled={locked}
-                  className="rounded-2xl px-12 py-8 items-center"
+                  className="rounded-2xl px-12 py-6 items-center"
                   style={{
                     backgroundColor:
                       nomination.myVote === 'lives' ? '#1F4E80' : '#22222F',
@@ -1849,7 +1924,7 @@ function VoteView({
                 <TouchableOpacity
                   onPress={() => handleVote('dies')}
                   disabled={locked}
-                  className="rounded-2xl px-12 py-8 items-center"
+                  className="rounded-2xl px-12 py-6 items-center"
                   style={{
                     backgroundColor:
                       nomination.myVote === 'dies' ? '#8B1818' : '#22222F',
@@ -1882,7 +1957,7 @@ function VoteView({
             onPress={toggleClock}
             disabled={busy !== null}
             style={{ opacity: busy === 'toggle' ? 0.4 : 1, alignSelf: 'stretch' }}
-            className="bg-wolf-accent rounded-xl py-5 items-center mt-10"
+            className="bg-wolf-accent rounded-xl py-5 items-center mt-6"
           >
             {busy === 'toggle' ? (
               <ActivityIndicator color="#0F0F14" />
@@ -1936,6 +2011,83 @@ function VoteView({
   );
 }
 
+// Max height for the vote-result LIVES/DIES panels before their voter lists
+// start scrolling internally — keeps both panels + the ELIMINATED panel visible
+// above CONTINUE GAME no matter how many players voted. Tune to taste.
+const RESULT_PANEL_MAX_H = 130;
+// Same idea for the ELIMINATED panel — caps it so a big cascade (many deaths +
+// their revealed roles) scrolls internally instead of pushing CONTINUE GAME off.
+const ELIM_PANEL_MAX_H = 200;
+
+// A capped-height panel body whose content scrolls internally, with floating
+// carets that appear only when there's more content in that direction: ▲ at the
+// top once scrolled down, ▼ at the bottom while there's more below. Keeps the
+// vote-result LIVES/DIES lists from stretching off-screen when a lot of players
+// voted, while hinting the hidden names above/below.
+function ScrollHintPanel({
+  children,
+  maxHeight,
+}: {
+  children: React.ReactNode;
+  /** Cap for the scroll area. maxHeight on the ScrollView bounds it so it
+   *  actually scrolls (content-sized when short, capped + scrollable when tall). */
+  maxHeight: number;
+}) {
+  const [showTop, setShowTop] = useState(false);
+  const [showBottom, setShowBottom] = useState(false);
+  const contentH = useRef(0);
+  const viewH = useRef(0);
+  const offsetY = useRef(0);
+  const recompute = () => {
+    setShowTop(offsetY.current > 6);
+    setShowBottom(contentH.current - viewH.current - offsetY.current > 6);
+  };
+  return (
+    <View style={{ position: 'relative' }}>
+      <ScrollView
+        style={{ maxHeight }}
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={e => {
+          offsetY.current = e.nativeEvent.contentOffset.y;
+          recompute();
+        }}
+        onLayout={e => {
+          viewH.current = e.nativeEvent.layout.height;
+          recompute();
+        }}
+        onContentSizeChange={(_w, h) => {
+          contentH.current = h;
+          recompute();
+        }}
+      >
+        {children}
+      </ScrollView>
+      {showTop && (
+        <View
+          pointerEvents="none"
+          style={{ position: 'absolute', left: 0, right: 0, top: 0, alignItems: 'center' }}
+        >
+          <Text style={{ color: HUD_CHROME, fontSize: 12, ...SCENE_TEXT_SHADOW }}>
+            ▲
+          </Text>
+        </View>
+      )}
+      {showBottom && (
+        <View
+          pointerEvents="none"
+          style={{ position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center' }}
+        >
+          <Text style={{ color: HUD_CHROME, fontSize: 12, ...SCENE_TEXT_SHADOW }}>
+            ▼
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 // ───── Results view ────────────────────────────────────────────────────────
 
 function ResultsView({
@@ -1969,6 +2121,7 @@ function ResultsView({
   const continueGame = useMutation(api.day.continueGameAfterVote);
   const [submitting, setSubmitting] = useState(false);
   const [buildOpen, setBuildOpen] = useState(false);
+  const [cogOpen, setCogOpen] = useState(false);
   const now = useNow();
 
   // Mid-flight trigger announcement window (existing behavior).
@@ -2012,7 +2165,6 @@ function ResultsView({
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}
-        onBuildPress={() => setBuildOpen(true)}
       />
 
       {hostMissing && (
@@ -2028,50 +2180,55 @@ function ResultsView({
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
 
+      <DayCogRow
+        onPress={isHost ? () => setCogOpen(true) : undefined}
+        onBuildPress={() => setBuildOpen(true)}
+        center={
+          <View className="items-center">
+            <Text
+              className="text-xs font-bold tracking-widest mb-1"
+              style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+            >
+              VOTED ON
+            </Text>
+            <Text
+              className="text-wolf-text text-2xl font-extrabold tracking-widest text-center"
+              numberOfLines={1}
+              style={SCENE_TEXT_SHADOW}
+            >
+              {nomination.nominee?.name.toUpperCase() ?? '—'}
+            </Text>
+          </View>
+        }
+      />
 
-      <ScrollView
-        contentContainerStyle={{
-          paddingHorizontal: 24,
-          paddingBottom: 24,
-          alignItems: 'center',
-        }}
-      >
-        <View className="mt-2 mb-6 items-center">
-          <Text
-            className="text-xs font-bold tracking-widest mb-1"
-            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
-          >
-            VOTED ON
-          </Text>
-          <Text
-            className="text-wolf-text text-2xl font-extrabold tracking-widest text-center"
-            numberOfLines={2}
-            style={SCENE_TEXT_SHADOW}
-          >
-            {nomination.nominee?.name.toUpperCase() ?? '—'}
-          </Text>
-        </View>
-
-        <View className="flex-row self-stretch" style={{ gap: 12 }}>
+      {/* Stationary layout — the LIVES/DIES frames and ELIMINATED stay put;
+          only each panel's list scrolls internally. */}
+      <View style={{ flex: 1, paddingHorizontal: 24, alignItems: 'center' }}>
+        <View className="flex-row self-stretch mt-2" style={{ gap: 12 }}>
           <View className="flex-1 bg-wolf-card rounded-xl px-4 py-3">
             <Text className="text-xs font-bold tracking-widest mb-2" style={{ color: '#5BA0E5' }}>
               LIVES ({livesCount})
             </Text>
-            {nomination.livesVoters.map((n: string, i: number) => (
-              <Text key={i} className="text-wolf-text text-sm py-0.5">
-                {n}
-              </Text>
-            ))}
+            <ScrollHintPanel maxHeight={RESULT_PANEL_MAX_H}>
+              {nomination.livesVoters.map((n: string, i: number) => (
+                <Text key={i} className="text-wolf-text text-sm py-0.5">
+                  {n}
+                </Text>
+              ))}
+            </ScrollHintPanel>
           </View>
           <View className="flex-1 bg-wolf-card rounded-xl px-4 py-3">
             <Text className="text-xs font-bold tracking-widest mb-2" style={{ color: '#E07070' }}>
               DIES ({diesCount})
             </Text>
-            {nomination.diesVoters.map((n: string, i: number) => (
-              <Text key={i} className="text-wolf-text text-sm py-0.5">
-                {n}
-              </Text>
-            ))}
+            <ScrollHintPanel maxHeight={RESULT_PANEL_MAX_H}>
+              {nomination.diesVoters.map((n: string, i: number) => (
+                <Text key={i} className="text-wolf-text text-sm py-0.5">
+                  {n}
+                </Text>
+              ))}
+            </ScrollHintPanel>
           </View>
         </View>
 
@@ -2087,10 +2244,9 @@ function ResultsView({
         ) : null}
 
         {lynch || cascadeDeaths.length > 0 ? (
-          <View
-            className="mt-6 rounded-2xl px-5 py-5 self-stretch bg-wolf-card"
-            style={{ gap: 12 }}
-          >
+          <View className="mt-6 rounded-2xl px-5 py-5 self-stretch bg-wolf-card">
+            <ScrollHintPanel maxHeight={ELIM_PANEL_MAX_H}>
+              <View style={{ gap: 12 }}>
             {lynch ? (
               <>
                 <Text
@@ -2106,13 +2262,9 @@ function ResultsView({
                     Hunter revealed mid-dwell would tip the village that a shot
                     is coming, defeating the cloak the dwell exists for. */}
                 {!continueLocked && nomination.nominee?.role ? (
-                  <View className="items-center mt-2">
-                    <RoleCard
-                      role={nomination.nominee.role}
-                      width={200}
-                      imageHeight={150}
-                    />
-                  </View>
+                  <Text className="text-wolf-text text-base text-center mt-1">
+                    ({nomination.nominee.role})
+                  </Text>
                 ) : null}
               </>
             ) : null}
@@ -2148,17 +2300,19 @@ function ResultsView({
                       </Text>
                     ) : null}
                     {!continueLocked && d.role ? (
-                      <View className="items-center mt-1">
-                        <RoleCard role={d.role} width={180} imageHeight={120} />
-                      </View>
+                      <Text className="text-wolf-text text-base text-center">
+                        ({d.role})
+                      </Text>
                     ) : null}
                   </View>
                 ))}
               </>
             ) : null}
+              </View>
+            </ScrollHintPanel>
           </View>
         ) : null}
-      </ScrollView>
+      </View>
 
       <View
         style={{
@@ -2204,6 +2358,21 @@ function ResultsView({
       <LynchTriggerOverlay
         gameId={game._id}
         deviceClientId={deviceClientId}
+      />
+
+      <TimersConfigModal
+        visible={cogOpen}
+        onClose={() => setCogOpen(false)}
+        gameId={game._id}
+        deviceClientId={deviceClientId}
+        initial={game.config}
+        revealConfig={{
+          revealOnLynch: game.revealOnLynch,
+          revealOnNightDeath: game.revealOnNightDeath,
+        }}
+        passHostCandidates={passHostCandidates}
+        roomCode={game.roomCode}
+        canEndGame
       />
 
       <BuildModal

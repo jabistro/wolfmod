@@ -966,6 +966,44 @@ export const resetTrialClock = mutation({
         subPhasePausedRemainingMs: fullMs,
       },
     });
+
+    // Resetting the VOTE clock also wipes the ballot so the table re-votes from
+    // scratch. Real players' votes are cleared and must be re-cast; bots can't
+    // tap, so we re-seed their DIES votes immediately (same as when the vote
+    // first opens). No votes exist in accusation/defense, so skip those.
+    if (nom.subPhase === 'vote') {
+      const priorVotes = await ctx.db
+        .query('nominationVotes')
+        .withIndex('by_game_nomination', q =>
+          q
+            .eq('gameId', args.gameId)
+            .eq('dayNumber', game.dayNumber)
+            .eq('nominationIndex', nom.nominationIndex),
+        )
+        .collect();
+      for (const prior of priorVotes) {
+        await ctx.db.delete(prior._id);
+      }
+
+      const players = await ctx.db
+        .query('players')
+        .withIndex('by_game', q => q.eq('gameId', args.gameId))
+        .collect();
+      const aliveBots = players.filter(
+        p => p.alive && isBotName(p.name) && p._id !== nom.nominatedPlayerId,
+      );
+      const now = Date.now();
+      for (const bot of aliveBots) {
+        await ctx.db.insert('nominationVotes', {
+          gameId: args.gameId,
+          dayNumber: game.dayNumber,
+          nominationIndex: nom.nominationIndex,
+          voterPlayerId: bot._id,
+          vote: 'dies',
+          votedAt: now,
+        });
+      }
+    }
   },
 });
 
