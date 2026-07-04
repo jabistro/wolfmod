@@ -478,7 +478,7 @@ export default function NightScreen() {
         )
       ) : activeStepNames.length === 0 ? (
         <View className="flex-1 items-center justify-center px-8">
-          <Text className="text-wolf-muted text-sm text-center">
+          <Text className="text-wolf-text text-sm text-center">
             You are out of the game. The night unfolds without you.
           </Text>
         </View>
@@ -547,7 +547,7 @@ function NightLogView({
       <View className="flex-1 items-center justify-center px-8">
         <ActivityIndicator color="#D4A017" />
         <Text
-          className="text-wolf-muted text-sm italic text-center mt-6"
+          className="text-wolf-text text-sm italic text-center mt-6"
           style={{ alignSelf: 'stretch' }}
         >
           The night is just beginning…
@@ -849,7 +849,7 @@ function AlphaConversionView({
               <Text className="text-wolf-red">WOLF</Text>
               {'.'}
             </Text>
-            <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+            <Text className="text-wolf-text text-sm text-center mt-6 px-4">
               Tomorrow night you wake with the wolves and learn who they are.
             </Text>
           </>
@@ -903,7 +903,7 @@ function DoppelgangerRevealView({
             </Text>
             {'.'}
           </Text>
-          <Text className="text-wolf-muted text-xs text-center mt-4">
+          <Text className="text-wolf-text text-xs text-center mt-4">
             Your old powers fade. You start fresh with this role.
           </Text>
         </View>
@@ -989,7 +989,7 @@ function SasquatchRevealOverlay({
               ))}
             </View>
           )}
-          <Text className="text-wolf-muted text-xs text-center mt-5">
+          <Text className="text-wolf-text text-xs text-center mt-5">
             You wake with the wolves now. Choose a victim together.
           </Text>
         </View>
@@ -1054,13 +1054,13 @@ function DrunkRevealOverlay({
                   ))}
                 </View>
               )}
-              <Text className="text-wolf-muted text-xs text-center mt-5">
+              <Text className="text-wolf-text text-xs text-center mt-5">
                 You wake with the wolves tonight. Choose a victim together.
               </Text>
             </>
           ) : (
             description && (
-              <Text className="text-wolf-muted text-sm text-center mt-4">
+              <Text className="text-wolf-text text-sm text-center mt-4">
                 {description}
               </Text>
             )
@@ -1599,7 +1599,7 @@ function SeerPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text className="text-wolf-text text-sm text-center mt-6 px-4">
             {isGhost ? "The Seer's check is in. Waiting for the night to settle…" : 'Your check is in. Waiting for the night to settle…'}
           </Text>
         </View>
@@ -1819,7 +1819,7 @@ function PIPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text className="text-wolf-text text-sm text-center mt-6 px-4">
             {piState.history.length > 0 &&
             piState.history[piState.history.length - 1]?.nightNumber !==
               undefined
@@ -2071,7 +2071,7 @@ function MentalistPicker({
           <Text className="text-wolf-text text-base text-center mt-6 px-4">
             Not enough new options tonight.
           </Text>
-          <Text className="text-wolf-muted text-sm text-center mt-3 px-6">
+          <Text className="text-wolf-text text-sm text-center mt-3 px-6">
             {lockedNames.length > 0
               ? isGhost
                 ? `Last night the Mentalist read ${lockedNames.join(' & ')}, and they can't be picked back-to-back.`
@@ -2080,7 +2080,7 @@ function MentalistPicker({
                 ? 'The Mentalist needs at least two valid targets to read.'
                 : 'You need at least two valid targets to read.'}
           </Text>
-          <Text className="text-wolf-muted text-xs text-center mt-4 px-6">
+          <Text className="text-wolf-text text-xs text-center mt-4 px-6">
             Passing for the night…
           </Text>
         </View>
@@ -2094,7 +2094,7 @@ function MentalistPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text className="text-wolf-text text-sm text-center mt-6 px-4">
             {isGhost
               ? "The Mentalist's comparison is in. Waiting for the night to settle…"
               : 'Your comparison is in. Waiting for the night to settle…'}
@@ -2338,7 +2338,7 @@ function WitchPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text className="text-wolf-text text-sm text-center mt-6 px-4">
             {isGhost
               ? "The Witch's turn is over. Waiting for the night to settle…"
               : 'Your turn is over. Waiting for the night to settle…'}
@@ -2736,7 +2736,7 @@ function LeprechaunPicker({
             <Text className="text-wolf-text text-2xl font-bold tracking-widest text-center">
               NO KILL
             </Text>
-            <Text className="text-wolf-muted text-sm text-center mt-3 italic">
+            <Text className="text-wolf-text text-sm text-center mt-3 italic">
               The wolves had no kill tonight.
             </Text>
           </View>
@@ -3240,7 +3240,7 @@ function HuntressPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text className="text-wolf-text text-sm text-center mt-6 px-4">
             Waiting for the night to settle…
           </Text>
           {huntressState.tonightShot ? (
@@ -3251,7 +3251,7 @@ function HuntressPicker({
               {huntressState.tonightShot.name}
             </Text>
           ) : huntressState.tonightSkipped ? (
-            <Text className="text-wolf-muted text-sm text-center mt-4 px-4 italic">
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4 italic">
               Saved the shot for later.
             </Text>
           ) : null}
@@ -3412,7 +3412,7 @@ function WarlockPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text className="text-wolf-text text-sm text-center mt-6 px-4">
             Waiting for the night to settle…
           </Text>
           {warlockState.tonightTarget ? (
@@ -3423,7 +3423,7 @@ function WarlockPicker({
               {warlockState.tonightTarget.name}
             </Text>
           ) : warlockState.tonightSkipped ? (
-            <Text className="text-wolf-muted text-sm text-center mt-4 px-4 italic">
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4 italic">
               Saved the power for later.
             </Text>
           ) : null}
@@ -3568,7 +3568,7 @@ function ChupacabraPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text className="text-wolf-text text-sm text-center mt-6 px-4">
             Waiting for the night to settle…
           </Text>
           {chupacabraState.tonightTarget ? (
@@ -3718,7 +3718,7 @@ function RevealerPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text className="text-wolf-text text-sm text-center mt-6 px-4">
             Waiting for the night to settle…
           </Text>
           {revealerState.tonightShot ? (
@@ -3729,7 +3729,7 @@ function RevealerPicker({
               {revealerState.tonightShot.name}
             </Text>
           ) : revealerState.tonightSkipped ? (
-            <Text className="text-wolf-muted text-sm text-center mt-4 px-4 italic">
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4 italic">
               Passed tonight.
             </Text>
           ) : null}
@@ -3885,7 +3885,7 @@ function RevilerPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text className="text-wolf-text text-sm text-center mt-6 px-4">
             Waiting for the night to settle…
           </Text>
           {revilerState.tonightShot ? (
@@ -3896,7 +3896,7 @@ function RevilerPicker({
               {revilerState.tonightShot.name}
             </Text>
           ) : revilerState.tonightSkipped ? (
-            <Text className="text-wolf-muted text-sm text-center mt-4 px-4 italic">
+            <Text className="text-wolf-text text-sm text-center mt-4 px-4 italic">
               Passed tonight.
             </Text>
           ) : null}
@@ -4055,7 +4055,7 @@ function NightmareWolfPicker({
       <View className="flex-1 px-6 pt-2 pb-8">
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+          <Text className="text-wolf-text text-sm text-center mt-6 px-4">
             Waiting for the night to settle…
           </Text>
           {nightmareState.tonightTarget ? (
@@ -4181,7 +4181,7 @@ function NightmareBlockedView() {
       <Text className="text-wolf-text text-3xl font-extrabold text-center mb-4">
         YOU'VE BEEN PUT{'\n'}TO SLEEP
       </Text>
-      <Text className="text-wolf-muted text-sm text-center px-4">
+      <Text className="text-wolf-text text-sm text-center px-4">
         You're unable to wake in time to use your power.
       </Text>
     </View>
