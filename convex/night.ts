@@ -445,33 +445,15 @@ async function isStepComplete(
       const skips = await getNightActions(ctx, gameId, nightNumber, 'reviler_skip');
       return shots.length + skips.length >= actors.length;
     }
-    case 'cursed_conversion': {
-      // Conversion rows are written inline in enterStep. Step is complete
-      // only when every converted Cursed has acknowledged the reveal via
-      // `submitCursedAck`. If no one converted this night, completes
-      // immediately (acks=0 >= conversions=0). Dwell still gates advance
-      // separately for cloak symmetry.
-      const conversions = await getNightActions(
-        ctx,
-        gameId,
-        nightNumber,
-        'cursed_conversion',
-      );
-      const acks = await getNightActions(
-        ctx,
-        gameId,
-        nightNumber,
-        'cursed_conversion_ack',
-      );
-      return acks.length >= conversions.length;
-    }
+    case 'cursed_conversion':
     case 'alpha_conversion':
     case 'doppelganger_dawn':
     case 'doppelganger_dusk':
       // No ack required — the converted player reads the modal during the
       // dwell window and the step auto-advances when the dwell elapses. (One
       // spaced-out player otherwise stalls the table; see the reveal-no-ack
-      // house rule.)
+      // house rule.) Cursed conversion rows are written inline in enterStep;
+      // the 6–12s step dwell is the reading window.
       return true;
   }
 }
@@ -4413,65 +4395,6 @@ export const submitNightmareSkip = mutation({
   },
 });
 
-// ───── Cursed conversion ack ────────────────────────────────────────────────
-//
-// Tapping OK on the reveal screen records a `cursed_conversion_ack` row.
-// `isStepComplete` for cursed_conversion gates on every converted Cursed
-// having an ack, so the step won't auto-advance on dwell expiry alone —
-// the converted Cursed can't miss the screen by looking away briefly.
-// Dwell still runs as the MINIMUM time (cloak symmetry). Host stall
-// override remains the safety valve if a Cursed never taps.
-
-export const submitCursedAck = mutation({
-  args: {
-    gameId: v.id('games'),
-    callerDeviceClientId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const game = await ctx.db.get(args.gameId);
-    if (!game) throw new Error('Game not found.');
-    if (game.phase !== 'night' || !isStepActive(game, 'cursed_conversion')) {
-      throw new Error('Not in the cursed conversion step.');
-    }
-
-    const me = await findCaller(ctx, args.gameId, args.callerDeviceClientId);
-    if (!me?.alive || me.role !== 'Cursed') {
-      throw new Error('Only a converted Cursed can acknowledge.');
-    }
-    // Caller must actually be one of tonight's converted Cursed.
-    const myConversion = await findMyAction(
-      ctx,
-      args.gameId,
-      game.nightNumber,
-      me._id,
-      'cursed_conversion',
-    );
-    if (!myConversion) {
-      throw new Error('You were not converted tonight.');
-    }
-    // Idempotent — repeat taps from a flaky network shouldn't unblock
-    // the step prematurely.
-    const existingAck = await findMyAction(
-      ctx,
-      args.gameId,
-      game.nightNumber,
-      me._id,
-      'cursed_conversion_ack',
-    );
-    if (existingAck) return;
-
-    await ctx.db.insert('nightActions', {
-      gameId: args.gameId,
-      nightNumber: game.nightNumber,
-      actorPlayerId: me._id,
-      actionType: 'cursed_conversion_ack',
-      resolvedAt: Date.now(),
-    });
-
-    await maybeAdvanceStep(ctx, args.gameId, 'cursed_conversion');
-  },
-});
-
 // Tapping OK on the Mason induction overlay clears the caller's persistent
 // `pendingMasonReveal` flag. Unlike the Cursed ack, this NEVER gates a step —
 // Masons have no night action, so there's no reason for the rest of the table
@@ -5152,7 +5075,7 @@ const STEP_ACTION_TYPES: Record<NightStep, readonly string[]> = {
   huntress: ['huntress_shot', 'huntress_skip'],
   revealer: ['revealer_shot', 'revealer_skip'],
   reviler: ['reviler_shot', 'reviler_skip'],
-  cursed_conversion: ['cursed_conversion', 'cursed_conversion_ack'],
+  cursed_conversion: ['cursed_conversion'],
   alpha_conversion: ['alpha_conversion'],
   doppelganger_dawn: ['doppelganger_conversion_reveal'],
   doppelganger_dusk: ['doppelganger_conversion', 'doppelganger_conversion_reveal'],
@@ -6844,7 +6767,6 @@ export const nightView = query({
     // no way to tell whether the wolves targeted them tonight.
     let cursedConversionState: {
       isMine: boolean;
-      acknowledged: boolean;
       convertedNames: string[];
     } | null = null;
     if (activeStepSet.has('cursed_conversion')) {
@@ -6866,15 +6788,7 @@ export const nightView = query({
           me.role === 'Cursed' &&
           conversions.some(c => c.actorPlayerId === me._id);
         if (isMine || !me.alive) {
-          const acks = await getNightActions(
-            ctx,
-            args.gameId,
-            game.nightNumber,
-            'cursed_conversion_ack',
-          );
-          const acknowledged =
-            isMine && acks.some(a => a.actorPlayerId === me._id);
-          cursedConversionState = { isMine, acknowledged, convertedNames };
+          cursedConversionState = { isMine, convertedNames };
         }
       }
     }

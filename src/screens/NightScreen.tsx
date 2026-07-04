@@ -373,10 +373,7 @@ export default function NightScreen() {
 
       {activeStepNames.includes('cursed_conversion') && cursedConversionState && (
         <CursedRevealView
-          gameId={game._id}
-          deviceClientId={deviceClientId}
           isMine={cursedConversionState.isMine}
-          acknowledged={cursedConversionState.acknowledged}
           convertedNames={cursedConversionState.convertedNames}
         />
       )}
@@ -782,70 +779,31 @@ function NightPickerLayout({
 // Shown to the converted Cursed (and dead spectators) during the
 // cursed_conversion night step. The body sentence has YOU / ARE / A / WOLF
 // rendered in red so the four red words read top-to-bottom as the subliminal
-// "you are a wolf". The OK button is required for the alive converted
-// Cursed — the step holds until they tap it (alongside the dwell) so they
-// can't miss the reveal by looking away. Dead spectators see the reveal
-// passively, no button.
+// "you are a wolf". No OK button — the step dwells and auto-advances
+// (reveal-no-ack rule), so a distracted player can't stall the table. Dead
+// spectators see the reveal passively.
 
 function CursedRevealView({
-  gameId,
-  deviceClientId,
   isMine,
-  acknowledged,
   convertedNames,
 }: {
-  gameId: Id<'games'>;
-  deviceClientId: string;
   isMine: boolean;
-  acknowledged: boolean;
   convertedNames: string[];
 }) {
-  const submitAck = useMutation(api.night.submitCursedAck);
-  const [submitting, setSubmitting] = useState(false);
-  const insets = useSafeAreaInsets();
-
-  async function handleAck() {
-    if (submitting) return;
-    setSubmitting(true);
-    try {
-      await submitAck({ gameId, callerDeviceClientId: deviceClientId });
-    } catch (e) {
-      showAlert('Error', e instanceof Error ? e.message : String(e));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  if (isMine && acknowledged) {
-    return (
-      <View className="flex-1 px-6 pt-2 pb-8">
-        <View className="flex-1 items-center justify-center">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
-            A CURSE TAKES HOLD
-          </Text>
-          <ActivityIndicator color="#D4A017" />
-          <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
-            Your fate is sealed. Waiting for morning…
-          </Text>
-        </View>
-      </View>
-    );
-  }
-
   return (
     <View className="flex-1 px-6 pt-2 pb-8">
       <View className="flex-1 items-center justify-center">
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
+        <Text className="text-wolf-text text-xs font-bold tracking-widest text-center mb-6">
           A CURSE TAKES HOLD
         </Text>
-        <Text className="text-wolf-text text-2xl font-extrabold text-center leading-8 px-2">
-          <Text className="text-wolf-red">YOU</Text>
+        <Text className="text-wolf-text text-3xl font-extrabold text-center leading-10 px-2">
+          <Text className="text-wolf-red font-extrabold">YOU</Text>
           {' WERE TARGETED TONIGHT, BUT '}
-          <Text className="text-wolf-red">ARE</Text>
+          <Text className="text-wolf-red font-extrabold">ARE</Text>
           {' STILL ALIVE. '}
-          <Text className="text-wolf-red">A</Text>
+          <Text className="text-wolf-red font-extrabold">A</Text>
           {' CURSE CONVERTED YOU INTO A '}
-          <Text className="text-wolf-red">WOLF</Text>
+          <Text className="text-wolf-red font-extrabold">WOLF</Text>
           {'.'}
         </Text>
         {!isMine && convertedNames.length > 0 && (
@@ -854,26 +812,6 @@ function CursedRevealView({
           </Text>
         )}
       </View>
-
-      {isMine && (
-        <View style={{ paddingBottom: Math.max(insets.bottom, 12) + 12 }}>
-          <TouchableOpacity
-            onPress={handleAck}
-            disabled={submitting}
-            activeOpacity={0.75}
-            className="bg-wolf-accent rounded-xl py-4 items-center"
-            style={{ opacity: submitting ? 0.4 : 1 }}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#0F0F14" />
-            ) : (
-              <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                OK
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      )}
     </View>
   );
 }
