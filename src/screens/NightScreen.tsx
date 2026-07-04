@@ -11,6 +11,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -34,6 +35,8 @@ import { MasonRevealModal } from '../components/MasonRevealModal';
 import { isWolfTeam } from '../data/v1Roles';
 import { getRoleDescription } from '../data/roleDescriptions';
 import { SCENE_TEXT_SHADOW, RING_SIZE, ringAnchorStyle } from '../theme/hud';
+import { useTheme } from '../contexts/ThemeContext';
+import { getTableArt } from '../data/tableArt';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Night'>;
 type Route = RouteProp<RootStackParamList, 'Night'>;
@@ -2746,20 +2749,20 @@ function LeprechaunPicker({
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator color="#D4A017" />
           {r?.blocked ? (
-            <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+            <Text className="text-wolf-text text-sm text-center mt-6 px-4">
               {isGhost
                 ? 'The Leprechaun has acknowledged the silent night. Waiting…'
                 : 'Acknowledged. Waiting for the night to settle…'}
             </Text>
           ) : r?.direction === 'leave' ? (
-            <Text className="text-wolf-muted text-sm text-center mt-6 px-4">
+            <Text className="text-wolf-text text-sm text-center mt-6 px-4">
               {isGhost
                 ? `The Leprechaun left the kill on ${r?.originalTargetName ?? '—'}. Waiting…`
                 : `Left the kill on ${r?.originalTargetName ?? '—'}. Waiting…`}
             </Text>
           ) : (
             <View className="mt-6 items-center px-4">
-              <Text className="text-wolf-muted text-xs tracking-widest font-bold mb-2">
+              <Text className="text-wolf-text text-xs tracking-widest font-bold mb-2">
                 KILL MOVED
               </Text>
               <Text className="text-wolf-text text-base text-center">
@@ -2771,7 +2774,7 @@ function LeprechaunPicker({
                   {r?.newTargetName ?? '—'}
                 </Text>
               </Text>
-              <Text className="text-wolf-muted text-xs text-center mt-3 italic">
+              <Text className="text-wolf-text text-xs text-center mt-3 italic">
                 {isGhost
                   ? 'Waiting for the night to settle…'
                   : 'Your move has been made. Waiting for the night to settle…'}
@@ -2962,9 +2965,11 @@ function LeprechaunCircle({
   disabled: boolean;
   onPress: () => void;
 }) {
+  const { theme } = useTheme();
+  const avatarNight = getTableArt(theme).avatarNight;
   const present = !!name;
+  const size = 88;
   const borderColor = selected ? '#F0EDE8' : '#3A3A48';
-  const backgroundColor = selected ? '#33333F' : '#22222F';
   return (
     <View style={{ alignItems: 'center', width: 96 }}>
       <TouchableOpacity
@@ -2972,27 +2977,76 @@ function LeprechaunCircle({
         disabled={disabled || !present}
         activeOpacity={0.7}
         style={{
-          width: 88,
-          height: 88,
-          borderRadius: 44,
+          width: size,
+          height: size,
+          borderRadius: size / 2,
           borderWidth: selected ? 2 : 1,
           borderColor,
-          backgroundColor,
-          alignItems: 'center',
-          justifyContent: 'center',
-          paddingHorizontal: 6,
+          overflow: 'hidden',
+          backgroundColor: '#22222F',
           opacity: disabled || !present ? 0.4 : 1,
         }}
       >
-        <Text
-          className="text-wolf-text font-bold text-center"
-          style={{ fontSize: 13 }}
-          numberOfLines={2}
-        >
-          {present ? name : '—'}
-        </Text>
+        {present ? (
+          <>
+            {/* Seat-style night avatar fills the circle, matching the ring. */}
+            <Image
+              source={avatarNight}
+              style={{ width: '100%', height: '100%' }}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+            />
+            {selected ? (
+              <View
+                pointerEvents="none"
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: 'rgba(240, 237, 232, 0.16)',
+                }}
+              />
+            ) : null}
+            {/* Name banner along the bottom, same as the seating ring. */}
+            <View
+              pointerEvents="none"
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                backgroundColor: 'rgba(10, 10, 14, 0.62)',
+                paddingVertical: 2,
+                paddingHorizontal: 2,
+                alignItems: 'center',
+              }}
+            >
+              <Text
+                style={{
+                  color: '#F0EDE8',
+                  fontSize: 11,
+                  fontWeight: selected ? '700' : '600',
+                  textAlign: 'center',
+                }}
+                numberOfLines={1}
+              >
+                {name}
+              </Text>
+            </View>
+          </>
+        ) : (
+          <View
+            style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Text className="text-wolf-muted" style={{ fontSize: 13 }}>
+              —
+            </Text>
+          </View>
+        )}
       </TouchableOpacity>
-      <Text className="text-wolf-muted text-[10px] font-bold tracking-widest mt-2">
+      <Text className="text-wolf-text text-[10px] font-bold tracking-widest mt-2">
         {label}
       </Text>
     </View>
