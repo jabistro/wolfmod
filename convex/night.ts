@@ -69,6 +69,12 @@ const STEP_DWELL_MAX_MS = 12000;
 // actors still get the full original dwell, preserving cloak variance.
 const REVEAL_WINDOW_MS = 5000;
 
+// Longer window for the pure info-read roles (Seer / PI / Mentalist). Their
+// result overlays auto-dismiss on the dwell (no OK button), so the player
+// needs enough on-screen time to memorize the reading before the night moves
+// on. Action reveals keep the shorter REVEAL_WINDOW_MS.
+const INFO_READING_WINDOW_MS = 10000;
+
 // The night the Drunk sobers up and patches into their hidden role. Per house
 // rules they "remember who they really are" at the start of the third night.
 const DRUNK_REVEAL_NIGHT = 3;
@@ -3089,17 +3095,18 @@ async function ensureReadingWindow(
   ctx: MutationCtx,
   gameId: Id<'games'>,
   step: NightStep,
+  windowMs: number = REVEAL_WINDOW_MS,
 ): Promise<void> {
   const game = await ctx.db.get(gameId);
   if (!game || game.phase !== 'night') return;
   const active = getActiveStepEntries(game);
   const idx = active.findIndex(e => e.step === step);
   if (idx < 0) return; // not currently active
-  const minEndsAt = Date.now() + REVEAL_WINDOW_MS;
+  const minEndsAt = Date.now() + windowMs;
   if (active[idx].endsAt >= minEndsAt) return;
   active[idx] = { ...active[idx], endsAt: minEndsAt };
   await ctx.db.patch(gameId, { nightActiveSteps: active });
-  await ctx.scheduler.runAfter(REVEAL_WINDOW_MS, internal.night.dwellTick, {
+  await ctx.scheduler.runAfter(windowMs, internal.night.dwellTick, {
     gameId,
     expectedStep: step,
   });
@@ -3593,7 +3600,7 @@ export const submitSeerCheck = mutation({
     // their result before the screen swaps to Morning. The client calls
     // `tickNight` after the player taps OK on the result modal. Returning
     // the team lets the client display the result without a query roundtrip.
-    await ensureReadingWindow(ctx, args.gameId, 'seer');
+    await ensureReadingWindow(ctx, args.gameId, 'seer', INFO_READING_WINDOW_MS);
     return { team };
   },
 });
@@ -3663,8 +3670,9 @@ export const submitPICheck = mutation({
     });
 
     // Don't auto-advance — same as Seer, the PI needs to read the result
-    // before the screen moves on. Client calls `tickNight` after OK.
-    await ensureReadingWindow(ctx, args.gameId, 'pi');
+    // before the screen moves on. The result overlay auto-dismisses on this
+    // dwell (no OK button), so give the full info-read window.
+    await ensureReadingWindow(ctx, args.gameId, 'pi', INFO_READING_WINDOW_MS);
     return { team };
   },
 });
@@ -3801,8 +3809,9 @@ export const submitMentalistCheck = mutation({
       resolvedAt: Date.now(),
     });
 
-    // Don't advance — Seer pattern. Client calls tickNight after OK.
-    await ensureReadingWindow(ctx, args.gameId, 'mentalist');
+    // Don't advance — Seer pattern. The result overlay auto-dismisses on this
+    // dwell (no OK button), so give the full info-read window.
+    await ensureReadingWindow(ctx, args.gameId, 'mentalist', INFO_READING_WINDOW_MS);
     return { sameTeam };
   },
 });

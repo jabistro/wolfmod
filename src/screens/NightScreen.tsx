@@ -1599,7 +1599,6 @@ function SeerPicker({
 }) {
   const alreadyChecked = history.some(h => h.nightNumber === nightNumber);
   const submitCheck = useMutation(api.night.submitSeerCheck);
-  const tickNight = useMutation(api.night.tickNight);
   const [submitting, setSubmitting] = useState(false);
   const [pendingTarget, setPendingTarget] = useState<{
     id: Id<'players'>;
@@ -1651,19 +1650,6 @@ function SeerPicker({
     setPendingTarget(null);
   }
 
-  async function handleAck() {
-    if (!pendingResult) return;
-    try {
-      // Asks the engine to advance — but the dwell may not be over yet, in
-      // which case this is a no-op and the scheduled tick will advance later.
-      await tickNight({ gameId, callerDeviceClientId: deviceClientId });
-    } catch (e) {
-      showAlert('Error', e instanceof Error ? e.message : String(e));
-    } finally {
-      setPendingResult(null);
-    }
-  }
-
   // Once the player has checked, hide the picker — we hold here until the
   // step's dwell ends, which keeps the on-screen "the seer is awake" timing
   // uniform whether the seer is alive or dead.
@@ -1676,26 +1662,6 @@ function SeerPicker({
             {isGhost ? "The Seer's check is in. Waiting for the night to settle…" : 'Your check is in. Waiting for the night to settle…'}
           </Text>
         </View>
-        {history.length > 0 && (
-          <View className="bg-wolf-card rounded-xl px-4 py-3">
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-              {isGhost ? "THE SEER'S CHECKS" : 'YOUR CHECKS'}
-            </Text>
-            {history.map((h, i) => (
-              <View key={i} className="flex-row justify-between py-1">
-                <Text className="text-wolf-text text-sm">
-                  Night {h.nightNumber} — {h.targetName}
-                </Text>
-                <Text
-                  className="text-sm font-bold"
-                  style={{ color: h.team === 'wolf' ? '#B03A2E' : '#5BA0E5' }}
-                >
-                  {h.team === 'wolf' ? 'WOLF' : 'VILLAGER'}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
       </View>
     );
   }
@@ -1727,27 +1693,6 @@ function SeerPicker({
             ? 'The Seer is investigating…'
             : 'Choose a player to investigate.'}
         </Text>
-
-        {history.length > 0 && (
-          <View className="bg-wolf-card rounded-xl px-4 py-3">
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-              {isGhost ? "THE SEER'S CHECKS" : 'YOUR CHECKS'}
-            </Text>
-            {history.map((h, i) => (
-              <View key={i} className="flex-row justify-between py-1">
-                <Text className="text-wolf-text text-sm">
-                  Night {h.nightNumber} — {h.targetName}
-                </Text>
-                <Text
-                  className="text-sm font-bold"
-                  style={{ color: h.team === 'wolf' ? '#B03A2E' : '#5BA0E5' }}
-                >
-                  {h.team === 'wolf' ? 'WOLF' : 'VILLAGER'}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
       </NightPickerLayout>
 
       {/* Confirmation overlay — guards against misclicks before the role
@@ -1771,8 +1716,9 @@ function SeerPicker({
         </ConfirmOverlay>
       )}
 
-      {/* Result overlay — blocks until the player taps OK, so they have time
-          to read the team before the night advances to morning. */}
+      {/* Result overlay — auto-dismisses when the step's reading-window dwell
+          ends and the engine advances (unmounting this picker), so a player
+          who forgets to dismiss can't stall the night. */}
       {pendingResult && (
         <Animated.View
           style={{
@@ -1781,36 +1727,47 @@ function SeerPicker({
             right: 0,
             top: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
+            backgroundColor: 'transparent',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: 32,
+            padding: 24,
             opacity: fadeAnim,
           }}
         >
           <View
-            className="rounded-2xl px-10 py-10 items-center"
+            className="bg-wolf-surface rounded-3xl"
             style={{
-              backgroundColor:
-                pendingResult.team === 'wolf' ? '#8B1818' : '#1F4E80',
-              minWidth: 240,
+              alignItems: 'center',
+              alignSelf: 'center',
+              maxWidth: 460,
+              width: '100%',
+              paddingTop: 40,
+              paddingBottom: 34,
+              paddingHorizontal: 32,
+              borderWidth: 1,
+              borderColor: '#2C2C3A',
             }}
           >
-            <Text className="text-wolf-text text-xs font-bold tracking-widest mb-3">
-              {pendingResult.name.toUpperCase()} IS A
+            <Text className="text-wolf-text text-3xl font-extrabold text-center">
+              {pendingResult.name.toUpperCase()}
             </Text>
-            <Text className="text-wolf-text text-5xl font-extrabold tracking-widest">
+            <Text className="text-wolf-muted text-xl text-center my-2">
+              IS A
+            </Text>
+            <View
+              className="bg-wolf-card"
+              style={{ height: 1, width: '75%', marginVertical: 26 }}
+            />
+            <Text
+              className="text-4xl font-extrabold tracking-widest text-center"
+              style={{ color: pendingResult.team === 'wolf' ? '#E0574B' : '#5BA0E5' }}
+            >
               {pendingResult.team === 'wolf' ? 'WOLF' : 'VILLAGER'}
             </Text>
-          </View>
-          <TouchableOpacity
-            onPress={handleAck}
-            className="bg-wolf-accent rounded-xl py-4 px-10 mt-10"
-          >
-            <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-              OK
+            <Text className="text-wolf-muted text-sm text-center mt-7">
+              Take a moment to remember this…
             </Text>
-          </TouchableOpacity>
+          </View>
         </Animated.View>
       )}
     </View>
@@ -1852,7 +1809,6 @@ function PIPicker({
 }) {
   const submitCheck = useMutation(api.night.submitPICheck);
   const submitSkip = useMutation(api.night.submitPISkip);
-  const tickNight = useMutation(api.night.tickNight);
 
   const [submitting, setSubmitting] = useState(false);
   const [pendingTarget, setPendingTarget] = useState<{
@@ -1905,17 +1861,6 @@ function PIPicker({
     setPendingTarget(null);
   }
 
-  async function handleAck() {
-    if (!pendingResult) return;
-    try {
-      await tickNight({ gameId, callerDeviceClientId: deviceClientId });
-    } catch (e) {
-      showAlert('Error', e instanceof Error ? e.message : String(e));
-    } finally {
-      setPendingResult(null);
-    }
-  }
-
   async function handleSkip() {
     if (submitting) return;
     setSubmitting(true);
@@ -1943,26 +1888,6 @@ function PIPicker({
               : 'Saved for later. Waiting for the night to settle…'}
           </Text>
         </View>
-        {piState.history.length > 0 && (
-          <View className="bg-wolf-card rounded-xl px-4 py-3">
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-              {isGhost ? "THE PI'S CHECK" : 'YOUR CHECK'}
-            </Text>
-            {piState.history.map((h, i) => (
-              <View key={i} className="flex-row justify-between py-1">
-                <Text className="text-wolf-text text-sm">
-                  Night {h.nightNumber} — {h.targetName} (+ neighbors)
-                </Text>
-                <Text
-                  className="text-sm font-bold"
-                  style={{ color: h.team === 'wolf' ? '#B03A2E' : '#5BA0E5' }}
-                >
-                  {h.team === 'wolf' ? 'WOLF' : 'VILLAGE'}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
       </View>
     );
   }
@@ -2032,7 +1957,8 @@ function PIPicker({
         </ConfirmOverlay>
       )}
 
-      {/* Result overlay */}
+      {/* Result overlay — neutral card, auto-dismisses on the reading-window
+          dwell (no OK button). */}
       {pendingResult && (
         <Animated.View
           style={{
@@ -2041,36 +1967,47 @@ function PIPicker({
             right: 0,
             top: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
+            backgroundColor: 'transparent',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: 32,
+            padding: 24,
             opacity: fadeAnim,
           }}
         >
           <View
-            className="rounded-2xl px-10 py-10 items-center"
+            className="bg-wolf-surface rounded-3xl"
             style={{
-              backgroundColor:
-                pendingResult.team === 'wolf' ? '#8B1818' : '#1F4E80',
-              minWidth: 240,
+              alignItems: 'center',
+              alignSelf: 'center',
+              maxWidth: 460,
+              width: '100%',
+              paddingTop: 40,
+              paddingBottom: 34,
+              paddingHorizontal: 32,
+              borderWidth: 1,
+              borderColor: '#2C2C3A',
             }}
           >
-            <Text className="text-wolf-text text-xs font-bold tracking-widest mb-3">
-              {pendingResult.name.toUpperCase()} + NEIGHBORS
+            <Text className="text-wolf-text text-3xl font-extrabold text-center">
+              {pendingResult.name.toUpperCase()}
             </Text>
-            <Text className="text-wolf-text text-5xl font-extrabold tracking-widest">
+            <Text className="text-wolf-muted text-xl text-center my-2">
+              + NEIGHBORS
+            </Text>
+            <View
+              className="bg-wolf-card"
+              style={{ height: 1, width: '75%', marginVertical: 26 }}
+            />
+            <Text
+              className="text-4xl font-extrabold tracking-widest text-center"
+              style={{ color: pendingResult.team === 'wolf' ? '#E0574B' : '#5BA0E5' }}
+            >
               {pendingResult.team === 'wolf' ? 'WOLF' : 'VILLAGE'}
             </Text>
-          </View>
-          <TouchableOpacity
-            onPress={handleAck}
-            className="bg-wolf-accent rounded-xl py-4 px-10 mt-10"
-          >
-            <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-              OK
+            <Text className="text-wolf-muted text-sm text-center mt-7">
+              Take a moment to remember this…
             </Text>
-          </TouchableOpacity>
+          </View>
         </Animated.View>
       )}
     </View>
@@ -2113,7 +2050,6 @@ function MentalistPicker({
   isGhost?: boolean;
 }) {
   const submitCheck = useMutation(api.night.submitMentalistCheck);
-  const tickNight = useMutation(api.night.tickNight);
 
   const [submitting, setSubmitting] = useState(false);
   const [picks, setPicks] = useState<Array<{ id: Id<'players'>; name: string }>>(
@@ -2152,7 +2088,10 @@ function MentalistPicker({
       return;
     }
     if (picks.length >= 2) return; // already two selected
-    setPicks([...picks, { id: player._id, name: player.name }]);
+    const next = [...picks, { id: player._id, name: player.name }];
+    setPicks(next);
+    // Second pick opens the confirmation immediately — no separate CONFIRM tap.
+    if (next.length === 2) setConfirmOpen(true);
   }
 
   async function handleConfirm() {
@@ -2176,16 +2115,6 @@ function MentalistPicker({
       showAlert('Could not compare', e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
-    }
-  }
-
-  async function handleAck() {
-    try {
-      await tickNight({ gameId, callerDeviceClientId: deviceClientId });
-    } catch (e) {
-      showAlert('Error', e instanceof Error ? e.message : String(e));
-    } finally {
-      setPendingResult(null);
     }
   }
 
@@ -2238,12 +2167,7 @@ function MentalistPicker({
             <Text className="text-wolf-text text-sm">
               {last.firstName} & {last.secondName}
             </Text>
-            <Text
-              className="text-sm font-bold mt-1"
-              style={{
-                color: last.sameTeam === 'same' ? '#5BA0E5' : '#E07070',
-              }}
-            >
+            <Text className="text-wolf-text text-sm font-bold mt-1">
               {last.sameTeam === 'same' ? 'SAME TEAM' : 'DIFFERENT TEAMS'}
             </Text>
           </View>
@@ -2270,32 +2194,6 @@ function MentalistPicker({
             }
           />
         )}
-        footer={
-          !isGhost ? (
-            <>
-              <View className="bg-wolf-card rounded-xl px-4 py-3">
-                <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-                  {`YOUR PICKS (${picks.length} / 2)`}
-                </Text>
-                <Text className="text-wolf-text text-sm">
-                  {picks.length === 0
-                    ? 'Tap a player to select them.'
-                    : picks.map(p => p.name).join(' & ')}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setConfirmOpen(true)}
-                disabled={picks.length !== 2 || submitting}
-                style={{ opacity: picks.length === 2 ? 1 : 0.4, marginTop: 12 }}
-                className="bg-wolf-accent rounded-xl py-5 items-center"
-              >
-                <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-                  CONFIRM
-                </Text>
-              </TouchableOpacity>
-            </>
-          ) : undefined
-        }
       >
         <Text className="text-wolf-text text-base text-center mt-2 mb-2">
           {isGhost
@@ -2305,37 +2203,12 @@ function MentalistPicker({
 
         {mentalistState.lockedTargets.length > 0 && (
           <View className="bg-wolf-card rounded-xl px-4 py-3 mb-3">
-            <Text className="text-wolf-muted text-xs leading-5">
+            <Text className="text-wolf-text text-xs leading-5">
               Off-limits tonight (read them last night):{' '}
-              <Text className="text-wolf-text">
+              <Text className="text-wolf-text font-bold">
                 {mentalistState.lockedTargets.map(t => t.name).join(' & ')}
               </Text>
             </Text>
-          </View>
-        )}
-
-        {mentalistState.history.length > 0 && (
-          <View className="bg-wolf-card rounded-xl px-4 py-3 mb-4">
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-              {isGhost ? "THE MENTALIST'S READINGS" : 'YOUR READINGS'}
-            </Text>
-            {mentalistState.history.map((h, i) => (
-              <View key={i} className="py-1">
-                <View className="flex-row justify-between">
-                  <Text className="text-wolf-text text-sm">
-                    Night {h.nightNumber} — {h.firstName} & {h.secondName}
-                  </Text>
-                  <Text
-                    className="text-sm font-bold"
-                    style={{
-                      color: h.sameTeam === 'same' ? '#5BA0E5' : '#E07070',
-                    }}
-                  >
-                    {h.sameTeam === 'same' ? 'SAME' : 'DIFFERENT'}
-                  </Text>
-                </View>
-              </View>
-            ))}
           </View>
         )}
 
@@ -2344,7 +2217,11 @@ function MentalistPicker({
       {/* Confirmation overlay */}
       {confirmOpen && (
         <ConfirmOverlay
-          onCancel={() => setConfirmOpen(false)}
+          onCancel={() => {
+            // Saying NO wipes the pair so the Mentalist can start fresh.
+            setConfirmOpen(false);
+            setPicks([]);
+          }}
           onConfirm={handleConfirm}
           submitting={submitting}
         >
@@ -2370,39 +2247,47 @@ function MentalistPicker({
             right: 0,
             top: 0,
             bottom: 0,
-            backgroundColor: 'rgba(0,0,0,0.92)',
+            backgroundColor: 'transparent',
             alignItems: 'center',
             justifyContent: 'center',
-            padding: 32,
+            padding: 24,
             opacity: fadeAnim,
           }}
         >
           <View
-            className="rounded-2xl px-10 py-10 items-center"
+            className="bg-wolf-surface rounded-3xl"
             style={{
-              backgroundColor:
-                pendingResult.sameTeam === 'same' ? '#1F4E80' : '#5A2F80',
-              minWidth: 260,
+              alignItems: 'center',
+              alignSelf: 'center',
+              maxWidth: 460,
+              width: '100%',
+              paddingTop: 40,
+              paddingBottom: 34,
+              paddingHorizontal: 32,
+              borderWidth: 1,
+              borderColor: '#2C2C3A',
             }}
           >
-            <Text className="text-wolf-text text-xs font-bold tracking-widest mb-3 text-center">
-              {pendingResult.firstName.toUpperCase()} &{' '}
+            <Text className="text-wolf-text text-3xl font-extrabold text-center">
+              {pendingResult.firstName.toUpperCase()}
+            </Text>
+            <Text className="text-wolf-muted text-xl text-center my-2">&</Text>
+            <Text className="text-wolf-text text-3xl font-extrabold text-center">
               {pendingResult.secondName.toUpperCase()}
             </Text>
-            <Text className="text-wolf-text text-3xl font-extrabold tracking-widest text-center">
+            <View
+              className="bg-wolf-card"
+              style={{ height: 1, width: '75%', marginVertical: 26 }}
+            />
+            <Text className="text-wolf-text text-4xl font-extrabold tracking-widest text-center">
               {pendingResult.sameTeam === 'same'
                 ? 'SAME TEAM'
                 : 'DIFFERENT TEAMS'}
             </Text>
-          </View>
-          <TouchableOpacity
-            onPress={handleAck}
-            className="bg-wolf-accent rounded-xl py-4 px-10 mt-10"
-          >
-            <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-              OK
+            <Text className="text-wolf-muted text-sm text-center mt-7">
+              Take a moment to remember this…
             </Text>
-          </TouchableOpacity>
+          </View>
         </Animated.View>
       )}
     </View>
