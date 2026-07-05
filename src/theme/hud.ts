@@ -1,3 +1,4 @@
+import { createContext, useContext } from 'react';
 import { Dimensions } from 'react-native';
 
 /**
@@ -37,6 +38,28 @@ export const ringAnchorStyle = {
   bottom: RING_BOTTOM_EDGE,
   alignItems: 'center' as const,
 };
+
+/**
+ * Space (px) occupied BELOW the ring's parent container that must be clawed
+ * back from the anchor so the ring keeps its on-screen position. The anchor
+ * math assumes the ring's parent reaches the true screen bottom; in a remote
+ * game the collapsed chat bar sits below the game area and breaks that, riding
+ * the ring up by the bar's height. RemoteGameLayout measures the collapsed bar
+ * and publishes it here; it's 0 in local play and while the chat is expanded
+ * (the bar is then an absolute overlay, so the game area is full-height again).
+ */
+export const RingBottomReservedContext = createContext(0);
+
+/** The reserved bottom space for the current subtree (see the context above). */
+export function useRingBottomReserved(): number {
+  return useContext(RingBottomReservedContext);
+}
+
+/** ringAnchorStyle corrected for any reserved bottom space in this subtree. */
+export function useRingAnchorStyle() {
+  const reserved = useRingBottomReserved();
+  return { ...ringAnchorStyle, bottom: RING_BOTTOM_EDGE - reserved };
+}
 
 /** Drop shadow for any text laid directly over the scene (no panel behind). */
 export const SCENE_TEXT_SHADOW = {

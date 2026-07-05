@@ -31,6 +31,7 @@ import {
   RING_SIZE,
   RING_BOTTOM_EDGE,
   ringAnchorStyle,
+  useRingBottomReserved,
 } from '../theme/hud';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
@@ -940,7 +941,6 @@ function DiscussionView({
   hostMissing: boolean;
   passHostCandidates?: Array<{ _id: Id<'players'>; name: string }>;
 }) {
-  const insets = useSafeAreaInsets();
   const now = useNow();
   const toggleNomTap = useMutation(api.day.toggleNomTap);
   const hostForceNominate = useMutation(api.day.hostForceNominate);
@@ -949,6 +949,10 @@ function DiscussionView({
   // Measured height of the seating area so the ring is sized to always fit
   // (ring + caption) without scrolling — see the seat-area block below.
   const [seatAreaH, setSeatAreaH] = useState(0);
+  // Anchor the ring at its shared screen spot, clawing back any space the
+  // remote-chat bar reserves below the game area (0 in local play). The ring
+  // and its caption both key off this so they stay glued together.
+  const ringBottomEdge = RING_BOTTOM_EDGE - useRingBottomReserved();
   // Host override: when armed, the host's next seat tap fires a trial
   // directly (bypasses the 2-tap consensus). Solo-test escape hatch. The
   // toggle is silent — other phones see only the resulting trial, with
@@ -1106,7 +1110,10 @@ function DiscussionView({
         style={{ flex: 1 }}
         onLayout={e => setSeatAreaH(e.nativeEvent.layout.height)}
       >
-        <View pointerEvents="box-none" style={ringAnchorStyle}>
+        <View
+          pointerEvents="box-none"
+          style={{ ...ringAnchorStyle, bottom: ringBottomEdge }}
+        >
           <SeatingCircle
             size={RING_SIZE}
             phase="day"
@@ -1151,7 +1158,7 @@ function DiscussionView({
             position: 'absolute',
             left: 0,
             right: 0,
-            top: Math.max(0, seatAreaH - RING_BOTTOM_EDGE + 8),
+            top: Math.max(0, seatAreaH - ringBottomEdge + 8),
             paddingHorizontal: 16,
             alignItems: 'center',
           }}
@@ -1220,29 +1227,6 @@ function DiscussionView({
           </Text>
         )}
         </View>
-        {/* Non-host footer lives INSIDE the flex-1 seat area (pinned to its
-            bottom via marginTop:auto) rather than as a sibling below it. As a
-            sibling it would shorten this container, and since the ring is
-            anchored absolutely to the container's bottom edge, the ring would
-            sit higher for non-hosts than for the host. Keeping it in-flow here
-            lets the container always reach the screen bottom, so the ring holds
-            the same on-screen anchor for everyone — matching NightPickerLayout. */}
-        {!isHost && !pending && (
-          <View
-            style={{
-              marginTop: 'auto',
-              paddingHorizontal: 24,
-              paddingBottom: Math.max(insets.bottom, 16) + 16,
-            }}
-          >
-            <Text
-              className="text-xs tracking-widest text-center"
-              style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
-            >
-              HOST CONTROLS THE FLOOR
-            </Text>
-          </View>
-        )}
       </View>
 
       <TimersConfigModal

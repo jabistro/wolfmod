@@ -34,7 +34,11 @@ import { HostMissingBanner } from '../components/HostMissingBanner';
 import { MasonRevealModal } from '../components/MasonRevealModal';
 import { isWolfTeam } from '../data/v1Roles';
 import { getRoleDescription } from '../data/roleDescriptions';
-import { SCENE_TEXT_SHADOW, RING_SIZE, ringAnchorStyle } from '../theme/hud';
+import {
+  SCENE_TEXT_SHADOW,
+  RING_SIZE,
+  useRingAnchorStyle,
+} from '../theme/hud';
 import { useTheme } from '../contexts/ThemeContext';
 import { getTableArt } from '../data/tableArt';
 
@@ -747,11 +751,12 @@ function NightPickerLayout({
   footer?: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  const ringAnchor = useRingAnchorStyle();
   return (
     <View style={{ flex: 1 }}>
-      {/* Ring pinned to the shared absolute anchor. box-none lets taps reach
-          the seats but not this wrapper. */}
-      <View pointerEvents="box-none" style={ringAnchorStyle}>
+      {/* Ring pinned to the shared absolute anchor (corrected for the remote-
+          chat bar). box-none lets taps reach the seats but not this wrapper. */}
+      <View pointerEvents="box-none" style={ringAnchor}>
         {ring(RING_SIZE)}
       </View>
       {children != null && (

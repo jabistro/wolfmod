@@ -3,6 +3,7 @@ import { BackHandler, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from 'convex/react';
 import ChatPane from './ChatPane';
+import { RingBottomReservedContext } from '../theme/hud';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 
@@ -39,6 +40,15 @@ export default function RemoteGameLayout({
   if (availH > maxAvailRef.current) maxAvailRef.current = availH;
   const keyboardHandledPx =
     maxAvailRef.current > 0 ? Math.max(0, maxAvailRef.current - availH) : 0;
+
+  // Measured height of the COLLAPSED chat bar. When collapsed the bar is an
+  // in-flow sibling below the game area, so it shrinks the space the seating
+  // ring is anchored within — the ring's absolute anchor (ringAnchorStyle)
+  // assumes its parent reaches the screen bottom, so without this correction
+  // the ring rides up by the bar's height. We publish it via context so the
+  // pickers can claw it back. Only meaningful (and only measured) while
+  // collapsed; expanded, the bar is an absolute overlay and reserves nothing.
+  const [collapsedBarH, setCollapsedBarH] = useState(0);
 
   // Expand state lives here so we can size the two regions. Auto-collapse the
   // instant the player must act (night picker / vote buttons) so the action
@@ -150,12 +160,19 @@ export default function RemoteGameLayout({
           when expanded, the OPAQUE chat is overlaid on top of everything below
           the header peek — so only the game's top header shows through, with no
           clipping involved. */}
-      <View style={{ flex: 1 }}>{children}</View>
+      <RingBottomReservedContext.Provider value={expanded ? 0 : collapsedBarH}>
+        <View style={{ flex: 1 }}>{children}</View>
+      </RingBottomReservedContext.Provider>
       {/* Chat: an in-flow bar at the bottom when collapsed; an absolute overlay
           covering from the header peek down when expanded. ChatPane stays
           mounted across the toggle (only its container's position changes) so
           its scroll/read state isn't reset. */}
       <View
+        onLayout={e => {
+          // Capture the bar height only while collapsed — expanded, this
+          // wrapper is the full-height overlay, not the bar we want to reserve.
+          if (!expanded) setCollapsedBarH(e.nativeEvent.layout.height);
+        }}
         style={
           expanded
             ? {
