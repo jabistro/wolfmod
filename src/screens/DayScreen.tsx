@@ -1220,23 +1220,30 @@ function DiscussionView({
           </Text>
         )}
         </View>
-      </View>
-
-      {!isHost && !pending && (
-        <View
-          style={{
-            paddingHorizontal: 24,
-            paddingBottom: Math.max(insets.bottom, 16) + 16,
-          }}
-        >
-          <Text
-            className="text-xs tracking-widest text-center"
-            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+        {/* Non-host footer lives INSIDE the flex-1 seat area (pinned to its
+            bottom via marginTop:auto) rather than as a sibling below it. As a
+            sibling it would shorten this container, and since the ring is
+            anchored absolutely to the container's bottom edge, the ring would
+            sit higher for non-hosts than for the host. Keeping it in-flow here
+            lets the container always reach the screen bottom, so the ring holds
+            the same on-screen anchor for everyone — matching NightPickerLayout. */}
+        {!isHost && !pending && (
+          <View
+            style={{
+              marginTop: 'auto',
+              paddingHorizontal: 24,
+              paddingBottom: Math.max(insets.bottom, 16) + 16,
+            }}
           >
-            HOST CONTROLS THE FLOOR
-          </Text>
-        </View>
-      )}
+            <Text
+              className="text-xs tracking-widest text-center"
+              style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+            >
+              HOST CONTROLS THE FLOOR
+            </Text>
+          </View>
+        )}
+      </View>
 
       <TimersConfigModal
         visible={cogOpen}
