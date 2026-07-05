@@ -94,6 +94,14 @@ if (!RN.__wolfFontPatched) {
   });
   ThemedTextInput.displayName = 'ThemedTextInput';
 
+  // TextInput carries a `State` static (currentlyFocusedInput, focusTextInput,
+  // blurTextInput, ...) that libraries read off the imported TextInput —
+  // notably @react-navigation/stack's useKeyboardManager during page-change
+  // gestures. Our wrapper is a fresh component, so forward the statics or those
+  // reads hit `undefined.currentlyFocusedInput()` and crash mid-transition.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (ThemedTextInput as any).State = (OriginalTextInput as any).State;
+
   // Keep NativeWind's className -> style mapping working for the wrappers.
   cssInterop(ThemedText, { className: 'style' });
   cssInterop(ThemedTextInput, { className: 'style' });
