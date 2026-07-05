@@ -34,6 +34,7 @@ import {
 } from '../theme/hud';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
+import { NightDeathTriggerOverlay } from '../components/NightDeathTriggerOverlay';
 import PassHostPickerModal from '../components/PassHostPickerModal';
 import GraveyardButton from '../components/GraveyardModal';
 
@@ -434,6 +435,16 @@ export default function DayScreen() {
       }}
     />
     {passPicker}
+    {/* Pre-empt case: the host tapped BEGIN DAY while a night-death Hunter was
+        still deciding. The day started (clock paused server-side); this overlay
+        carries the shot decision + its full-screen announcement into the day,
+        interrupting everyone. Gated to the night-death flow so it never
+        collides with the lynch-cascade overlay inside ResultsView. */}
+    <NightDeathTriggerOverlay
+      gameId={game._id}
+      deviceClientId={deviceClientId}
+      onlyFollowUpDay
+    />
     </>
   );
 }

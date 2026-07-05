@@ -25,6 +25,7 @@ import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import { MasonRevealModal } from '../components/MasonRevealModal';
+import { NightDeathTriggerOverlay } from '../components/NightDeathTriggerOverlay';
 
 type Nav = StackNavigationProp<RootStackParamList, 'Morning'>;
 type Route = RouteProp<RootStackParamList, 'Morning'>;
@@ -139,6 +140,13 @@ export default function MorningScreen() {
         submitting={ackingMason}
       />
       <InGameLeaveButton onPress={confirmLeave} />
+      {/* A Hunter/HW who died overnight decides their shot right here, over the
+          dawn reveal — no waiting for BEGIN DAY. When they fire, every phone
+          gets the full-screen announcement. Self-gates off the trigger queue. */}
+      <NightDeathTriggerOverlay
+        gameId={game._id}
+        deviceClientId={deviceClientId}
+      />
       <View className="px-4 pt-10 pb-3 items-center">
         <Text
           className="text-xs tracking-widest"

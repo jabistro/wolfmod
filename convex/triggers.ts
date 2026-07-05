@@ -12,8 +12,10 @@ import {
   isBotName,
   isTriggerRole,
   applyWinIfReached,
+  recordWinIfReached,
   postWinBanner,
   initializeDayClock,
+  dayConfigOf,
   flagCubDeathIfApplicable,
   flagAlphaConvertIfApplicable,
   type TriggerRole,
@@ -307,9 +309,17 @@ export async function processTriggerQueue(
   while (true) {
     const game = await ctx.db.get(gameId);
     if (!game) return;
-    // Trigger flow runs in 'triggers' phase (night context, Case B) and
-    // 'day' phase (lynch context, during the vote dwell).
-    if (game.phase !== 'triggers' && game.phase !== 'day') return;
+    // Trigger flow runs in 'morning' phase (night-death Hunter shot, opened
+    // the instant morning hits and running concurrently with the dawn
+    // reveal), 'day' phase (lynch cascade during the vote dwell, OR a
+    // night-death shot that carried into the day after the host pre-empted
+    // with BEGIN DAY), and the legacy 'triggers' phase.
+    if (
+      game.phase !== 'triggers' &&
+      game.phase !== 'day' &&
+      game.phase !== 'morning'
+    )
+      return;
     const queue = [...(game.pendingDeathTriggers ?? [])];
     if (queue.length === 0) {
       // Lynch context: don't auto-transition — the host's CONTINUE button
@@ -368,6 +378,35 @@ function deathCauseForShot(role: TriggerRole): string {
 
 // ───── Finalization ─────────────────────────────────────────────────────────
 
+/**
+ * Un-pauses the discussion clock after a pre-empted night-death Hunter shot
+ * resolves. BEGIN DAY started the day with `dayPausedRemainingMs` holding the
+ * full duration; convert that back into a live `dayEndsAt` and (remote only)
+ * re-arm the expiry tick. No-op if the clock isn't paused (defensive) or a
+ * trial is somehow already in flight (its own pause wins).
+ */
+async function resumeDayClockAfterTrigger(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<void> {
+  const game = await ctx.db.get(gameId);
+  if (!game || game.phase !== 'day') return;
+  if (game.currentNomination) return; // trial pause owns the clock
+  const paused = game.dayPausedRemainingMs;
+  if (paused === undefined) return;
+  const endsAt = Date.now() + paused;
+  await ctx.db.patch(gameId, {
+    dayEndsAt: endsAt,
+    dayPausedRemainingMs: undefined,
+  });
+  if (game.mode === 'remote') {
+    await ctx.scheduler.runAfter(paused, internal.day.dayClockExpiryTick, {
+      gameId,
+      expectedEndsAt: endsAt,
+    });
+  }
+}
+
 async function finalizeTriggerPhase(
   ctx: MutationCtx,
   gameId: Id<'games'>,
@@ -375,6 +414,7 @@ async function finalizeTriggerPhase(
   const game = await ctx.db.get(gameId);
   if (!game) return;
   const followUp = game.triggersFollowUp ?? 'day';
+  const phaseAtFinalize = game.phase;
 
   // Clear trigger state regardless of follow-up.
   await ctx.db.patch(gameId, {
@@ -385,9 +425,40 @@ async function finalizeTriggerPhase(
   });
 
   if (followUp === 'day') {
-    // Case B path: morning was shown, host tapped BEGIN DAY, triggers ran.
-    // If the trigger cascade sealed a win, end the game directly rather
-    // than starting a day that no one's going to play.
+    // Night-death Hunter shot. The decision window opened at morning and ran
+    // concurrently with the dawn reveal. Where we land now depends on whether
+    // the host already pre-empted with BEGIN DAY:
+    //
+    //   * Still in 'morning' → the Hunter resolved before BEGIN DAY. Stay in
+    //     morning (the dawn panel already reflects any new victim); the host
+    //     advances when ready. Just record a win if the shot sealed one.
+    //   * Already in 'day' → the host pre-empted; the day started paused while
+    //     the Hunter decided. Resume the day clock now that the shot (and its
+    //     announcement) has landed — unless it ended the game.
+    //   * 'triggers' (legacy) → begin the next day fresh.
+    if (phaseAtFinalize === 'morning') {
+      const winner = await recordWinIfReached(ctx, gameId);
+      if (winner && game.mode === 'remote') {
+        const ended = await ctx.db.get(gameId);
+        if (ended) {
+          await postWinBanner(ctx, ended);
+          await ctx.db.patch(gameId, { phase: 'ended', endedAt: Date.now() });
+        }
+      }
+      return;
+    }
+    if (phaseAtFinalize === 'day') {
+      const won = await applyWinIfReached(ctx, gameId);
+      if (won) {
+        const ended = await ctx.db.get(gameId);
+        if (ended) await postWinBanner(ctx, ended);
+        return;
+      }
+      // Resume the day clock that BEGIN DAY started paused.
+      await resumeDayClockAfterTrigger(ctx, gameId);
+      return;
+    }
+    // Legacy 'triggers' phase path.
     const won = await applyWinIfReached(ctx, gameId);
     if (won) {
       const ended = await ctx.db.get(gameId);
@@ -426,9 +497,14 @@ async function requireHead(
 ): Promise<{ game: Doc<'games'>; me: Player; head: TriggerEntry }> {
   const game = await ctx.db.get(gameId);
   if (!game) throw new Error('Game not found.');
-  // Triggers can fire in either the 'triggers' phase (night context) or
-  // the 'day' phase (lynch dwell). Reject anywhere else.
-  if (game.phase !== 'triggers' && game.phase !== 'day') {
+  // Triggers can fire in 'morning' (night-death Hunter shot, before the host
+  // pre-empts with BEGIN DAY), 'day' (lynch dwell OR a pre-empted night-death
+  // shot), or the legacy 'triggers' phase. Reject anywhere else.
+  if (
+    game.phase !== 'triggers' &&
+    game.phase !== 'day' &&
+    game.phase !== 'morning'
+  ) {
     throw new Error('No trigger is active.');
   }
   const queue = game.pendingDeathTriggers ?? [];
@@ -511,6 +587,23 @@ export const submitHunterShot = mutation({
       `${me.name.toUpperCase()} HAS SHOT ${target.name.toUpperCase()}`,
       `${target.name.toUpperCase()} HAS BEEN ELIMINATED`,
     ]);
+    // Pre-empt case: the host already started the day (running clock) while
+    // this Hunter was deciding. Now that the shot has actually landed, pause
+    // the day clock so the full-screen announcement genuinely interrupts the
+    // day; finalizeTriggerPhase resumes it once the trigger flow settles. (A
+    // pass never reaches here, so a silent decision never pauses the clock —
+    // no tell.) No-op outside the day / during a trial.
+    if (game.phase === 'day' && !game.currentNomination) {
+      const fresh = await ctx.db.get(args.gameId);
+      if (fresh && fresh.dayPausedRemainingMs === undefined) {
+        await ctx.db.patch(args.gameId, {
+          dayPausedRemainingMs: Math.max(
+            0,
+            (fresh.dayEndsAt ?? Date.now()) - Date.now(),
+          ),
+        });
+      }
+    }
     // Remote: also drop a PERMANENT record in the village chat. The on-screen
     // overlay above is transient and, with the chat expanded (the default
     // during the triggers phase), it's hidden behind the docked chat — so the
@@ -524,12 +617,17 @@ export const submitHunterShot = mutation({
         game.triggersFollowUp === 'night'
           ? game.revealOnLynch ?? false
           : game.revealOnNightDeath ?? false;
+      // A night-death shot ('day' follow-up) belongs to the dawning day
+      // (dayNumber + 1), matching the dawn report's label; a lynch cascade
+      // ('night' follow-up) belongs to the current day.
+      const shotDayLabel =
+        game.triggersFollowUp === 'night' ? game.dayNumber : game.dayNumber + 1;
       await ctx.db.insert('messages', {
         gameId: args.gameId,
         channel: 'village',
         authorName: 'MODERATOR',
         body: '',
-        phaseLabel: `Day ${game.dayNumber}`,
+        phaseLabel: `Day ${shotDayLabel}`,
         sentAt: Date.now(),
         system: true,
         shotReport: {
@@ -703,7 +801,12 @@ export const triggerAutoTick = internalMutation({
   handler: async (ctx, args) => {
     const game = await ctx.db.get(args.gameId);
     if (!game) return;
-    if (game.phase !== 'triggers' && game.phase !== 'day') return;
+    if (
+      game.phase !== 'triggers' &&
+      game.phase !== 'day' &&
+      game.phase !== 'morning'
+    )
+      return;
     const queue = game.pendingDeathTriggers ?? [];
     const head = queue[0];
     if (!head) return;

@@ -1446,8 +1446,16 @@ async function resolveMorning(
   });
   await enqueueTriggersForDeaths(ctx, gameId, hunterDeaths);
   await postDawnReport(ctx, gameId);
+  // Open the Hunter's shot window immediately — the decision runs concurrently
+  // with the dawn reveal instead of waiting for BEGIN DAY. processTriggerQueue
+  // runs in 'morning' phase now, so this sets triggerEndsAt + schedules the
+  // auto-tick. The dead Hunter's phone shows the picker; everyone else keeps
+  // reading the morning report. If the host pre-empts with BEGIN DAY before
+  // the Hunter decides, the trigger carries into the day (see applyBeginDay).
+  await processTriggerQueue(ctx, gameId);
   // Don't recordWinIfReached yet — the triggers may shift the count
-  // (Hunter cascade) before the game is officially over.
+  // (Hunter cascade) before the game is officially over. finalizeTriggerPhase
+  // records/applies the win once the shot resolves.
 }
 
 /**
@@ -5347,11 +5355,13 @@ async function applyBeginDay(ctx: MutationCtx, gameId: Id<'games'>) {
     await ctx.db.patch(gameId, { phase: 'ended', endedAt: Date.now() });
     return;
   }
-  if ((game.pendingDeathTriggers?.length ?? 0) > 0) {
-    await ctx.db.patch(gameId, { phase: 'triggers' });
-    await processTriggerQueue(ctx, gameId);
-    return;
-  }
+  // A night-death Hunter shot may still be in flight (its window opened at
+  // morning). The host is pre-empting: start the day NORMALLY (running clock)
+  // even if the Hunter hasn't decided yet — a paused clock would tip the
+  // village off that an eliminated player is holding a shot. The trigger keeps
+  // running (pendingDeathTriggers / triggerEndsAt persist). Only if the Hunter
+  // actually fires does submitHunterShot pause the clock for the announcement,
+  // which finalizeTriggerPhase then resumes. A silent pass never pauses.
   await ctx.db.patch(gameId, { phase: 'day', dayNumber: game.dayNumber + 1 });
   await initializeDayClock(ctx, gameId);
 }
