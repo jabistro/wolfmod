@@ -8,7 +8,9 @@ import {
   ScrollView,
   Pressable,
   Dimensions,
+  StyleSheet,
 } from 'react-native';
+import { Image as ExpoImage } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -26,11 +28,14 @@ import {
 import { ROLES, CATEGORIES, roleSortKey, type RoleCategory } from '../data/roles';
 import { getRoleValue } from '../data/roleValues';
 import TimersConfigModal from '../components/TimersConfigModal';
+import { TIMER_STEPPERS, formatTimerValue } from '../components/TimerSteppers';
 import RolesBrowserModal from '../components/RolesBrowserModal';
 import { showAlert } from '../components/ThemedAlert';
 import { useAndroidBack } from '../hooks/useAndroidBack';
 import { DEV_FEATURES_AVAILABLE } from '../config/devFlags';
 import { useDevMode } from '../contexts/DevModeContext';
+import { useTheme } from '../contexts/ThemeContext';
+import { getTableArt } from '../data/tableArt';
 
 // Build the category map for v1 roles once. The role selection modal uses
 // this to power its team tabs (Villagers / Wolves / Team Wolf / Solo) so
@@ -52,6 +57,12 @@ const MIN_SEAT = 30;
 const MAX_SEAT = 64;
 const MIN_PLAYER_COUNT = 3;
 const MAX_PLAYER_COUNT = 40;
+
+// Solid wolf-card panels sit over the busy lobby art, matching the card/panel
+// grey used across the rest of the app so text keeps its normal dark-theme
+// colors and stays legible over the scenery.
+const PANEL_GREY = '#3A3A47'; // wolf-card
+const SEAT_GREY_EMPTY = '#22222F'; // empty-seat fill (darker than the panel)
 
 /**
  * Largest seatSize that keeps adjacent seats from overlapping when N seats are
@@ -86,12 +97,20 @@ function seatFontSize(seatSize: number, longName: boolean): number {
   return 7;
 }
 
-function formatRoleSummary(roles: string[]): string {
+// Vertical list of the picked roles, one per line, aggregating duplicates
+// as "Role ×N" (e.g. three Villagers render as a single "Villager ×3" row).
+function RoleList({ roles }: { roles: string[] }) {
   const counts: Record<string, number> = {};
   for (const r of roles) counts[r] = (counts[r] ?? 0) + 1;
-  return Object.entries(counts)
-    .map(([role, count]) => (count > 1 ? `${role} ×${count}` : role))
-    .join(', ');
+  return (
+    <>
+      {Object.entries(counts).map(([role, count]) => (
+        <Text key={role} className="text-wolf-text text-sm font-bold py-0.5">
+          {count > 1 ? `${role} ×${count}` : role}
+        </Text>
+      ))}
+    </>
+  );
 }
 
 function BalanceLine({ roles }: { roles: string[] }) {
@@ -115,21 +134,21 @@ function BalanceLine({ roles }: { roles: string[] }) {
 // One-line summary of the role-reveal variant in the lobby SETTINGS card.
 // Only renders when at least one toggle is on — a silent absence reads as
 // "standard hidden-role game", which is the default.
-function RevealLine({
-  revealOnLynch,
-  revealOnNightDeath,
-}: {
-  revealOnLynch: boolean;
-  revealOnNightDeath: boolean;
-}) {
-  if (!revealOnLynch && !revealOnNightDeath) return null;
-  const parts: string[] = [];
-  if (revealOnLynch) parts.push('lynch');
-  if (revealOnNightDeath) parts.push('night');
+// One row of the read-only settings list — "LABEL              VALUE". Every
+// player sees the full build this way; only the host gets the EDIT button.
+function SettingsRow({ label, value }: { label: string; value: string }) {
   return (
-    <Text style={{ color: '#D4A017', fontSize: 12, fontWeight: '600', marginTop: 8 }}>
-      Reveal role on: {parts.join(' + ')}
-    </Text>
+    <View className="flex-row items-center justify-between py-1.5">
+      <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+        {label}
+      </Text>
+      <Text
+        className="text-wolf-text text-sm font-bold"
+        style={{ fontVariant: ['tabular-nums'] }}
+      >
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -138,6 +157,8 @@ export default function LobbyScreen() {
   const { params } = useRoute<Route>();
   const deviceClientId = useDeviceId();
   const insets = useSafeAreaInsets();
+  const { theme } = useTheme();
+  const art = getTableArt(theme);
   const { devModeEnabled } = useDevMode();
   // Lobby dev tools require both an opted-in build and the host's toggle being on.
   const showDevTools = DEV_FEATURES_AVAILABLE && devModeEnabled;
@@ -341,7 +362,7 @@ export default function LobbyScreen() {
     if (!deviceClientId) return;
     showAlert(
       `Remove ${playerName}?`,
-      'They leave the lobby and the table shrinks by one seat. Remaining players shift to close the gap. Roles stay picked — adjust them if the count no longer matches.',
+      'They leave the lobby and their seat opens up. The table keeps its size — seat someone else there, or lower the count with the − button.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -559,11 +580,26 @@ export default function LobbyScreen() {
   const seatSize = computeSeatSize(game.playerCount, CIRCLE_SIZE);
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <View style={{ flex: 1, backgroundColor: '#0F0F14' }}>
+      <ExpoImage
+        source={art.lobby}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+      />
+      {/* Light scrim — the scattered lobby art is already low-contrast, so a
+          gentle darken is enough to keep the non-paneled header text legible. */}
+      <View
+        style={{
+          ...StyleSheet.absoluteFillObject,
+          backgroundColor: 'rgba(15, 15, 20, 0.32)',
+        }}
+      />
+      <SafeAreaView className="flex-1">
       {/* Header */}
       <View className="flex-row items-center px-4 pt-10 pb-3">
         <TouchableOpacity onPress={handleLeave} className="w-16">
-          <Text className="text-wolf-text text-base">Leave</Text>
+          <Text className="text-wolf-accent text-base font-bold">Leave</Text>
         </TouchableOpacity>
         <Text className="flex-1 text-wolf-text text-xl font-bold text-center">Lobby</Text>
         <View className="w-16" />
@@ -576,54 +612,59 @@ export default function LobbyScreen() {
       >
         {/* Room code */}
         <View className="items-center pt-2 pb-6">
-          <Text className="text-wolf-muted text-xs tracking-widest">ROOM CODE</Text>
-          <Text
-            className="text-wolf-accent text-5xl font-extrabold mt-1"
-            style={{ letterSpacing: 8 }}
+          <View
+            style={{
+              backgroundColor: PANEL_GREY,
+              borderRadius: 20,
+              paddingHorizontal: 28,
+              paddingVertical: 14,
+              alignItems: 'center',
+            }}
           >
-            {game.roomCode}
-          </Text>
-          {isHost ? (
-            <View
-              className="flex-row items-center mt-2"
-              style={{ gap: 12 }}
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+              ROOM CODE
+            </Text>
+            <Text
+              className="text-wolf-accent text-5xl font-extrabold mt-1"
+              style={{ letterSpacing: 8 }}
             >
-              <TouchableOpacity
-                onPress={() => changePlayerCount(-1)}
-                disabled={
-                  game.playerCount <= MIN_PLAYER_COUNT ||
-                  game.playerCount <= players.length
-                }
-                style={{
-                  opacity:
-                    game.playerCount <= MIN_PLAYER_COUNT ||
-                    game.playerCount <= players.length
-                      ? 0.3
-                      : 1,
-                }}
-                className="w-7 h-7 bg-wolf-card rounded-full items-center justify-center"
+              {game.roomCode}
+            </Text>
+            {isHost ? (
+              <View
+                className="flex-row items-center mt-2"
+                style={{ gap: 12 }}
               >
-                <Text className="text-wolf-text text-base">−</Text>
-              </TouchableOpacity>
-              <Text className="text-wolf-muted text-xs tracking-widest">
+                <TouchableOpacity
+                  onPress={() => changePlayerCount(-1)}
+                  disabled={game.playerCount <= MIN_PLAYER_COUNT}
+                  style={{
+                    opacity: game.playerCount <= MIN_PLAYER_COUNT ? 0.3 : 1,
+                  }}
+                  className="w-7 h-7 bg-wolf-card rounded-full items-center justify-center"
+                >
+                  <Text className="text-wolf-text text-base">−</Text>
+                </TouchableOpacity>
+                <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+                  {players.length} / {game.playerCount} JOINED
+                </Text>
+                <TouchableOpacity
+                  onPress={() => changePlayerCount(1)}
+                  disabled={game.playerCount >= MAX_PLAYER_COUNT}
+                  style={{
+                    opacity: game.playerCount >= MAX_PLAYER_COUNT ? 0.3 : 1,
+                  }}
+                  className="w-7 h-7 bg-wolf-card rounded-full items-center justify-center"
+                >
+                  <Text className="text-wolf-text text-base">+</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <Text className="text-wolf-muted text-xs font-bold tracking-widest mt-2">
                 {players.length} / {game.playerCount} JOINED
               </Text>
-              <TouchableOpacity
-                onPress={() => changePlayerCount(1)}
-                disabled={game.playerCount >= MAX_PLAYER_COUNT}
-                style={{
-                  opacity: game.playerCount >= MAX_PLAYER_COUNT ? 0.3 : 1,
-                }}
-                className="w-7 h-7 bg-wolf-card rounded-full items-center justify-center"
-              >
-                <Text className="text-wolf-text text-base">+</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <Text className="text-wolf-muted text-xs tracking-widest mt-2">
-              {players.length} / {game.playerCount} JOINED
-            </Text>
-          )}
+            )}
+          </View>
         </View>
 
         {/* Seating circle */}
@@ -656,41 +697,95 @@ export default function LobbyScreen() {
                     width: seatSize,
                     height: seatSize,
                     borderRadius: seatSize / 2,
-                    backgroundColor: occupant ? '#22222F' : '#1A1A24',
+                    backgroundColor: occupant ? '#22222F' : PANEL_GREY,
                     borderWidth: 2,
                     borderColor: isMe
                       ? '#D4A017'
                       : occupant
-                        ? '#3A3A48'
+                        ? '#4A4A58'
                         : '#2A2A38',
+                    overflow: 'hidden',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    paddingHorizontal: 2,
+                    paddingHorizontal: occupant ? 0 : 2,
                   }}
                 >
-                  <Text
-                    style={{
-                      color: occupant ? '#F0EDE8' : '#5A5560',
-                      fontSize,
-                      fontWeight: '600',
-                      textAlign: 'center',
-                    }}
-                    numberOfLines={2}
-                  >
-                    {occupant ? occupant.name : `${i + 1}`}
-                  </Text>
+                  {occupant ? (
+                    // Taken seat: use the moonlit cloaked avatar so seated
+                    // players read against the dark lobby art, with a dark name
+                    // banner along the bottom (see SeatingCircle).
+                    <>
+                      <ExpoImage
+                        source={art.avatarNight}
+                        style={{ width: '100%', height: '100%' }}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                      />
+                      <View
+                        pointerEvents="none"
+                        style={{
+                          position: 'absolute',
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          backgroundColor: 'rgba(10, 10, 14, 0.72)',
+                          paddingVertical: 2,
+                          paddingHorizontal: 2,
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: '#F0EDE8',
+                            fontSize,
+                            fontWeight: isMe ? '700' : '600',
+                            textAlign: 'center',
+                          }}
+                          numberOfLines={1}
+                        >
+                          {occupant.name}
+                        </Text>
+                      </View>
+                    </>
+                  ) : (
+                    <Text
+                      style={{
+                        color: '#8A8590',
+                        fontSize,
+                        fontWeight: '600',
+                        textAlign: 'center',
+                      }}
+                      numberOfLines={2}
+                    >
+                      {i + 1}
+                    </Text>
+                  )}
                 </TouchableOpacity>
               );
             })}
           </View>
         </View>
 
+        {/* Light-grey legibility panel — everything below the seating circle
+            sits on a solid surface so the section labels and controls read
+            over the busy lobby art. */}
+        <View
+          style={{
+            backgroundColor: PANEL_GREY,
+            borderRadius: 24,
+            marginHorizontal: 12,
+            marginTop: 16,
+            paddingTop: 12,
+            paddingBottom: 20,
+          }}
+        >
         {isHost && seatedByPosition.size > 0 && (
           <View className="items-center mt-4">
             <TouchableOpacity
               onPress={handleClearAllSeats}
               activeOpacity={0.6}
-              className="px-3 py-1.5"
+              className="px-4 py-2 rounded-lg"
+              style={{ backgroundColor: SEAT_GREY_EMPTY }}
             >
               <Text className="text-wolf-red text-xs font-bold tracking-widest">
                 CLEAR ALL SEATS
@@ -718,9 +813,10 @@ export default function LobbyScreen() {
                         ? () => handleDeletePlayer(p._id, p.name)
                         : undefined
                     }
-                    className="bg-wolf-card rounded-full px-3 py-1.5"
+                    className="rounded-full px-3 py-1.5"
+                    style={{ backgroundColor: SEAT_GREY_EMPTY }}
                   >
-                    <Text className="text-wolf-text text-sm">
+                    <Text className="text-wolf-text text-sm font-bold">
                       {p.name}
                       {p.isHost ? ' (host)' : ''}
                       {canDelete ? '  ×' : ''}
@@ -768,64 +864,69 @@ export default function LobbyScreen() {
           {isHost ? (
             <TouchableOpacity
               onPress={openRoleModal}
-              className="bg-wolf-card rounded-xl px-4 py-4"
+              className="rounded-xl px-4 py-4"
+              style={{ backgroundColor: SEAT_GREY_EMPTY }}
               activeOpacity={0.75}
             >
-              <Text className="text-wolf-text text-sm">
-                {game.selectedRoles.length === 0
-                  ? 'Tap to pick roles'
-                  : formatRoleSummary(game.selectedRoles)}
-              </Text>
+              {game.selectedRoles.length === 0 ? (
+                <Text className="text-wolf-text text-sm font-bold">Tap to pick roles</Text>
+              ) : (
+                <RoleList roles={game.selectedRoles} />
+              )}
               {game.selectedRoles.length > 0 && <BalanceLine roles={game.selectedRoles} />}
             </TouchableOpacity>
           ) : (
-            <View className="bg-wolf-card rounded-xl px-4 py-4">
-              <Text className="text-wolf-text text-sm">
-                {game.selectedRoles.length === 0
-                  ? 'Host is picking roles…'
-                  : formatRoleSummary(game.selectedRoles)}
-              </Text>
+            <View
+              className="rounded-xl px-4 py-4"
+              style={{ backgroundColor: SEAT_GREY_EMPTY }}
+            >
+              {game.selectedRoles.length === 0 ? (
+                <Text className="text-wolf-text text-sm font-bold">Host is picking roles…</Text>
+              ) : (
+                <RoleList roles={game.selectedRoles} />
+              )}
               {game.selectedRoles.length > 0 && <BalanceLine roles={game.selectedRoles} />}
             </View>
           )}
         </View>
 
-        {/* Settings section */}
+        {/* Settings — full read-only list so every player sees the exact
+            build. Only the host gets EDIT (opens the config modal); the list
+            itself isn't tappable, mirroring the ROLES / BROWSE ALL header. */}
         <View className="px-6 mt-6">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-2">
-            SETTINGS
-          </Text>
-          {isHost ? (
-            <TouchableOpacity
-              onPress={() => setTimersModalOpen(true)}
-              className="bg-wolf-card rounded-xl px-4 py-4"
-              activeOpacity={0.75}
-            >
-              <Text className="text-wolf-text text-sm">
-                {Math.floor(game.dayDurationSec / 60)}:
-                {(game.dayDurationSec % 60).toString().padStart(2, '0')} day ·{' '}
-                {game.accusationSec}s acc · {game.defenseSec}s def ·{' '}
-                {game.voteTimerSec}s vote · {game.maxNominationsPerDay} noms
-              </Text>
-              <RevealLine
-                revealOnLynch={game.revealOnLynch}
-                revealOnNightDeath={game.revealOnNightDeath}
+          <View className="flex-row items-center justify-between mb-2">
+            <Text className="text-wolf-muted text-xs font-bold tracking-widest">
+              SETTINGS
+            </Text>
+            {isHost && (
+              <TouchableOpacity
+                onPress={() => setTimersModalOpen(true)}
+                hitSlop={8}
+                activeOpacity={0.6}
+              >
+                <Text className="text-wolf-accent text-xs font-bold tracking-widest">
+                  EDIT ›
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <View>
+            {TIMER_STEPPERS.map(({ key, label, isTime }) => (
+              <SettingsRow
+                key={key}
+                label={label}
+                value={isTime ? formatTimerValue(game[key]) : String(game[key])}
               />
-            </TouchableOpacity>
-          ) : (
-            <View className="bg-wolf-card rounded-xl px-4 py-4">
-              <Text className="text-wolf-text text-sm">
-                {Math.floor(game.dayDurationSec / 60)}:
-                {(game.dayDurationSec % 60).toString().padStart(2, '0')} day ·{' '}
-                {game.accusationSec}s acc · {game.defenseSec}s def ·{' '}
-                {game.voteTimerSec}s vote · {game.maxNominationsPerDay} noms
-              </Text>
-              <RevealLine
-                revealOnLynch={game.revealOnLynch}
-                revealOnNightDeath={game.revealOnNightDeath}
-              />
-            </View>
-          )}
+            ))}
+            <SettingsRow
+              label="REVEAL ON LYNCH"
+              value={game.revealOnLynch ? 'ON' : 'OFF'}
+            />
+            <SettingsRow
+              label="REVEAL ON NIGHT DEATH"
+              value={game.revealOnNightDeath ? 'ON' : 'OFF'}
+            />
+          </View>
         </View>
 
         {/* Visible in local dev (__DEV__) or playtest builds that opt in via
@@ -880,7 +981,7 @@ export default function LobbyScreen() {
               </Text>
             </TouchableOpacity>
             {!canStart && (
-              <Text className="text-wolf-muted text-xs text-center mt-2">
+              <Text className="text-wolf-muted text-xs font-bold text-center mt-2">
                 {!allSeated
                   ? 'All players must be seated.'
                   : tooManyRoles
@@ -904,6 +1005,7 @@ export default function LobbyScreen() {
             </Text>
           </View>
         )}
+        </View>
       </ScrollView>
 
       {/* Seat assignment modal */}
@@ -1009,8 +1111,8 @@ export default function LobbyScreen() {
         >
           <View className="bg-wolf-surface rounded-t-3xl" style={{ height: '85%' }}>
             <View className="flex-row items-center px-6 py-4 border-b border-wolf-card">
-              <TouchableOpacity onPress={() => setRolesModalOpen(false)} className="w-16">
-                <Text className="text-wolf-text">Cancel</Text>
+              <TouchableOpacity onPress={() => setRolesModalOpen(false)} className="w-20">
+                <Text className="text-wolf-text" numberOfLines={1}>Cancel</Text>
               </TouchableOpacity>
               <View className="flex-1 items-center">
                 <Text className="text-wolf-text text-base font-bold">
@@ -1036,7 +1138,7 @@ export default function LobbyScreen() {
                 onPress={saveRoles}
                 disabled={draftTotal !== draftTarget}
                 style={{ opacity: draftTotal === draftTarget ? 1 : 0.4 }}
-                className="w-16 items-end"
+                className="w-20 items-end"
               >
                 <Text className="text-wolf-accent font-bold">Done</Text>
               </TouchableOpacity>
@@ -1533,6 +1635,7 @@ export default function LobbyScreen() {
           roomCode={game.roomCode}
         />
       )}
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }

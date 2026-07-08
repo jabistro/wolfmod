@@ -7,8 +7,10 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image as ExpoImage } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useMutation } from 'convex/react';
@@ -19,6 +21,8 @@ import { showAlert } from '../components/ThemedAlert';
 import { useTimerDefaults } from '../contexts/TimerDefaultsContext';
 import { usePlayerName } from '../contexts/PlayerNameContext';
 import { useRoleReveal } from '../contexts/RoleRevealContext';
+import { useTheme } from '../contexts/ThemeContext';
+import { getTableArt } from '../data/tableArt';
 
 type Nav = StackNavigationProp<RootStackParamList, 'CreateGame'>;
 
@@ -32,6 +36,8 @@ export default function CreateGameScreen() {
   const { timerDefaults } = useTimerDefaults();
   const { playerName, setPlayerName } = usePlayerName();
   const { revealOnLynch, revealOnNightDeath } = useRoleReveal();
+  const { theme } = useTheme();
+  const art = getTableArt(theme);
 
   const [name, setName] = useState('');
   const [playerCount, setPlayerCount] = useState(9);
@@ -77,10 +83,26 @@ export default function CreateGameScreen() {
   const ready = !!deviceClientId && !submitting && name.trim().length > 0;
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <View style={{ flex: 1, backgroundColor: '#0F0F14' }}>
+      <ExpoImage
+        source={art.createJoin}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+      />
+      {/* Light scrim — keeps the scene vivid while lifting the form off the art. */}
+      <View
+        style={{
+          ...StyleSheet.absoluteFillObject,
+          backgroundColor: 'rgba(15, 15, 20, 0.32)',
+        }}
+      />
+      <SafeAreaView className="flex-1">
       <View className="flex-row items-center px-4 pt-10 pb-3">
-        <TouchableOpacity onPress={() => navigation.goBack()} className="w-16">
-          <Text className="text-wolf-text text-base">‹ Back</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Text className="text-wolf-text text-base font-bold" numberOfLines={1}>
+            ‹ Back
+          </Text>
         </TouchableOpacity>
         <Text className="flex-1 text-wolf-text text-xl font-bold text-center">Create Game</Text>
         <View className="w-16" />
@@ -92,7 +114,7 @@ export default function CreateGameScreen() {
       >
         <View className="flex-1 px-8 justify-center" style={{ gap: 36 }}>
           <View style={{ gap: 8 }}>
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest">YOUR NAME</Text>
+            <Text className="text-wolf-text text-sm font-extrabold tracking-widest">YOUR NAME</Text>
             <TextInput
               value={name}
               onChangeText={setName}
@@ -106,7 +128,7 @@ export default function CreateGameScreen() {
           </View>
 
           <View className="items-center" style={{ gap: 12 }}>
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest">PLAYER COUNT</Text>
+            <Text className="text-wolf-text text-sm font-extrabold tracking-widest">PLAYER COUNT</Text>
             <View className="flex-row items-center" style={{ gap: 24 }}>
               <TouchableOpacity
                 onPress={() => setPlayerCount(p => Math.max(MIN, p - 1))}
@@ -134,7 +156,7 @@ export default function CreateGameScreen() {
           </View>
 
           <View style={{ gap: 12 }}>
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center">
+            <Text className="text-wolf-text text-sm font-extrabold tracking-widest text-center">
               HOW ARE YOU PLAYING?
             </Text>
             <View className="flex-row" style={{ gap: 12 }}>
@@ -173,7 +195,7 @@ export default function CreateGameScreen() {
                     </Text>
                     <Text
                       className={`text-[11px] mt-1 tracking-wide ${
-                        selected ? 'text-wolf-bg/70' : 'text-wolf-muted'
+                        selected ? 'text-wolf-bg/70' : 'text-wolf-text'
                       }`}
                     >
                       {opt.sub}
@@ -200,6 +222,7 @@ export default function CreateGameScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }

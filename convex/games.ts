@@ -300,36 +300,13 @@ export const removePlayerFromGame = mutation({
     if (target.isHost) {
       throw new Error("Host can't be removed — use Leave to end the game.");
     }
-    if (game.playerCount <= MIN_PLAYERS) {
-      throw new Error(`Game needs at least ${MIN_PLAYERS} seats.`);
-    }
 
+    // Just delete the player, leaving their seat empty. The table keeps its
+    // size (playerCount untouched), so the host can seat someone else there
+    // or lower the count deliberately with setPlayerCount. Remaining players
+    // keep their exact seat positions — no compaction, no fall-off, because
+    // the ring still renders the same number of seats.
     await ctx.db.delete(args.playerId);
-
-    // Compact remaining seats to 0..n-1, preserving relative order. Without
-    // this, a hole appears where the removed player sat AND any seated
-    // player whose position equals the old (now-invalid) top index falls
-    // off the ring — the lobby circle only renders `playerCount` seats but
-    // the player record still has the stale position, so they vanish from
-    // the UI while still counting as "joined" for the start check.
-    const remaining = await ctx.db
-      .query('players')
-      .withIndex('by_game', q => q.eq('gameId', args.gameId))
-      .collect();
-    const seated = remaining
-      .filter(p => typeof p.seatPosition === 'number')
-      .sort(
-        (a, b) => (a.seatPosition as number) - (b.seatPosition as number),
-      );
-    for (let i = 0; i < seated.length; i++) {
-      if (seated[i].seatPosition !== i) {
-        await ctx.db.patch(seated[i]._id, { seatPosition: i });
-      }
-    }
-
-    // selectedRoles intentionally left alone — surfacing the mismatch
-    // (TOO MANY ROLES / NEED MORE) is the design.
-    await ctx.db.patch(args.gameId, { playerCount: game.playerCount - 1 });
   },
 });
 
@@ -379,14 +356,12 @@ export const setPlayerCount = mutation({
       .query('players')
       .withIndex('by_game', q => q.eq('gameId', args.gameId))
       .collect();
-    if (args.playerCount < players.length) {
-      throw new Error(
-        `${players.length} players have joined — remove some before lowering the count.`,
-      );
-    }
 
-    // Shrinking the table: any seat index outside the new range no longer
-    // exists, so unseat its occupant. The host re-seats them afterwards.
+    // The host can shrink the table at any time, even below the number of
+    // joined players — the lobby surfaces the mismatch ("5 / 4 JOINED") and
+    // Start stays gated until it resolves. Shrinking the table: any seat
+    // index outside the new range no longer exists, so unseat its occupant.
+    // The host re-seats or removes them afterwards.
     for (const p of players) {
       if (
         typeof p.seatPosition === 'number' &&

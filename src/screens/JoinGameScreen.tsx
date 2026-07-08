@@ -7,8 +7,10 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image as ExpoImage } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import { useMutation } from 'convex/react';
@@ -17,6 +19,8 @@ import { api } from '../../convex/_generated/api';
 import type { RootStackParamList } from '../navigation/types';
 import { useDeviceId } from '../hooks/useDeviceId';
 import { usePlayerName } from '../contexts/PlayerNameContext';
+import { useTheme } from '../contexts/ThemeContext';
+import { getTableArt } from '../data/tableArt';
 
 type Nav = StackNavigationProp<RootStackParamList, 'JoinGame'>;
 
@@ -36,6 +40,8 @@ export default function JoinGameScreen() {
   const deviceClientId = useDeviceId();
   const joinGame = useMutation(api.games.joinGame);
   const { playerName, setPlayerName } = usePlayerName();
+  const { theme } = useTheme();
+  const art = getTableArt(theme);
 
   const [roomCode, setRoomCode] = useState('');
   const [name, setName] = useState('');
@@ -86,10 +92,26 @@ export default function JoinGameScreen() {
     name.trim().length > 0;
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <View style={{ flex: 1, backgroundColor: '#0F0F14' }}>
+      <ExpoImage
+        source={art.createJoin}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+      />
+      {/* Light scrim — keeps the scene vivid while lifting the form off the art. */}
+      <View
+        style={{
+          ...StyleSheet.absoluteFillObject,
+          backgroundColor: 'rgba(15, 15, 20, 0.32)',
+        }}
+      />
+      <SafeAreaView className="flex-1">
       <View className="flex-row items-center px-4 pt-10 pb-3">
-        <TouchableOpacity onPress={() => navigation.goBack()} className="w-16">
-          <Text className="text-wolf-text text-base">‹ Back</Text>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Text className="text-wolf-text text-base font-bold" numberOfLines={1}>
+            ‹ Back
+          </Text>
         </TouchableOpacity>
         <Text className="flex-1 text-wolf-text text-xl font-bold text-center">Join Game</Text>
         <View className="w-16" />
@@ -101,7 +123,7 @@ export default function JoinGameScreen() {
       >
         <View className="flex-1 px-8 justify-center" style={{ gap: 28 }}>
           <View style={{ gap: 8 }}>
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest">ROOM CODE</Text>
+            <Text className="text-wolf-text text-sm font-extrabold tracking-widest">ROOM CODE</Text>
             <TextInput
               value={roomCode}
               onChangeText={t => {
@@ -119,7 +141,7 @@ export default function JoinGameScreen() {
           </View>
 
           <View style={{ gap: 8 }}>
-            <Text className="text-wolf-muted text-xs font-bold tracking-widest">YOUR NAME</Text>
+            <Text className="text-wolf-text text-sm font-extrabold tracking-widest">YOUR NAME</Text>
             <TextInput
               value={name}
               onChangeText={t => {
@@ -166,6 +188,7 @@ export default function JoinGameScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }

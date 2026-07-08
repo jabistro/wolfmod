@@ -196,9 +196,9 @@ export default function TimersConfigModal({
           <View className="flex-row items-center px-6 py-4 border-b border-wolf-card">
             <TouchableOpacity
               onPress={() => (isPicking ? setMode('main') : onClose())}
-              className="w-16"
+              className="w-20"
             >
-              <Text className="text-wolf-text">
+              <Text className="text-wolf-text" numberOfLines={1}>
                 {isPicking ? 'Back' : 'Cancel'}
               </Text>
             </TouchableOpacity>
@@ -206,12 +206,12 @@ export default function TimersConfigModal({
               {isPicking ? 'Pass Host' : 'Settings'}
             </Text>
             {isPicking ? (
-              <View className="w-16" />
+              <View className="w-20" />
             ) : (
               <TouchableOpacity
                 onPress={handleSave}
                 disabled={submitting}
-                className="w-16 items-end"
+                className="w-20 items-end"
               >
                 {submitting ? (
                   <ActivityIndicator color="#D4A017" />

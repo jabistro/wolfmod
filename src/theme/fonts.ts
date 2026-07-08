@@ -42,8 +42,15 @@ const FAMILIES: Record<Theme, WeightFamilies> = {
 export const FONT_SCALE: Record<Theme, number> = {
   ghibli: 1,
   chibi: 1,
-  '16bit': 0.65,
+  '16bit': 0.7,
 };
+
+// Press Start 2P needs generous leading: its declared line box is tall and,
+// with includeFontPadding:false, Android otherwise crops the glyph so the pixel
+// text reads short/squished. Scaled themes get an explicit lineHeight of
+// scaledFontSize * this ratio (when a call site hasn't set its own), giving the
+// glyphs full vertical room and centering them in the line.
+export const PIXEL_LINE_RATIO = 1.5;
 
 // Module-level current theme, kept in sync by ThemeProvider. The global Text
 // patch reads this at render time (it can't use React context/hooks). It also

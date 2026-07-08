@@ -4,6 +4,7 @@ import { cssInterop } from 'nativewind';
 import {
   familyForWeight,
   FONT_SCALE,
+  PIXEL_LINE_RATIO,
   getFontTheme,
   subscribeFontTheme,
 } from './fonts';
@@ -70,7 +71,17 @@ if (!RN.__wolfFontPatched) {
     const scale = FONT_SCALE[getFontTheme()] ?? 1;
     if (scale !== 1) {
       const base = typeof flat.fontSize === 'number' ? flat.fontSize : 14;
-      override.fontSize = base * scale;
+      const scaled = base * scale;
+      override.fontSize = scaled;
+      // Give the tall pixel font vertical room so includeFontPadding:false
+      // doesn't shear its top rows (the "squished" look). Skip when the call
+      // site set its own lineHeight, and align the glyph in the taller box.
+      if (flat.lineHeight === undefined) {
+        override.lineHeight = Math.round(scaled * PIXEL_LINE_RATIO);
+        if (flat.textAlignVertical === undefined) {
+          override.textAlignVertical = 'center';
+        }
+      }
     }
 
     return [style, override];
