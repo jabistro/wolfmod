@@ -58,7 +58,7 @@ export default function ClockSetupScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>‹ Back</Text>
+          <Text style={styles.backText} numberOfLines={1}>‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Clock Setup</Text>
         <View style={styles.headerSpacer} />
@@ -130,6 +130,7 @@ const styles = StyleSheet.create({
   backText: {
     color: '#F0EDE8',
     fontSize: 16,
+    fontWeight: '700',
   },
   title: {
     flex: 1,

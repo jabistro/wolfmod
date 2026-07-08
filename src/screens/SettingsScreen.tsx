@@ -1,12 +1,15 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, TextInput, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, TextInput, Switch, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image as ExpoImage } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RootStackParamList } from '../navigation/types';
 import { usePlayerName } from '../contexts/PlayerNameContext';
 import { useDevMode } from '../contexts/DevModeContext';
 import { useRoleReveal } from '../contexts/RoleRevealContext';
+import { useTheme } from '../contexts/ThemeContext';
+import { getTableArt } from '../data/tableArt';
 import { DEV_FEATURES_AVAILABLE } from '../config/devFlags';
 
 type NavProp = StackNavigationProp<RootStackParamList, 'Settings'>;
@@ -28,17 +31,32 @@ export default function SettingsScreen() {
     setRevealOnNightDeath,
   } = useRoleReveal();
 
+  const art = getTableArt(useTheme().theme);
+
   const rows: Row[] = [
     { label: 'THEMES', onPress: () => navigation.navigate('Themes'), enabled: true },
     { label: 'TIMERS', onPress: () => navigation.navigate('TimerDefaults'), enabled: true },
   ];
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <View style={{ flex: 1, backgroundColor: '#0F0F14' }}>
+      <ExpoImage
+        source={art.lobby}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        cachePolicy="memory-disk"
+      />
+      <View
+        style={{
+          ...StyleSheet.absoluteFillObject,
+          backgroundColor: 'rgba(15, 15, 20, 0.32)',
+        }}
+      />
+      <SafeAreaView className="flex-1">
       <View className="flex-1 px-6 pt-6 pb-12">
         <View className="flex-row items-center mb-8">
           <TouchableOpacity onPress={() => navigation.goBack()} className="py-2 pr-4">
-            <Text className="text-wolf-text text-base">‹ Back</Text>
+            <Text className="text-wolf-text text-base font-bold" numberOfLines={1}>‹ Back</Text>
           </TouchableOpacity>
           <Text className="text-wolf-text text-2xl font-bold tracking-widest flex-1 text-center mr-16">
             SETTINGS
@@ -46,7 +64,7 @@ export default function SettingsScreen() {
         </View>
 
         <View style={{ gap: 8 }} className="mb-2">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest">YOUR NAME</Text>
+          <Text className="text-wolf-text text-xs font-bold tracking-widest">YOUR NAME</Text>
           <TextInput
             value={playerName}
             onChangeText={setPlayerName}
@@ -55,9 +73,9 @@ export default function SettingsScreen() {
             autoCapitalize="words"
             autoCorrect={false}
             maxLength={20}
-            className="bg-wolf-card text-wolf-text rounded-xl px-4 py-4 text-lg"
+            className="bg-wolf-card text-wolf-text font-bold rounded-xl px-4 py-4 text-lg"
           />
-          <Text className="text-wolf-muted text-xs px-1">
+          <Text className="text-wolf-text text-xs font-bold px-1">
             Pre-fills your name when you create or join a game.
           </Text>
         </View>
@@ -65,7 +83,7 @@ export default function SettingsScreen() {
         {/* Role reveal variant. Off by default — these seed a new game's
             setting at create time; the host can still flip them in the lobby. */}
         <View className="mt-4">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-1 px-1">
+          <Text className="text-wolf-text text-xs font-bold tracking-widest mb-1 px-1">
             ROLE REVEAL
           </Text>
           <View className="bg-wolf-card border border-wolf-surface rounded-2xl px-5 py-4 flex-row items-center justify-between">
@@ -73,7 +91,7 @@ export default function SettingsScreen() {
               <Text className="text-wolf-text text-base font-semibold tracking-wider">
                 ON LYNCH
               </Text>
-              <Text className="text-wolf-muted text-xs mt-1">
+              <Text className="text-wolf-text text-xs font-bold mt-1">
                 When the village votes someone out, reveal their role.
               </Text>
             </View>
@@ -90,7 +108,7 @@ export default function SettingsScreen() {
               <Text className="text-wolf-text text-base font-semibold tracking-wider">
                 ON NIGHT DEATH
               </Text>
-              <Text className="text-wolf-muted text-xs mt-1">
+              <Text className="text-wolf-text text-xs font-bold mt-1">
                 When a player dies in the night, reveal their role at dawn.
               </Text>
             </View>
@@ -112,7 +130,7 @@ export default function SettingsScreen() {
               <Text className="text-wolf-text text-lg font-semibold tracking-wider">
                 DEVELOPER MODE
               </Text>
-              <Text className="text-wolf-muted text-xs mt-1">
+              <Text className="text-wolf-text text-xs font-bold mt-1">
                 Show FILL SEATS / ASSIGN ROLES in the lobby. Turn off to play a real game.
               </Text>
             </View>
@@ -143,6 +161,7 @@ export default function SettingsScreen() {
           ))}
         </View>
       </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }

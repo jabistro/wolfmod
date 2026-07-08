@@ -602,7 +602,7 @@ export default function ClockScreen() {
                     style={styles.tutorialNavBtn}
                     onPress={() => setTutorialPage(p => p - 1)}
                   >
-                    <Text style={styles.tutorialNavText}>‹ BACK</Text>
+                    <Text style={styles.tutorialNavText} numberOfLines={1}>‹ BACK</Text>
                   </TouchableOpacity>
                 )}
                 {tutorialPage < TUTORIAL_PAGES.length - 1 ? (

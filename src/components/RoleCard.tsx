@@ -65,8 +65,12 @@ export default function RoleCard({
   // Side matte each side of the portrait; mirror it beneath when evenFrame.
   const sideMatte = compact ? Math.max(0, Math.round((width - imageWidth) / 2)) : 0;
   const matteHeight = compact ? imageHeight + (evenFrame ? sideMatte : 0) : imageHeight;
-  const descFontSize = compact ? 12 : 13;
-  const descLineHeight = compact ? 16 : 18;
+  // The 16bit pixel font renders much taller per glyph, so its description text
+  // grows the card enough to force scrolling on the Themes picker. Shrink the
+  // description font (and line-height) for that deck only.
+  const is16bit = theme === '16bit';
+  const descFontSize = (compact ? 12 : 13) * (is16bit ? 0.8 : 1);
+  const descLineHeight = (compact ? 16 : 18) * (is16bit ? 0.8 : 1);
   const descPadV = compact ? 8 : 10;
 
   // Narrow cards need a smaller name font so single-word roles like "WEREWOLF"

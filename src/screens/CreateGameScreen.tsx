@@ -123,7 +123,7 @@ export default function CreateGameScreen() {
               autoCapitalize="words"
               autoCorrect={false}
               maxLength={20}
-              className="bg-wolf-card text-wolf-text rounded-xl px-4 py-4 text-lg"
+              className="bg-wolf-card text-wolf-text font-bold rounded-xl px-4 py-4 text-lg"
             />
           </View>
 
