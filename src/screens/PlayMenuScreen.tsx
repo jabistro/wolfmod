@@ -47,7 +47,7 @@ export default function PlayMenuScreen() {
           className="items-center bg-wolf-card border border-wolf-surface rounded-2xl py-7"
         >
           <Text className="text-wolf-text text-2xl font-bold tracking-widest">CREATE GAME</Text>
-          <Text className="text-wolf-muted text-xs mt-1 tracking-widest uppercase">
+          <Text className="text-wolf-text font-bold text-xs mt-1 tracking-widest uppercase">
             Host a new game
           </Text>
         </TouchableOpacity>
@@ -58,7 +58,7 @@ export default function PlayMenuScreen() {
           className="items-center bg-wolf-card border border-wolf-surface rounded-2xl py-7"
         >
           <Text className="text-wolf-text text-2xl font-bold tracking-widest">JOIN GAME</Text>
-          <Text className="text-wolf-muted text-xs mt-1 tracking-widest uppercase">
+          <Text className="text-wolf-text font-bold text-xs mt-1 tracking-widest uppercase">
             Enter a room code
           </Text>
         </TouchableOpacity>

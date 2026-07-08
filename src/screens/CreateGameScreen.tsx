@@ -194,8 +194,8 @@ export default function CreateGameScreen() {
                       {opt.title}
                     </Text>
                     <Text
-                      className={`text-[11px] mt-1 tracking-wide ${
-                        selected ? 'text-wolf-bg/70' : 'text-wolf-text'
+                      className={`text-[11px] font-bold mt-1 tracking-wide ${
+                        selected ? 'text-wolf-bg' : 'text-wolf-text'
                       }`}
                     >
                       {opt.sub}
