@@ -113,7 +113,7 @@ function RoleList({ roles }: { roles: string[] }) {
   );
 }
 
-function BalanceLine({ roles }: { roles: string[] }) {
+function BalanceLine({ roles, inline = false }: { roles: string[]; inline?: boolean }) {
   let total = 0;
   for (const r of roles) total += getRoleValue(r);
   const color = total > 0 ? '#4caf50' : total < 0 ? '#ef5350' : '#8A8590';
@@ -123,10 +123,10 @@ function BalanceLine({ roles }: { roles: string[] }) {
         color,
         fontSize: 12,
         fontWeight: '600',
-        marginTop: 16,
+        marginTop: inline ? 0 : 16,
       }}
     >
-      Balance: {total > 0 ? `+${total}` : total}
+      BALANCE: {total > 0 ? `+${total}` : total}
     </Text>
   );
 }
@@ -466,6 +466,52 @@ export default function LobbyScreen() {
       else next[role] = cur - 1;
       return next;
     });
+  }
+
+  // Clears the persisted build in the lobby ROLES card (host only). Seats and
+  // players are untouched — only the picked roles are wiped.
+  function handleClearRoles() {
+    if (!deviceClientId || game.selectedRoles.length === 0) return;
+    showAlert(
+      'Clear all roles?',
+      'Every picked role is removed and the balance resets to zero. Seats and players stay as they are.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await setRoles({
+                gameId: game._id,
+                roles: [],
+                callerDeviceClientId: deviceClientId,
+              });
+            } catch (e) {
+              showAlert('Error', e instanceof Error ? e.message : String(e));
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  // Wipes the in-progress picker draft back to zero (local only — nothing is
+  // saved until Done). Confirmed because it discards the whole selection.
+  function handleResetDraft() {
+    if (draftTotal === 0) return;
+    showAlert(
+      'Reset all roles?',
+      "Clears every role in this list back to zero. Nothing is saved until you tap Done.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => setDraftCounts({}),
+        },
+      ],
+    );
   }
 
   async function saveRoles() {
@@ -873,7 +919,23 @@ export default function LobbyScreen() {
               ) : (
                 <RoleList roles={game.selectedRoles} />
               )}
-              {game.selectedRoles.length > 0 && <BalanceLine roles={game.selectedRoles} />}
+              {game.selectedRoles.length > 0 && (
+                <View
+                  className="flex-row items-center justify-between"
+                  style={{ marginTop: 16 }}
+                >
+                  <BalanceLine roles={game.selectedRoles} inline />
+                  <TouchableOpacity
+                    onPress={handleClearRoles}
+                    hitSlop={8}
+                    activeOpacity={0.6}
+                  >
+                    <Text className="text-wolf-red text-xs font-bold tracking-widest">
+                      CLEAR
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </TouchableOpacity>
           ) : (
             <View
@@ -1111,10 +1173,10 @@ export default function LobbyScreen() {
         >
           <View className="bg-wolf-surface rounded-t-3xl" style={{ height: '85%' }}>
             <View className="flex-row items-center px-6 py-4 border-b border-wolf-card">
-              <TouchableOpacity onPress={() => setRolesModalOpen(false)} className="w-20">
-                <Text className="text-wolf-text" numberOfLines={1}>Cancel</Text>
+              <TouchableOpacity onPress={() => setRolesModalOpen(false)}>
+                <Text className="text-wolf-text font-bold" numberOfLines={1}>CANCEL</Text>
               </TouchableOpacity>
-              <View className="flex-1 items-center">
+              <View className="flex-1 items-center px-3">
                 <Text className="text-wolf-text text-base font-bold">
                   Roles ({draftTotal} / {draftTarget})
                 </Text>
@@ -1131,17 +1193,25 @@ export default function LobbyScreen() {
                     marginTop: 2,
                   }}
                 >
-                  Balance: {draftBalance > 0 ? `+${draftBalance}` : draftBalance}
+                  BALANCE: {draftBalance > 0 ? `+${draftBalance}` : draftBalance}
                 </Text>
               </View>
-              <TouchableOpacity
-                onPress={saveRoles}
-                disabled={draftTotal !== draftTarget}
-                style={{ opacity: draftTotal === draftTarget ? 1 : 0.4 }}
-                className="w-20 items-end"
-              >
-                <Text className="text-wolf-accent font-bold">Done</Text>
-              </TouchableOpacity>
+              <View className="flex-row items-center" style={{ gap: 18 }}>
+                <TouchableOpacity
+                  onPress={handleResetDraft}
+                  disabled={draftTotal === 0}
+                  style={{ opacity: draftTotal === 0 ? 0.4 : 1 }}
+                >
+                  <Text className="text-wolf-red font-bold" numberOfLines={1}>RESET</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={saveRoles}
+                  disabled={draftTotal !== draftTarget}
+                  style={{ opacity: draftTotal === draftTarget ? 1 : 0.4 }}
+                >
+                  <Text className="text-wolf-accent font-bold">DONE</Text>
+                </TouchableOpacity>
+              </View>
             </View>
             <View
               className="flex-row px-4 py-3 border-b border-wolf-card"
@@ -1411,7 +1481,7 @@ export default function LobbyScreen() {
                 }}
                 className="w-16"
               >
-                <Text className="text-wolf-text">Done</Text>
+                <Text className="text-wolf-text font-bold">DONE</Text>
               </TouchableOpacity>
               <Text className="flex-1 text-wolf-text text-base font-bold text-center">
                 Assign Roles (DEV)

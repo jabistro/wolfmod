@@ -22,7 +22,7 @@ export default function RolesBrowserModal({ visible, onClose }: Props) {
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={12}>
-            <Text style={styles.closeText}>Close</Text>
+            <Text style={styles.closeText}>CLOSE</Text>
           </TouchableOpacity>
           <Text style={styles.title}>Roles</Text>
           <TouchableOpacity
@@ -56,6 +56,7 @@ const styles = StyleSheet.create({
   closeText: {
     color: '#F0EDE8',
     fontSize: 16,
+    fontWeight: '700',
   },
   title: {
     flex: 1,

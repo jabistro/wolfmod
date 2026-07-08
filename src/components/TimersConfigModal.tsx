@@ -198,8 +198,8 @@ export default function TimersConfigModal({
               onPress={() => (isPicking ? setMode('main') : onClose())}
               className="w-20"
             >
-              <Text className="text-wolf-text" numberOfLines={1}>
-                {isPicking ? 'Back' : 'Cancel'}
+              <Text className="text-wolf-text font-bold" numberOfLines={1}>
+                {isPicking ? 'BACK' : 'CANCEL'}
               </Text>
             </TouchableOpacity>
             <Text className="flex-1 text-wolf-text text-base font-bold text-center">
@@ -216,7 +216,7 @@ export default function TimersConfigModal({
                 {submitting ? (
                   <ActivityIndicator color="#D4A017" />
                 ) : (
-                  <Text className="text-wolf-accent font-bold">Save</Text>
+                  <Text className="text-wolf-accent font-bold">SAVE</Text>
                 )}
               </TouchableOpacity>
             )}
