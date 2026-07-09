@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
 import {
   Modal,
-  ScrollView,
   View,
   Text,
   TouchableOpacity,
+  Pressable,
+  StyleSheet,
+  Dimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
-import RoleCard from './RoleCard';
+import HintedScrollView from './HintedScrollView';
 import { SCENE_TEXT_SHADOW, HUD_CHROME } from '../theme/hud';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 type Entry = {
   _id: Id<'players'>;
@@ -73,6 +76,12 @@ export default function GraveyardButton({
   );
 }
 
+/**
+ * The GRAVEYARD panel — a centered pop-up (matching BuildModal), listing the
+ * revealed dead as Name → Role rows. No time-of-death: a real-table moderator
+ * just states who was what role on death, not which day they died. Close sits
+ * top-left; tapping the dim backdrop also closes it.
+ */
 function GraveyardModal({
   visible,
   onClose,
@@ -82,70 +91,106 @@ function GraveyardModal({
   onClose: () => void;
   entries: Entry[];
 }) {
-  const insets = useSafeAreaInsets();
   return (
     <Modal
       visible={visible}
+      animationType="fade"
+      presentationStyle="overFullScreen"
       transparent
-      animationType="slide"
       onRequestClose={onClose}
     >
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: 'rgba(0,0,0,0.85)',
-          justifyContent: 'flex-end',
-        }}
-      >
-        <View
-          className="bg-wolf-surface rounded-t-3xl"
-          style={{ paddingBottom: Math.max(insets.bottom, 16) + 8, maxHeight: '85%' }}
-        >
-          <View className="flex-row items-center px-6 py-4 border-b border-wolf-card">
-            <View className="w-16" />
-            <Text className="flex-1 text-wolf-text text-base font-bold text-center tracking-widest">
-              GRAVEYARD
-            </Text>
-            <TouchableOpacity onPress={onClose} className="w-16 items-end">
-              <Text className="text-wolf-accent font-bold">Done</Text>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable style={styles.panel} onPress={e => e.stopPropagation()}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={12}>
+              <Text style={styles.closeText}>Close</Text>
             </TouchableOpacity>
+            <Text style={styles.title}>GRAVEYARD</Text>
+            <View style={styles.closeBtn} />
           </View>
 
-          <ScrollView
-            contentContainerStyle={{
-              paddingHorizontal: 16,
-              paddingVertical: 18,
-              flexDirection: 'row',
-              flexWrap: 'wrap',
-              justifyContent: 'center',
-              gap: 16,
-            }}
+          <HintedScrollView
+            style={styles.list}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
           >
             {entries.map(e => (
-              <View key={e._id} className="items-center" style={{ gap: 6 }}>
-                <View className="flex-row items-center" style={{ gap: 6 }}>
-                  <Text className="text-wolf-text text-sm font-bold tracking-wider">
-                    {e.name.toUpperCase()}
-                  </Text>
-                  {e.label ? (
-                    <Text className="text-wolf-muted text-xs font-bold tracking-widest">
-                      ({e.label})
-                    </Text>
-                  ) : null}
-                </View>
-                <RoleCard
-                  role={e.role}
-                  width={162}
-                  imageHeight={168}
-                  badgeSize={20}
-                  evenFrame
-                  hideDescription
-                />
+              <View key={e._id} style={styles.row}>
+                <Text style={styles.name} numberOfLines={1}>
+                  {e.name}
+                </Text>
+                <Text style={styles.role} numberOfLines={1}>
+                  {e.role}
+                </Text>
               </View>
             ))}
-          </ScrollView>
-        </View>
-      </View>
+          </HintedScrollView>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }
+
+const styles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  panel: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: SCREEN_HEIGHT * 0.75,
+    backgroundColor: '#1A1A24',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#2C2C3A',
+    paddingBottom: 8,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2C2C3A',
+  },
+  closeBtn: { width: 60 },
+  closeText: { color: '#F0EDE8', fontSize: 16 },
+  title: {
+    flex: 1,
+    color: '#F0EDE8',
+    fontSize: 20,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    letterSpacing: 2,
+  },
+  list: { maxHeight: SCREEN_HEIGHT * 0.62 },
+  listContent: { paddingHorizontal: 16, paddingVertical: 6 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#24242F',
+    gap: 12,
+  },
+  name: {
+    color: '#F0EDE8',
+    fontSize: 16,
+    fontWeight: '600',
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  role: {
+    color: '#D4A017',
+    fontSize: 15,
+    fontWeight: '700',
+    flexShrink: 1,
+    textAlign: 'right',
+  },
+});
