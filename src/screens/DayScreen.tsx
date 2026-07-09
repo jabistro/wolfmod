@@ -514,9 +514,10 @@ function DayHeader({
   mode: string;
   roomCode: string;
   onLeavePress?: () => void;
-  /** If set, render a 🛠 tools button just left of the ROOM block. Lives in
-   *  the header so it stays reachable inside the remote split-view's header
-   *  peek zone even while the chat pane is expanded. */
+  /** If set, render the 🛠 BUILD icon in the top-left tools cluster (left of
+   *  the graveyard icon). Lives in the header so it stays reachable inside the
+   *  remote split-view's header peek zone even while the chat pane is expanded,
+   *  and sits uniformly across every day sub-screen and mode. */
   onBuildPress?: () => void;
   /** Role-reveal variant: drives the graveyard button (self-hides until the
    *  first role is revealed). */
@@ -539,7 +540,25 @@ function DayHeader({
         </Text>
       </View>
       {onLeavePress && <InGameLeaveButton onPress={onLeavePress} />}
-      {gameId && <GraveyardButton gameId={gameId} />}
+      {/* Top-left tools cluster, just below the LEAVE button (top:40): the 🛠
+          BUILD icon with the ⚰️ graveyard icon to its right. Graveyard
+          self-hides until the first role is revealed, so BUILD sits alone in a
+          standard hidden-role game. */}
+      <View
+        style={{
+          position: 'absolute',
+          left: 8,
+          top: 68,
+          zIndex: 10,
+          flexDirection: 'row',
+          alignItems: 'center',
+        }}
+      >
+        {onBuildPress && (
+          <BuildButton onPress={onBuildPress} style={{ padding: 8 }} />
+        )}
+        {gameId && <GraveyardButton gameId={gameId} />}
+      </View>
       <View
         style={{
           position: 'absolute',
@@ -572,12 +591,6 @@ function DayHeader({
         >
           {roomCode}
         </Text>
-        {onBuildPress && (
-          <BuildButton
-            onPress={onBuildPress}
-            style={{ marginTop: 10, marginRight: 6 }}
-          />
-        )}
       </View>
     </View>
   );
@@ -616,9 +629,9 @@ function BuildButton({
 // ───── Day action row ──────────────────────────────────────────────────────
 //
 // Sits below the day timer on the Discussion sub-screen. Two stat columns —
-// left ("N ALIVE"), center (NOMS LEFT). The 🛠 build button now lives in
-// DayHeader (right of the title, left of ROOM); the host's settings cog lives
-// on its own row beneath this one via DayCogRow.
+// left ("N ALIVE"), center (NOMS LEFT). The 🛠 build button lives in
+// DayHeader's top-left tools cluster (with the graveyard icon); the host's
+// settings cog lives on its own row beneath this one via DayCogRow.
 
 function DayActionRow({
   left,
@@ -627,7 +640,7 @@ function DayActionRow({
 }: {
   left?: React.ReactNode;
   center?: React.ReactNode;
-  /** Far-right slot (e.g. the BUILD button on the Discussion sub-screen). */
+  /** Far-right slot (unused since BUILD moved to the header; kept generic). */
   right?: React.ReactNode;
 }) {
   return (
@@ -655,7 +668,6 @@ function DayCogRow({
   onNomToggle,
   nomDisabled,
   onBeginNight,
-  onBuildPress,
   center,
 }: {
   /** Host-only settings cog. Omit (non-host) to render the row without it. */
@@ -669,10 +681,7 @@ function DayCogRow({
   /** If set, render a BEGIN NIGHT pill pushed to the right of this row
    *  (host-only, discussion view). Same height as the NOM toggle. */
   onBeginNight?: () => void;
-  /** If set, render the BUILD button pushed to the far right of this row
-   *  (trial / vote / results sub-screens, local mode). */
-  onBuildPress?: () => void;
-  /** Screen-centered content between the cog and BUILD (e.g. the VOTE RESULT
+  /** Screen-centered content between the cog and the right edge (e.g. the VOTE RESULT
    *  "VOTED ON NAME" block), so it shares this row instead of taking its own. */
   center?: React.ReactNode;
 }) {
@@ -754,9 +763,6 @@ function DayCogRow({
             BEGIN NIGHT
           </Text>
         </TouchableOpacity>
-      )}
-      {onBuildPress && (
-        <BuildButton onPress={onBuildPress} style={{ marginLeft: 'auto' }} />
       )}
     </View>
   );
@@ -1051,11 +1057,7 @@ function DiscussionView({
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}
-        // Local: BUILD sits on the stats row below. Remote: keep it in the
-        // header so it stays reachable in the chat split-view's peek zone.
-        onBuildPress={
-          game.mode === 'remote' ? () => setBuildOpen(true) : undefined
-        }
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       {hostMissing && (
@@ -1089,11 +1091,6 @@ function DiscussionView({
           >
             NOMS LEFT: {game.nominationsRemaining}/{game.maxNominationsPerDay}
           </Text>
-        }
-        right={
-          game.mode !== 'remote' ? (
-            <BuildButton onPress={() => setBuildOpen(true)} />
-          ) : undefined
         }
       />
       {isHost && (
@@ -1367,6 +1364,7 @@ function TrialView({
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       {hostMissing && (
@@ -1390,10 +1388,7 @@ function TrialView({
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
 
-      <DayCogRow
-        onPress={isHost ? () => setCogOpen(true) : undefined}
-        onBuildPress={() => setBuildOpen(true)}
-      />
+      {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
 
       <Pressable
         onPress={isHost ? toggleClock : undefined}
@@ -1738,9 +1733,7 @@ function VoteView({
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}
-        onBuildPress={
-          game.mode === 'remote' ? () => setBuildOpen(true) : undefined
-        }
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       {hostMissing && (
@@ -1756,14 +1749,7 @@ function VoteView({
         maxNominationsPerDay={game.maxNominationsPerDay}
       />
 
-      {(isHost || game.mode !== 'remote') && (
-        <DayCogRow
-          onPress={isHost ? () => setCogOpen(true) : undefined}
-          onBuildPress={
-            game.mode !== 'remote' ? () => setBuildOpen(true) : undefined
-          }
-        />
-      )}
+      {isHost && <DayCogRow onPress={() => setCogOpen(true)} />}
 
       <ScrollView
         className="flex-1"
@@ -2167,6 +2153,7 @@ function ResultsView({
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}
+        onBuildPress={() => setBuildOpen(true)}
       />
 
       {hostMissing && (
@@ -2184,7 +2171,6 @@ function ResultsView({
 
       <DayCogRow
         onPress={isHost ? () => setCogOpen(true) : undefined}
-        onBuildPress={() => setBuildOpen(true)}
         center={
           <View className="items-center">
             <Text

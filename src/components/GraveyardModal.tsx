@@ -30,7 +30,15 @@ type Entry = {
  * revealed player — so it stays invisible in a standard hidden-role game and
  * appears the moment the first reveal lands.
  */
-export default function GraveyardButton({ gameId }: { gameId: Id<'games'> }) {
+export default function GraveyardButton({
+  gameId,
+  style,
+}: {
+  gameId: Id<'games'>;
+  /** Layout override — parent positions this inline (right of the BUILD icon
+   *  in DayHeader's top-left cluster). */
+  style?: object;
+}) {
   const [open, setOpen] = useState(false);
   const view = useQuery(api.games.graveyardView, { gameId });
   const entries = (view?.entries ?? []) as Entry[];
@@ -38,19 +46,15 @@ export default function GraveyardButton({ gameId }: { gameId: Id<'games'> }) {
 
   return (
     <>
-      {/* Pinned top-left, just below the LEAVE button (which sits at top:40). */}
       <TouchableOpacity
         onPress={() => setOpen(true)}
         hitSlop={8}
         style={{
-          position: 'absolute',
-          left: 8,
-          top: 68,
           padding: 8,
-          zIndex: 10,
           flexDirection: 'row',
           alignItems: 'center',
           gap: 4,
+          ...style,
         }}
       >
         <Text style={{ fontSize: 24, ...SCENE_TEXT_SHADOW }}>⚰️</Text>
