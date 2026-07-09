@@ -2003,9 +2003,6 @@ function VoteView({
 // start scrolling internally — keeps both panels + the ELIMINATED panel visible
 // above CONTINUE GAME no matter how many players voted. Tune to taste.
 const RESULT_PANEL_MAX_H = 130;
-// Same idea for the ELIMINATED panel — caps it so a big cascade (many deaths +
-// their revealed roles) scrolls internally instead of pushing CONTINUE GAME off.
-const ELIM_PANEL_MAX_H = 200;
 
 // A capped-height panel body whose content scrolls internally, with floating
 // carets that appear only when there's more content in that direction: ▲ at the
@@ -2015,11 +2012,18 @@ const ELIM_PANEL_MAX_H = 200;
 function ScrollHintPanel({
   children,
   maxHeight,
+  fill = false,
 }: {
   children: React.ReactNode;
-  /** Cap for the scroll area. maxHeight on the ScrollView bounds it so it
-   *  actually scrolls (content-sized when short, capped + scrollable when tall). */
-  maxHeight: number;
+  /** Fixed cap for the scroll area (the LIVES/DIES voter lists). maxHeight on
+   *  the ScrollView bounds it so it actually scrolls — content-sized when short,
+   *  capped + scrollable when tall. Ignored when `fill` is set. */
+  maxHeight?: number;
+  /** Fill the remaining flex space instead of a fixed cap (the ELIMINATED +
+   *  CONTINUE region). A big cascade (many deaths + their revealed roles) then
+   *  pushes the button down and the whole block scrolls within the space above
+   *  the safe area, rather than the card overflowing behind a pinned button. */
+  fill?: boolean;
 }) {
   const [showTop, setShowTop] = useState(false);
   const [showBottom, setShowBottom] = useState(false);
@@ -2031,9 +2035,10 @@ function ScrollHintPanel({
     setShowBottom(contentH.current - viewH.current - offsetY.current > 6);
   };
   return (
-    <View style={{ position: 'relative' }}>
+    <View style={{ position: 'relative', ...(fill ? { flex: 1, minHeight: 0 } : null) }}>
       <ScrollView
-        style={{ maxHeight }}
+        style={fill ? { flex: 1 } : { maxHeight }}
+        contentContainerStyle={fill ? { flexGrow: 1 } : undefined}
         nestedScrollEnabled
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={16}
@@ -2190,9 +2195,12 @@ function ResultsView({
         }
       />
 
-      {/* Stationary layout — the LIVES/DIES frames and ELIMINATED stay put;
-          only each panel's list scrolls internally. */}
-      <View style={{ flex: 1, paddingHorizontal: 24, alignItems: 'center' }}>
+      {/* Voter tallies stay fixed up top; the ELIMINATED result + CONTINUE
+          button share one scroll region below (see ScrollHintPanel fill), so a
+          big cascade (many deaths + their revealed roles) pushes the button
+          down and the whole block scrolls with ▲/▼ hint carets — instead of the
+          card overflowing behind the button and hiding half the eliminations. */}
+      <View style={{ flex: 1, paddingHorizontal: 24 }}>
         <View className="flex-row self-stretch mt-2" style={{ gap: 12 }}>
           <View className="flex-1 bg-wolf-card rounded-xl px-4 py-3">
             <Text className="text-xs font-bold tracking-widest mb-2" style={{ color: '#5BA0E5' }}>
@@ -2220,125 +2228,124 @@ function ResultsView({
           </View>
         </View>
 
-        {!lynch ? (
-          <View
-            className="mt-6 rounded-2xl px-5 py-5 self-stretch bg-wolf-card"
-            style={{ gap: 12 }}
-          >
-            <Text className="text-wolf-text text-2xl font-extrabold tracking-widest text-center">
-              LIVES
-            </Text>
-          </View>
-        ) : null}
-
-        {lynch || cascadeDeaths.length > 0 ? (
-          <View className="mt-6 rounded-2xl px-5 py-5 self-stretch bg-wolf-card">
-            <ScrollHintPanel maxHeight={ELIM_PANEL_MAX_H}>
-              <View style={{ gap: 12 }}>
-            {lynch ? (
-              <>
-                <Text
-                  className="text-wolf-accent text-xs font-extrabold tracking-widest text-center"
-                  style={{ letterSpacing: 2 }}
-                >
-                  ELIMINATED
-                </Text>
+        <ScrollHintPanel fill>
+          <View style={{ paddingBottom: Math.max(insets.bottom, 16) + 16 }}>
+            {!lynch ? (
+              <View
+                className="mt-6 rounded-2xl px-5 py-5 self-stretch bg-wolf-card"
+                style={{ gap: 12 }}
+              >
                 <Text className="text-wolf-text text-2xl font-extrabold tracking-widest text-center">
-                  {nomination.nominee?.name.toUpperCase() ?? '—'}
+                  LIVES
                 </Text>
-                {/* Hold the role until the dwell/trigger window clears — a
-                    Hunter revealed mid-dwell would tip the village that a shot
-                    is coming, defeating the cloak the dwell exists for. */}
-                {!continueLocked && nomination.nominee?.role ? (
-                  <Text className="text-wolf-text text-base text-center mt-1">
-                    ({nomination.nominee.role})
-                  </Text>
-                ) : null}
-              </>
-            ) : null}
-
-            {cascadeDeaths.length > 0 ? (
-              <>
-                {lynch ? (
-                  <View
-                    style={{
-                      height: 1,
-                      backgroundColor: '#D4A017',
-                      opacity: 0.3,
-                      marginTop: 4,
-                      marginBottom: 4,
-                    }}
-                  />
-                ) : null}
-                <Text
-                  className="text-wolf-accent text-xs font-extrabold tracking-widest text-center"
-                  style={{ letterSpacing: 2 }}
-                >
-                  {lynch ? 'ALSO ELIMINATED' : 'ELIMINATED'}
-                </Text>
-                {cascadeDeaths.map(d => (
-                  <View key={d._id} style={{ alignItems: 'center', gap: 2 }}>
-                    <Text className="text-wolf-text text-xl font-extrabold tracking-widest text-center">
-                      {d.name.toUpperCase()}
-                    </Text>
-                    {(d.cause === 'hunter' || d.cause === 'hunter-wolf') &&
-                    d.shotByName ? (
-                      <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center">
-                        SHOT BY {d.shotByName.toUpperCase()}
-                      </Text>
-                    ) : null}
-                    {!continueLocked && d.role ? (
-                      <Text className="text-wolf-text text-base text-center">
-                        ({d.role})
-                      </Text>
-                    ) : null}
-                  </View>
-                ))}
-              </>
-            ) : null}
               </View>
-            </ScrollHintPanel>
-          </View>
-        ) : null}
-      </View>
+            ) : null}
 
-      <View
-        style={{
-          paddingHorizontal: 24,
-          paddingBottom: Math.max(insets.bottom, 16) + 16,
-        }}
-      >
-        {isHost ? (
-          <TouchableOpacity
-            onPress={handleContinue}
-            disabled={submitting || continueLocked}
-            style={{ opacity: submitting || continueLocked ? 0.4 : 1 }}
-            className="bg-wolf-accent rounded-xl py-5 items-center"
-          >
-            {submitting ? (
-              <ActivityIndicator color="#0F0F14" />
-            ) : continueLocked ? (
-              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-                {dwellActive
-                  ? `WAIT  ${Math.ceil(dwellRemainingMs / 1000)}`
-                  : 'RESOLVING…'}
-              </Text>
-            ) : (
-              <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
-                CONTINUE GAME
-              </Text>
-            )}
-          </TouchableOpacity>
-        ) : (
-          <Text
-            className="text-xs tracking-widest text-center"
-            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
-          >
-            {continueLocked
-              ? 'TALLYING…'
-              : 'WAITING FOR HOST TO CONTINUE'}
-          </Text>
-        )}
+            {lynch || cascadeDeaths.length > 0 ? (
+              <View className="mt-6 rounded-2xl px-5 py-5 self-stretch bg-wolf-card">
+                <View style={{ gap: 12 }}>
+                  {lynch ? (
+                    <>
+                      <Text
+                        className="text-wolf-accent text-xs font-extrabold tracking-widest text-center"
+                        style={{ letterSpacing: 2 }}
+                      >
+                        ELIMINATED
+                      </Text>
+                      <Text className="text-wolf-text text-2xl font-extrabold tracking-widest text-center">
+                        {nomination.nominee?.name.toUpperCase() ?? '—'}
+                      </Text>
+                      {/* Hold the role until the dwell/trigger window clears — a
+                          Hunter revealed mid-dwell would tip the village that a
+                          shot is coming, defeating the cloak the dwell exists for. */}
+                      {!continueLocked && nomination.nominee?.role ? (
+                        <Text className="text-wolf-text text-base text-center mt-1">
+                          ({nomination.nominee.role})
+                        </Text>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  {cascadeDeaths.length > 0 ? (
+                    <>
+                      {lynch ? (
+                        <View
+                          style={{
+                            height: 1,
+                            backgroundColor: '#D4A017',
+                            opacity: 0.3,
+                            marginTop: 4,
+                            marginBottom: 4,
+                          }}
+                        />
+                      ) : null}
+                      <Text
+                        className="text-wolf-accent text-xs font-extrabold tracking-widest text-center"
+                        style={{ letterSpacing: 2 }}
+                      >
+                        {lynch ? 'ALSO ELIMINATED' : 'ELIMINATED'}
+                      </Text>
+                      {cascadeDeaths.map(d => (
+                        <View key={d._id} style={{ alignItems: 'center', gap: 2 }}>
+                          <Text className="text-wolf-text text-xl font-extrabold tracking-widest text-center">
+                            {d.name.toUpperCase()}
+                          </Text>
+                          {(d.cause === 'hunter' || d.cause === 'hunter-wolf') &&
+                          d.shotByName ? (
+                            <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center">
+                              SHOT BY {d.shotByName.toUpperCase()}
+                            </Text>
+                          ) : null}
+                          {!continueLocked && d.role ? (
+                            <Text className="text-wolf-text text-base text-center">
+                              ({d.role})
+                            </Text>
+                          ) : null}
+                        </View>
+                      ))}
+                    </>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+
+            {/* Continue / status scrolls with the result so it's always
+                reachable no matter how tall the cascade gets. */}
+            <View className="mt-6">
+              {isHost ? (
+                <TouchableOpacity
+                  onPress={handleContinue}
+                  disabled={submitting || continueLocked}
+                  style={{ opacity: submitting || continueLocked ? 0.4 : 1 }}
+                  className="bg-wolf-accent rounded-xl py-5 items-center"
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#0F0F14" />
+                  ) : continueLocked ? (
+                    <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                      {dwellActive
+                        ? `WAIT  ${Math.ceil(dwellRemainingMs / 1000)}`
+                        : 'RESOLVING…'}
+                    </Text>
+                  ) : (
+                    <Text className="text-wolf-bg text-lg font-extrabold tracking-widest">
+                      CONTINUE GAME
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ) : (
+                <Text
+                  className="text-xs tracking-widest text-center"
+                  style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+                >
+                  {continueLocked
+                    ? 'TALLYING…'
+                    : 'WAITING FOR HOST TO CONTINUE'}
+                </Text>
+              )}
+            </View>
+          </View>
+        </ScrollHintPanel>
       </View>
 
       {/* Lynch trigger overlay — unchanged (Hunter / Hunter Wolf / MB picker
