@@ -34,6 +34,7 @@ import {
   useRingBottomReserved,
 } from '../theme/hud';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
+import { useTheme } from '../contexts/ThemeContext';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import { NightDeathTriggerOverlay } from '../components/NightDeathTriggerOverlay';
 import PassHostPickerModal from '../components/PassHostPickerModal';
@@ -193,6 +194,36 @@ function formatTime(ms: number): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+// Reset/refresh icon for the timer controls — the white two-arrow refresh art,
+// centered in a fixed square that fills its circular button background. `size`
+// is the icon's width; `box` is the containing square (the button diameter).
+// Under the 16bit theme we swap in a nearest-neighbor-pixelated variant so the
+// icon matches the chunky pixel-font aesthetic instead of reading as a smooth
+// vector next to blocky text.
+function RefreshIcon({ size, box }: { size: number; box: number }) {
+  const { theme } = useTheme();
+  return (
+    <View
+      style={{
+        width: box,
+        height: box,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Image
+        source={
+          theme === '16bit'
+            ? require('../../assets/images/refresh-16bit.png')
+            : require('../../assets/images/refresh.png')
+        }
+        style={{ width: size, height: size }}
+        resizeMode="contain"
+      />
+    </View>
+  );
 }
 
 // Returns a fresh `Date.now()` on every render while a ticking interval forces
@@ -470,9 +501,13 @@ function TrialStatusBar({
     <View className="mx-4 mt-3 mb-4 flex-row" style={{ gap: 10 }}>
       <View
         className="flex-1 bg-wolf-card rounded-xl flex-row items-center justify-between"
-        style={{ paddingVertical: 8, paddingHorizontal: 14 }}
+        style={{ paddingVertical: 8, paddingHorizontal: 14, gap: 10 }}
       >
-        <Text className="text-wolf-muted text-xs tracking-widest">
+        <Text
+          className="text-wolf-muted text-xs tracking-widest"
+          style={{ flexShrink: 1, minWidth: 0 }}
+          numberOfLines={1}
+        >
           TIME REMAINING
         </Text>
         <Text
@@ -526,12 +561,18 @@ function DayHeader({
   return (
     <View className="px-4 pt-10 pb-3" style={{ position: 'relative' }}>
       <View className="items-center">
-        <Text
-          className="text-lg font-bold tracking-widest"
-          style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
-        >
-          DAY {dayNumber}
-        </Text>
+        {/* Fixed-height centered box: keeps DAY N's optical center on the same
+            y-line as the absolutely-positioned LEAVE / ROOM labels (all use a
+            26px band at top:40), so the three read as one aligned row instead
+            of staggering by their differing font sizes. */}
+        <View style={{ height: 26, justifyContent: 'center' }}>
+          <Text
+            className="text-lg font-bold tracking-widest"
+            style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
+          >
+            DAY {dayNumber}
+          </Text>
+        </View>
         <Text
           className="text-wolf-accent text-3xl font-extrabold tracking-widest mt-1"
           style={SCENE_TEXT_SHADOW}
@@ -568,24 +609,28 @@ function DayHeader({
           zIndex: 10,
         }}
       >
-        <Text
-          style={{
-            color: HUD_CHROME,
-            fontSize: 10,
-            fontWeight: '700',
-            letterSpacing: 2,
-            ...SCENE_TEXT_SHADOW,
-          }}
-        >
-          ROOM
-        </Text>
+        {/* Same 26px centered band as LEAVE / DAY N so the ROOM label lines up
+            with them; the room code hangs just below. */}
+        <View style={{ height: 26, justifyContent: 'center' }}>
+          <Text
+            style={{
+              color: HUD_CHROME,
+              fontSize: 10,
+              fontWeight: '700',
+              letterSpacing: 2,
+              ...SCENE_TEXT_SHADOW,
+            }}
+          >
+            ROOM
+          </Text>
+        </View>
         <Text
           style={{
             color: '#D4A017',
             fontSize: 16,
             fontWeight: '800',
             letterSpacing: 3,
-            marginTop: 5,
+            marginTop: -2,
             ...SCENE_TEXT_SHADOW,
           }}
         >
@@ -865,8 +910,8 @@ function DayClockBar({
             TIME UP / PAUSED label is showing, so BEGIN NIGHT never shifts. */}
         {(dayOver || paused) && (
           <Text
-            className="text-wolf-muted text-xs tracking-widest"
-            style={{ position: 'absolute', top: -4, left: 0, right: 0, textAlign: 'center' }}
+            className="text-wolf-muted text-xs font-bold tracking-widest"
+            style={{ position: 'absolute', top: -14, left: 0, right: 0, textAlign: 'center' }}
           >
             {dayOver ? 'TIME UP' : 'PAUSED'}
           </Text>
@@ -891,17 +936,7 @@ function DayClockBar({
             className="bg-wolf-surface rounded-full items-center justify-center"
             style={{ width: 52, height: 52, opacity: busy === 'reset' ? 0.4 : 1 }}
           >
-            <Text
-              className="text-wolf-text"
-              style={{
-                fontSize: 34,
-                lineHeight: 36,
-                textAlignVertical: 'center',
-                includeFontPadding: false,
-              }}
-            >
-              ↺
-            </Text>
+            <RefreshIcon size={34} box={52} />
           </TouchableOpacity>
         )}
       </View>
@@ -1053,7 +1088,7 @@ function DiscussionView({
     <PhaseScreen phase="day">
       <DayHeader
         dayNumber={game.dayNumber}
-        mode="DISCUSSION"
+        mode="DISCUSS"
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}
@@ -1208,7 +1243,7 @@ function DiscussionView({
           </Text>
         ) : meAlive ? (
           <Text
-            className="text-xs text-center mt-4"
+            className="text-sm font-bold text-center mt-4"
             style={{ color: HUD_CHROME, ...SCENE_TEXT_SHADOW }}
           >
             Tap a player to nominate them. A second tap by anyone puts them
@@ -1415,11 +1450,15 @@ function TrialView({
         )}
         <Text
           className="font-extrabold"
+          numberOfLines={1}
+          adjustsFontSizeToFit
           style={{
             color,
             fontSize: 100,
             fontVariant: ['tabular-nums'],
             marginTop: 12,
+            alignSelf: 'stretch',
+            textAlign: 'center',
             ...SCENE_TEXT_SHADOW,
           }}
         >
@@ -1432,21 +1471,7 @@ function TrialView({
             style={{ marginTop: 12, opacity: busy === 'reset' ? 0.4 : 1 }}
             className="bg-wolf-card rounded-full items-center justify-center"
           >
-            <View
-              style={{
-                width: 48,
-                height: 48,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <Text
-                className="text-wolf-text text-xl"
-                style={{ lineHeight: 20, marginTop: -3, includeFontPadding: false }}
-              >
-                ↺
-              </Text>
-            </View>
+            <RefreshIcon size={30} box={48} />
           </TouchableOpacity>
         )}
       </Pressable>
@@ -1601,7 +1626,7 @@ function RemoteTrialScreen({
         ? 'DEFENSE'
         : sp === 'prevote'
           ? 'GET READY TO VOTE'
-          : 'VOTE RESULT';
+          : 'VOTE';
   return (
     <PhaseScreen phase="day">
       <DayHeader
@@ -1729,7 +1754,7 @@ function VoteView({
     <PhaseScreen phase="day">
       <DayHeader
         dayNumber={game.dayNumber}
-        mode={isPreVote ? 'GET READY TO VOTE' : 'TIME TO VOTE'}
+        mode={isPreVote ? 'GET READY TO VOTE' : 'VOTE'}
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}
@@ -1807,15 +1832,15 @@ function VoteView({
               >
                 <View
                   style={{
-                    width: 40,
-                    height: 40,
+                    width: 44,
+                    height: 44,
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
                   <Text
                     className="text-wolf-text text-lg"
-                    style={{ lineHeight: 18, marginTop: -2, includeFontPadding: false }}
+                    style={{ lineHeight: 20, marginTop: -2, includeFontPadding: false }}
                   >
                     {paused ? '▶' : '❚❚'}
                   </Text>
@@ -1828,21 +1853,7 @@ function VoteView({
               style={{ opacity: busy === 'reset' ? 0.4 : 1 }}
               className="bg-wolf-card rounded-full items-center justify-center"
             >
-              <View
-                style={{
-                  width: 40,
-                  height: 40,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Text
-                  className="text-wolf-text text-lg"
-                  style={{ lineHeight: 18, marginTop: -2, includeFontPadding: false }}
-                >
-                  ↺
-                </Text>
-              </View>
+              <RefreshIcon size={28} box={44} />
             </TouchableOpacity>
           </View>
         )}
@@ -2154,7 +2165,7 @@ function ResultsView({
     <PhaseScreen phase="day">
       <DayHeader
         dayNumber={game.dayNumber}
-        mode="VOTE RESULT"
+        mode="VOTE"
         roomCode={game.roomCode}
         gameId={game._id}
         onLeavePress={onLeavePress}

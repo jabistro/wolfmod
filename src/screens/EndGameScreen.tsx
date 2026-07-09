@@ -686,7 +686,7 @@ export default function EndGameScreen() {
                           key={`night-${group[0].nightNumber}-${gi}`}
                           className="px-4 py-3 gap-y-2"
                           style={{
-                            backgroundColor: gi % 2 === 0 ? '#1A1A24' : '#20202D',
+                            backgroundColor: gi % 2 === 0 ? '#20202D' : '#33333F',
                           }}
                         >
                           {group.map((entry, i) => (
@@ -694,8 +694,11 @@ export default function EndGameScreen() {
                               key={`${entry.nightNumber}-${entry.kind}-${i}`}
                               className="flex-row"
                             >
-                              <Text className="text-wolf-muted text-xs font-bold tracking-widest w-16">
-                                N{entry.nightNumber}
+                              <Text
+                                className="text-wolf-muted text-xs font-bold tracking-wide w-24"
+                                numberOfLines={1}
+                              >
+                                NIGHT {entry.nightNumber}
                               </Text>
                               <View className="flex-1">{renderEntryBody(entry)}</View>
                             </View>

@@ -1,17 +1,21 @@
 import React, { useState } from 'react';
 import {
   Modal,
-  ScrollView,
   View,
   Text,
   TouchableOpacity,
+  Pressable,
   ActivityIndicator,
+  StyleSheet,
+  Dimensions,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
 import { showAlert } from './ThemedAlert';
+import HintedScrollView from './HintedScrollView';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 type Candidate = { _id: Id<'players'>; name: string };
 
@@ -25,6 +29,10 @@ type Props = {
   onPassed?: () => void;
 };
 
+/**
+ * Pass-host picker — a centered pop-up (matching BUILD / GRAVEYARD) that lists
+ * the other players as tap-to-pass rows. Tapping the dim backdrop closes it.
+ */
 export default function PassHostPickerModal({
   visible,
   onClose,
@@ -33,9 +41,19 @@ export default function PassHostPickerModal({
   candidates,
   onPassed,
 }: Props) {
-  const insets = useSafeAreaInsets();
   const passHost = useMutation(api.games.passHost);
   const [passing, setPassing] = useState<Id<'players'> | null>(null);
+
+  function confirmPass(target: Candidate) {
+    showAlert(
+      'Pass host?',
+      `${target.name} becomes the host and takes over moderating. You can't take it back — you'd have to ask them to pass it to you.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Pass Host', onPress: () => handlePass(target) },
+      ],
+    );
+  }
 
   async function handlePass(target: Candidate) {
     setPassing(target._id);
@@ -60,60 +78,120 @@ export default function PassHostPickerModal({
   return (
     <Modal
       visible={visible}
+      animationType="fade"
+      presentationStyle="overFullScreen"
       transparent
-      animationType="slide"
       onRequestClose={onClose}
     >
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: 'rgba(0,0,0,0.85)',
-          justifyContent: 'flex-end',
-        }}
-      >
-        <View
-          className="bg-wolf-surface rounded-t-3xl"
-          style={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
-        >
-          <View className="flex-row items-center px-6 py-4 border-b border-wolf-card">
-            <TouchableOpacity onPress={onClose} className="w-16">
-              <Text className="text-wolf-text">Cancel</Text>
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable style={styles.panel} onPress={e => e.stopPropagation()}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn} hitSlop={12}>
+              <Text style={styles.closeText}>Close</Text>
             </TouchableOpacity>
-            <Text className="flex-1 text-wolf-text text-base font-bold text-center">
-              Pass Host
-            </Text>
-            <View className="w-16" />
+            <Text style={styles.title}>PASS HOST</Text>
+            <View style={styles.closeBtn} />
           </View>
 
-          <ScrollView
-            style={{ maxHeight: 380 }}
-            contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 12 }}
+          <HintedScrollView
+            style={styles.list}
+            contentContainerStyle={styles.listContent}
+            showsVerticalScrollIndicator={false}
           >
             {candidates.length === 0 ? (
-              <Text className="text-wolf-muted text-sm text-center py-6">
+              <Text style={styles.emptyText}>
                 No other players to pass host to.
               </Text>
             ) : (
               candidates.map(c => (
                 <TouchableOpacity
                   key={c._id}
-                  onPress={() => handlePass(c)}
+                  onPress={() => confirmPass(c)}
                   disabled={passing !== null}
-                  className="bg-wolf-card rounded-xl px-4 py-4 mb-2 flex-row items-center justify-between"
-                  style={{ opacity: passing && passing !== c._id ? 0.4 : 1 }}
+                  style={[
+                    styles.row,
+                    { opacity: passing && passing !== c._id ? 0.4 : 1 },
+                  ]}
                 >
-                  <Text className="text-wolf-text text-base">{c.name}</Text>
+                  <Text style={styles.rowName} numberOfLines={1}>
+                    {c.name}
+                  </Text>
                   {passing === c._id ? (
                     <ActivityIndicator color="#D4A017" />
                   ) : (
-                    <Text className="text-wolf-muted">›</Text>
+                    <Text style={styles.chevron}>›</Text>
                   )}
                 </TouchableOpacity>
               ))
             )}
-          </ScrollView>
-        </View>
-      </View>
+          </HintedScrollView>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }
+
+const styles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  panel: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: SCREEN_HEIGHT * 0.75,
+    backgroundColor: '#1A1A24',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#2C2C3A',
+    paddingBottom: 8,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#2C2C3A',
+  },
+  closeBtn: { width: 60 },
+  closeText: { color: '#F0EDE8', fontSize: 16 },
+  title: {
+    flex: 1,
+    color: '#F0EDE8',
+    fontSize: 20,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    letterSpacing: 2,
+  },
+  list: { maxHeight: SCREEN_HEIGHT * 0.62 },
+  listContent: { paddingHorizontal: 16, paddingVertical: 6 },
+  emptyText: {
+    color: '#8A8590',
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: 24,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#3A3A47',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    marginVertical: 4,
+    gap: 12,
+  },
+  rowName: {
+    flex: 1,
+    color: '#F0EDE8',
+    fontSize: 16,
+    minWidth: 0,
+  },
+  chevron: { color: '#8A8590', fontSize: 16 },
+});

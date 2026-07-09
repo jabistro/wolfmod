@@ -485,7 +485,7 @@ export default function RoleRevealScreen() {
               </View>
             ) : (
               <>
-                <Text className="text-wolf-muted text-sm text-center mt-12">
+                <Text className="text-wolf-text text-base font-bold text-center mt-12">
                   Waiting for the host to begin Day 1…
                 </Text>
                 <ActivityIndicator color="#D4A017" style={{ marginTop: 24 }} />
@@ -493,7 +493,7 @@ export default function RoleRevealScreen() {
             )
           ) : (
             <>
-              <Text className="text-wolf-muted text-sm text-center mt-12">
+              <Text className="text-wolf-text text-base font-bold text-center mt-12">
                 Waiting for the others to confirm their roles…
               </Text>
               <ActivityIndicator color="#D4A017" style={{ marginTop: 24 }} />

@@ -15,6 +15,7 @@ import type { Id } from '../../convex/_generated/dataModel';
 import { showAlert } from './ThemedAlert';
 import TimerSteppers, { type TimerConfigValues } from './TimerSteppers';
 import HintedScrollView from './HintedScrollView';
+import PassHostPickerModal from './PassHostPickerModal';
 
 type PassHostCandidate = { _id: Id<'players'>; name: string };
 
@@ -70,7 +71,6 @@ export default function TimersConfigModal({
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const setDayConfig = useMutation(api.day.setDayConfig);
-  const passHost = useMutation(api.games.passHost);
   const endGameByHost = useMutation(api.games.endGameByHost);
   const [values, setValues] = useState(initial);
   const [revealLynch, setRevealLynch] = useState(!!revealConfig?.revealOnLynch);
@@ -78,8 +78,7 @@ export default function TimersConfigModal({
     !!revealConfig?.revealOnNightDeath,
   );
   const [submitting, setSubmitting] = useState(false);
-  const [mode, setMode] = useState<'main' | 'pick-host'>('main');
-  const [passing, setPassing] = useState<Id<'players'> | null>(null);
+  const [passPickerOpen, setPassPickerOpen] = useState(false);
   const [ending, setEnding] = useState(false);
 
   // Re-seed only when the modal OPENS so it reflects the latest config. We
@@ -92,7 +91,7 @@ export default function TimersConfigModal({
       setValues(initial);
       setRevealLynch(!!revealConfig?.revealOnLynch);
       setRevealNight(!!revealConfig?.revealOnNightDeath);
-      setMode('main');
+      setPassPickerOpen(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -151,36 +150,12 @@ export default function TimersConfigModal({
     );
   }
 
-  async function handlePass(target: PassHostCandidate) {
-    setPassing(target._id);
-    try {
-      await passHost({
-        gameId,
-        targetPlayerId: target._id,
-        callerDeviceClientId: deviceClientId,
-      });
-      onClose();
-    } catch (e) {
-      showAlert(
-        'Could not pass host',
-        e instanceof Error ? e.message : String(e),
-      );
-    } finally {
-      setPassing(null);
-    }
-  }
-
-  const isPicking = mode === 'pick-host';
-
   return (
     <Modal
       visible={visible}
       transparent
       animationType="slide"
-      onRequestClose={() => {
-        if (isPicking) setMode('main');
-        else onClose();
-      }}
+      onRequestClose={onClose}
     >
       <View
         style={{
@@ -194,63 +169,28 @@ export default function TimersConfigModal({
           style={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
         >
           <View className="flex-row items-center px-6 py-4 border-b border-wolf-card">
-            <TouchableOpacity
-              onPress={() => (isPicking ? setMode('main') : onClose())}
-              className="w-20"
-            >
+            <TouchableOpacity onPress={onClose} className="w-20">
               <Text className="text-wolf-text font-bold" numberOfLines={1}>
-                {isPicking ? 'BACK' : 'CANCEL'}
+                CANCEL
               </Text>
             </TouchableOpacity>
             <Text className="flex-1 text-wolf-text text-base font-bold text-center">
-              {isPicking ? 'Pass Host' : 'Settings'}
+              Settings
             </Text>
-            {isPicking ? (
-              <View className="w-20" />
-            ) : (
-              <TouchableOpacity
-                onPress={handleSave}
-                disabled={submitting}
-                className="w-20 items-end"
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#D4A017" />
-                ) : (
-                  <Text className="text-wolf-accent font-bold">SAVE</Text>
-                )}
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              onPress={handleSave}
+              disabled={submitting}
+              className="w-20 items-end"
+            >
+              {submitting ? (
+                <ActivityIndicator color="#D4A017" />
+              ) : (
+                <Text className="text-wolf-accent font-bold">SAVE</Text>
+              )}
+            </TouchableOpacity>
           </View>
 
-          {isPicking ? (
-            <HintedScrollView
-              style={{ maxHeight: 360 }}
-              contentContainerStyle={{ paddingHorizontal: 24, paddingVertical: 12 }}
-            >
-              {(passHostCandidates ?? []).length === 0 ? (
-                <Text className="text-wolf-muted text-sm text-center py-6">
-                  No other players to pass host to.
-                </Text>
-              ) : (
-                (passHostCandidates ?? []).map(c => (
-                  <TouchableOpacity
-                    key={c._id}
-                    onPress={() => handlePass(c)}
-                    disabled={passing !== null}
-                    className="bg-wolf-card rounded-xl px-4 py-4 mb-2 flex-row items-center justify-between"
-                    style={{ opacity: passing && passing !== c._id ? 0.4 : 1 }}
-                  >
-                    <Text className="text-wolf-text text-base">{c.name}</Text>
-                    {passing === c._id ? (
-                      <ActivityIndicator color="#D4A017" />
-                    ) : (
-                      <Text className="text-wolf-muted">›</Text>
-                    )}
-                  </TouchableOpacity>
-                ))
-              )}
-            </HintedScrollView>
-          ) : (
+          {
             // Cap the scroll area so a tall config (timers + role-reveal +
             // end-game) can never push the fixed Save header off the top of
             // the screen — the content scrolls instead.
@@ -284,18 +224,22 @@ export default function TimersConfigModal({
                 </View>
               )}
               {passHostCandidates !== undefined && (
-                <TouchableOpacity
-                  onPress={() => setMode('pick-host')}
-                  className="flex-row items-center justify-between bg-wolf-card rounded-xl px-4 py-4"
-                >
-                  <Text
-                    className="text-wolf-text"
-                    style={{ fontSize: 13, fontWeight: '700', letterSpacing: 1.5 }}
+                // Compact centered button under the room code — opens the
+                // PassHostPickerModal popup (same picker the Leave flow uses)
+                // rather than an inline drill-down.
+                <View className="items-center">
+                  <TouchableOpacity
+                    onPress={() => setPassPickerOpen(true)}
+                    className="bg-wolf-card rounded-xl px-7 py-3"
                   >
-                    PASS HOST
-                  </Text>
-                  <Text className="text-wolf-muted">›</Text>
-                </TouchableOpacity>
+                    <Text
+                      className="text-wolf-text"
+                      style={{ fontSize: 13, fontWeight: '700', letterSpacing: 1.5 }}
+                    >
+                      PASS HOST
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               )}
               <TimerSteppers values={values} onChange={update} />
               {revealConfig && (
@@ -359,9 +303,23 @@ export default function TimersConfigModal({
                 </TouchableOpacity>
               )}
             </HintedScrollView>
-          )}
+          }
         </View>
       </View>
+
+      {/* Pass-host picker popup — same bottom-sheet the Leave flow opens.
+          Nested over the settings sheet; closing the picker after a
+          successful pass also closes Settings (the caller is no longer host). */}
+      {passHostCandidates !== undefined && (
+        <PassHostPickerModal
+          visible={passPickerOpen}
+          onClose={() => setPassPickerOpen(false)}
+          gameId={gameId}
+          deviceClientId={deviceClientId}
+          candidates={passHostCandidates}
+          onPassed={onClose}
+        />
+      )}
     </Modal>
   );
 }

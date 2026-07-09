@@ -16,7 +16,12 @@ export function InGameLeaveButton({ onPress }: { onPress: () => void }) {
         position: 'absolute',
         left: 8,
         top: 40,
-        padding: 8,
+        // Fixed-height centered box so LEAVE's optical center lands at the
+        // same y as the DAY N / ROOM header labels regardless of theme font
+        // scaling (explicit heights aren't scaled by the global font patch).
+        height: 26,
+        justifyContent: 'center',
+        paddingHorizontal: 8,
         zIndex: 10,
       }}
     >

@@ -1891,17 +1891,17 @@ export const endGameView = query({
       if (a.actorPlayerId) pushEntry(a.actorPlayerId, baseEntry);
     }
 
-    // Build the elimination label ("d2" / "n3") from each death record. We
-    // fall back to nightNumber+1 for the day number only if the legacy death
+    // Build the elimination label ("Day 2" / "Night 3") from each death record.
+    // We fall back to nightNumber+1 for the day number only if the legacy death
     // row predates the phase tag (so older games still render something
     // reasonable rather than swallowing the label).
     const labelFor = (death: DeathInfo | undefined): string | null => {
       if (!death) return null;
       if (death.phase === 'day') {
         const day = death.dayNumber ?? death.nightNumber + 1;
-        return `d${day}`;
+        return `Day ${day}`;
       }
-      return `n${death.nightNumber}`;
+      return `Night ${death.nightNumber}`;
     };
 
     return {

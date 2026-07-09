@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
@@ -35,6 +35,24 @@ export function useGameLeaveHandler({
 }: Params) {
   const navigation = useNavigation<any>();
   const leaveGame = useMutation(api.games.leaveGame);
+
+  // Notify a player the moment host is handed to them (pass-host, or claiming
+  // an abandoned host slot) so they realize they're now moderating. We fire
+  // only on a genuine false→true flip observed while mounted — never on the
+  // initial render (a standing host arriving on a screen shouldn't be told
+  // they "became" host), and never while `isHost` is still loading (undefined).
+  // Every in-game screen wires this hook with its live `isHost`, and only one
+  // is mounted at a time, so this covers the whole game with a single site.
+  const prevIsHostRef = useRef<boolean | undefined>(undefined);
+  useEffect(() => {
+    if (isHost === true && prevIsHostRef.current === false) {
+      showAlert(
+        "You're the host now",
+        'Host was passed to you — you’re moderating from here. You can adjust the timers or pass host on from the ⚙ settings menu.',
+      );
+    }
+    if (typeof isHost === 'boolean') prevIsHostRef.current = isHost;
+  }, [isHost]);
 
   const confirmLeave = useCallback(() => {
     const defaultMsg = isHost
