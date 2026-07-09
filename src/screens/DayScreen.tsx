@@ -911,7 +911,7 @@ function DayClockBar({
         {(dayOver || paused) && (
           <Text
             className="text-wolf-muted text-xs font-bold tracking-widest"
-            style={{ position: 'absolute', top: -14, left: 0, right: 0, textAlign: 'center' }}
+            style={{ position: 'absolute', top: -8, left: 0, right: 0, textAlign: 'center' }}
           >
             {dayOver ? 'TIME UP' : 'PAUSED'}
           </Text>
