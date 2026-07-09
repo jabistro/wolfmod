@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
-  SafeAreaView,
   Pressable,
   TouchableOpacity,
   ActivityIndicator,
@@ -23,6 +22,8 @@ import { InGameLeaveButton } from '../components/InGameLeaveButton';
 import { useGameLeaveHandler } from '../hooks/useGameLeaveHandler';
 import { HostMissingBanner } from '../components/HostMissingBanner';
 import { SeatingCircle, type SeatingPlayer } from '../components/SeatingCircle';
+import { PhaseScreen } from '../components/PhaseScreen';
+import { ConfirmOverlay } from '../components/ConfirmOverlay';
 
 type Nav = StackNavigationProp<RootStackParamList, 'RoleReveal'>;
 type Route = RouteProp<RootStackParamList, 'RoleReveal'>;
@@ -104,7 +105,8 @@ export default function RoleRevealScreen() {
     } else if (phase === 'morning') {
       navigation.replace('Morning', { gameId: params.gameId });
     } else if (phase === 'day') {
-      navigation.replace('Day', { gameId: params.gameId });
+      // fromReveal → slow night→day dissolve (mirrors the dawn transition).
+      navigation.replace('Day', { gameId: params.gameId, fromReveal: true });
     } else if (phase === 'ended') {
       navigation.replace('EndGame', { gameId: params.gameId });
     }
@@ -118,14 +120,14 @@ export default function RoleRevealScreen() {
 
   if (!deviceClientId || reveal === undefined) {
     return (
-      <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center">
+      <PhaseScreen phase="night" className="items-center justify-center">
         <ActivityIndicator color="#D4A017" />
-      </SafeAreaView>
+      </PhaseScreen>
     );
   }
   if (reveal === null) {
     return (
-      <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center px-8">
+      <PhaseScreen phase="night" className="items-center justify-center px-8">
         <Text className="text-wolf-text text-lg text-center mb-6">
           This game no longer exists.
         </Text>
@@ -135,7 +137,7 @@ export default function RoleRevealScreen() {
         >
           <Text className="text-wolf-bg font-bold tracking-widest">HOME</Text>
         </TouchableOpacity>
-      </SafeAreaView>
+      </PhaseScreen>
     );
   }
 
@@ -145,17 +147,17 @@ export default function RoleRevealScreen() {
 
   if (game.phase !== 'reveal' && game.phase !== 'lobby') {
     return (
-      <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center">
+      <PhaseScreen phase="night" className="items-center justify-center">
         <ActivityIndicator color="#D4A017" />
-      </SafeAreaView>
+      </PhaseScreen>
     );
   }
 
   if (!me.role) {
     return (
-      <SafeAreaView className="flex-1 bg-wolf-bg items-center justify-center">
+      <PhaseScreen phase="night" className="items-center justify-center">
         <Text className="text-wolf-muted">Waiting for roles to be dealt…</Text>
-      </SafeAreaView>
+      </PhaseScreen>
     );
   }
 
@@ -183,11 +185,10 @@ export default function RoleRevealScreen() {
         ? { fontSize: 17, lineHeight: 24 }
         : { fontSize: 22, lineHeight: 32 };
   const packTopMargin = packCount >= 4 ? 12 : 16;
-  // Masons are village — gold border, not the wolf-team red. Header + frame
-  // share the accent so the block reads as "your allies" at a glance.
+  // Masons are village — the header label stays gold, wolves/Minion red — but
+  // the panel itself is the standard grey card, no tinted fill or border.
   const isMason = me.role === 'Mason';
   const packAccent = isMason ? '#D4A017' : '#FF3B30';
-  const packTint = isMason ? 'rgba(212,160,23,0.08)' : 'rgba(255,59,48,0.08)';
 
   function onPressIn() {
     setIsPressed(true);
@@ -313,7 +314,7 @@ export default function RoleRevealScreen() {
       doppelgangerCandidates.map(c => c._id as unknown as string),
     );
     return (
-      <SafeAreaView className="flex-1 bg-wolf-bg">
+      <PhaseScreen phase="night">
         <InGameLeaveButton onPress={confirmLeave} />
         <View className="flex-row items-center px-4 pt-10 pb-3">
           <View className="w-16" />
@@ -334,7 +335,7 @@ export default function RoleRevealScreen() {
           style={{ flex: 1 }}
         >
           <SeatingCircle
-            phase="day"
+            phase="night"
             totalSeats={game.playerCount}
             players={seatingPlayers}
             meId={me._id}
@@ -344,18 +345,10 @@ export default function RoleRevealScreen() {
           />
         </ScrollView>
         {pickedCandidate && (
-          <View
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              top: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0,0,0,0.92)',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 32,
-            }}
+          <ConfirmOverlay
+            onCancel={() => setDoppelgangerPick(null)}
+            onConfirm={submitDoppelgangerPick}
+            submitting={submittingPick}
           >
             <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
               MARK YOUR SHADOW
@@ -363,38 +356,12 @@ export default function RoleRevealScreen() {
             <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
               {pickedCandidate.name.toUpperCase()}
             </Text>
-            <Text className="text-wolf-muted text-sm text-center mb-10">
+            <Text className="text-wolf-text font-bold text-sm text-center">
               When they fall, you inherit their role.
             </Text>
-            <View className="flex-row" style={{ gap: 14 }}>
-              <TouchableOpacity
-                onPress={() => setDoppelgangerPick(null)}
-                disabled={submittingPick}
-                className="bg-wolf-card rounded-xl py-4 px-10"
-                style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-              >
-                <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                  NO
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={submitDoppelgangerPick}
-                disabled={submittingPick}
-                style={{ opacity: submittingPick ? 0.4 : 1 }}
-                className="bg-wolf-accent rounded-xl py-4 px-10"
-              >
-                {submittingPick ? (
-                  <ActivityIndicator color="#0F0F14" />
-                ) : (
-                  <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                    YES
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
+          </ConfirmOverlay>
         )}
-      </SafeAreaView>
+      </PhaseScreen>
     );
   }
 
@@ -422,7 +389,7 @@ export default function RoleRevealScreen() {
       mamaWolfCandidates.map(c => c._id as unknown as string),
     );
     return (
-      <SafeAreaView className="flex-1 bg-wolf-bg">
+      <PhaseScreen phase="night">
         <InGameLeaveButton onPress={confirmLeave} />
         <View className="flex-row items-center px-4 pt-10 pb-3">
           <View className="w-16" />
@@ -443,7 +410,7 @@ export default function RoleRevealScreen() {
           style={{ flex: 1 }}
         >
           <SeatingCircle
-            phase="day"
+            phase="night"
             totalSeats={game.playerCount}
             players={seatingPlayers}
             meId={me._id}
@@ -453,18 +420,10 @@ export default function RoleRevealScreen() {
           />
         </ScrollView>
         {pickedCandidate && (
-          <View
-            style={{
-              position: 'absolute',
-              left: 0,
-              right: 0,
-              top: 0,
-              bottom: 0,
-              backgroundColor: 'rgba(0,0,0,0.92)',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 32,
-            }}
+          <ConfirmOverlay
+            onCancel={() => setMamaWolfPick(null)}
+            onConfirm={submitMamaWolfPick}
+            submitting={submittingPick}
           >
             <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
               MARK A LYCAN
@@ -472,44 +431,18 @@ export default function RoleRevealScreen() {
             <Text className="text-wolf-text text-3xl font-extrabold text-center mb-2">
               {pickedCandidate.name.toUpperCase()}
             </Text>
-            <Text className="text-wolf-muted text-sm text-center mb-10">
+            <Text className="text-wolf-text font-bold text-sm text-center">
               The Seer will read them as a wolf. They'll never know.
             </Text>
-            <View className="flex-row" style={{ gap: 14 }}>
-              <TouchableOpacity
-                onPress={() => setMamaWolfPick(null)}
-                disabled={submittingPick}
-                className="bg-wolf-card rounded-xl py-4 px-10"
-                style={{ borderWidth: 1, borderColor: '#3A3A48' }}
-              >
-                <Text className="text-wolf-text text-base font-extrabold tracking-widest">
-                  NO
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={submitMamaWolfPick}
-                disabled={submittingPick}
-                style={{ opacity: submittingPick ? 0.4 : 1 }}
-                className="bg-wolf-accent rounded-xl py-4 px-10"
-              >
-                {submittingPick ? (
-                  <ActivityIndicator color="#0F0F14" />
-                ) : (
-                  <Text className="text-wolf-bg text-base font-extrabold tracking-widest">
-                    YES
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
+          </ConfirmOverlay>
         )}
-      </SafeAreaView>
+      </PhaseScreen>
     );
   }
 
   if (isConfirmed) {
     return (
-      <SafeAreaView className="flex-1 bg-wolf-bg">
+      <PhaseScreen phase="night">
         <InGameLeaveButton onPress={confirmLeave} />
         {reveal.hostMissing && (
           <View style={{ marginTop: 70 }}>
@@ -520,7 +453,7 @@ export default function RoleRevealScreen() {
           </View>
         )}
         <View className="flex-1 items-center justify-center px-8">
-          <Text className="text-wolf-muted text-xs font-bold tracking-widest mb-3">
+          <Text className="text-wolf-text text-xs font-bold tracking-widest mb-3">
             PLAYERS READY
           </Text>
           <Text
@@ -532,7 +465,7 @@ export default function RoleRevealScreen() {
           {allConfirmed ? (
             me.isHost ? (
               <View className="items-center mt-12 w-full" style={{ paddingHorizontal: 24 }}>
-                <Text className="text-wolf-muted text-sm text-center mb-4">
+                <Text className="text-wolf-text font-bold text-sm text-center mb-4">
                   Everyone has their role. Start the game when the table is ready.
                 </Text>
                 <TouchableOpacity
@@ -567,12 +500,12 @@ export default function RoleRevealScreen() {
             </>
           )}
         </View>
-      </SafeAreaView>
+      </PhaseScreen>
     );
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-wolf-bg">
+    <PhaseScreen phase="night">
       <InGameLeaveButton onPress={confirmLeave} />
       <View className="flex-row items-center px-4 pt-10 pb-3">
         <View className="w-16" />
@@ -589,14 +522,6 @@ export default function RoleRevealScreen() {
         />
       )}
 
-      <View className="px-6 items-center mb-3">
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest">
-          {typeof me.seatPosition === 'number'
-            ? `SEAT ${me.seatPosition + 1} • ${me.name.toUpperCase()}`
-            : me.name.toUpperCase()}
-        </Text>
-      </View>
-
       <View className="flex-1 items-center justify-center px-6">
         {revealed ? (
           <Animated.View style={{ alignItems: 'center', opacity: fadeAnim }}>
@@ -611,12 +536,10 @@ export default function RoleRevealScreen() {
                   width: cardWidth,
                   marginTop: packTopMargin,
                   alignItems: 'center',
-                  borderWidth: 3,
-                  borderColor: packAccent,
                   borderRadius: 14,
                   paddingVertical: 14,
                   paddingHorizontal: 22,
-                  backgroundColor: packTint,
+                  backgroundColor: '#1A1A24',
                 }}
               >
                 <Text
@@ -653,7 +576,7 @@ export default function RoleRevealScreen() {
             >
               <Text className="text-wolf-muted text-5xl">?</Text>
             </View>
-            <Text className="text-wolf-muted text-sm text-center mt-6">
+            <Text className="text-wolf-text font-bold text-sm text-center mt-6">
               {isRemoteReveal
                 ? 'Revealing your role…'
                 : hasSeenRole
@@ -665,7 +588,7 @@ export default function RoleRevealScreen() {
       </View>
 
       {!isRemoteReveal && (
-        <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
+        <View style={{ paddingHorizontal: 24, marginBottom: 8 }}>
           <Pressable
             onPressIn={onPressIn}
             onPressOut={onPressOut}
@@ -692,7 +615,9 @@ export default function RoleRevealScreen() {
       <View
         style={{
           paddingHorizontal: 24,
-          paddingBottom: Math.max(insets.bottom, 16) + 16,
+          // Sit just above the Android nav bar (insets.bottom) with a small
+          // buffer — tighter than before so tall wolf packs get more room.
+          paddingBottom: Math.max(insets.bottom, 8) + 4,
         }}
       >
         <TouchableOpacity
@@ -710,6 +635,6 @@ export default function RoleRevealScreen() {
           )}
         </TouchableOpacity>
       </View>
-    </SafeAreaView>
+    </PhaseScreen>
   );
 }

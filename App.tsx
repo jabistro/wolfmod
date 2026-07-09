@@ -200,7 +200,17 @@ export default function App() {
               <Stack.Screen name="Night" component={NightWithChat} options={{ gestureEnabled: false, ...crossFadeSlow }} />
               <Stack.Screen name="Triggers" component={TriggersWithChat} options={{ gestureEnabled: false }} />
               <Stack.Screen name="Morning" component={MorningWithChat} options={{ gestureEnabled: false, ...crossFadeSlow }} />
-              <Stack.Screen name="Day" component={DayWithChat} options={{ gestureEnabled: false }} />
+              {/* Day 1 out of the role reveal gets the slow night→day dissolve
+                  (fromReveal param); every other entry (dawn→Day) keeps the
+                  default fast cut since Morning already settled on day.jpg. */}
+              <Stack.Screen
+                name="Day"
+                component={DayWithChat}
+                options={({ route }) => ({
+                  gestureEnabled: false,
+                  ...(route.params?.fromReveal ? crossFadeSlow : {}),
+                })}
+              />
               <Stack.Screen name="EndGame" component={EndGameWithChat} options={{ gestureEnabled: false }} />
             </Stack.Navigator>
             <StatusBar style="light" />
