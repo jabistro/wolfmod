@@ -22,9 +22,9 @@ This is the recommended way in — no app store, no account, no build tools. [Do
 
 If you have a WolfMod development or preview build installed, scan this to pull the latest public demo over the air (an EAS Update at runtime 3.6.0 — it loads in a WolfMod build, not stock Expo Go):
 
-<a href="https://expo.dev/preview/update?message=Public+demo&updateRuntimeVersion=3.6.0&createdAt=2026-07-09T06%3A51%3A41.699Z&slug=wolfmod&projectId=cb9e5e86-7395-4618-b62a-a148b6bf3d83&group=c44302b9-dee1-4b8e-a882-d1f9b46f9029"><img src="assets/images/expo-go-qr.png" alt="Preview update QR" width="180"></a>
+<a href="https://expo.dev/preview/update?message=Public+demo&updateRuntimeVersion=3.6.0&createdAt=2026-07-09T21%3A57%3A55.932Z&slug=wolfmod&projectId=cb9e5e86-7395-4618-b62a-a148b6bf3d83&group=910e8acd-09db-4755-abb1-2433bfa0f54b"><img src="assets/images/expo-go-qr.png" alt="Preview update QR" width="180"></a>
 
-Or open the [preview link](https://expo.dev/preview/update?message=Public+demo&updateRuntimeVersion=3.6.0&createdAt=2026-07-09T06%3A51%3A41.699Z&slug=wolfmod&projectId=cb9e5e86-7395-4618-b62a-a148b6bf3d83&group=c44302b9-dee1-4b8e-a882-d1f9b46f9029) directly on your phone.
+Or open the [preview link](https://expo.dev/preview/update?message=Public+demo&updateRuntimeVersion=3.6.0&createdAt=2026-07-09T21%3A57%3A55.932Z&slug=wolfmod&projectId=cb9e5e86-7395-4618-b62a-a148b6bf3d83&group=910e8acd-09db-4755-abb1-2433bfa0f54b) directly on your phone.
 
 The demo runs on a shared Convex backend, so it may be slow or rate-limited under load.
 
