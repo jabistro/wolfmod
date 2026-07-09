@@ -1,0 +1,64 @@
+# EAS Build upload ignore. When this file exists, EAS CLI uses it INSTEAD of
+# .gitignore for the build archive, so this must mirror .gitignore's excludes
+# (node_modules/.git are always excluded regardless) and then add the build-only
+# ones below. Keep the mirrored block in sync if .gitignore changes.
+
+# ----- mirrored from .gitignore -----
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders
+/ios
+/android
+
+# convex
+convex/_generated/ai/
+
+# Claude Code local state
+.claude/
+
+# ----- build-only exclusions (source art that is NOT bundled into the app) -----
+# The app bundles only the downscaled per-deck variants (roles_<deck>_medium/
+# and roles_<deck>_thumbs/, referenced via require() in src/data). These
+# un-suffixed directories hold the full-resolution originals — source only,
+# never bundled — so they don't belong in the build upload (~176 MB).
+/roles_ghibli/
+/roles_chibi/
+/roles_16bit/
+
+# Staged original art (Firefly/Bezier sources) used to generate the decks;
+# never referenced by the app (~35 MB).
+/art_staging/
