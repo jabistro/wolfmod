@@ -1942,7 +1942,10 @@ function VoteView({
             );
           })()
         ) : (
-          <Text className="text-wolf-muted text-sm text-center mt-6 italic">
+          <Text
+            className="text-wolf-text text-base font-bold text-center mt-6 italic"
+            style={SCENE_TEXT_SHADOW}
+          >
             You are out of the game — spectating.
           </Text>
         )}

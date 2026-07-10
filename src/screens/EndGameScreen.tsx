@@ -669,9 +669,18 @@ export default function EndGameScreen() {
                   {hasHistory ? (
                     <Text
                       className="text-wolf-text font-bold ml-2 w-8 text-center"
-                      style={{ fontSize: 38, lineHeight: 42 }}
+                      style={{
+                        fontSize: 20,
+                        lineHeight: 20,
+                        includeFontPadding: false,
+                        textAlignVertical: 'center',
+                        // The arrowhead glyphs sit off-center in their em box:
+                        // ⌄ (collapsed) rides low, ⌃ (expanded) rides high.
+                        // Nudge each the opposite way to level with the pill.
+                        transform: [{ translateY: isExpanded ? 5 : -3 }],
+                      }}
                     >
-                      {isExpanded ? '▾' : '▸'}
+                      {isExpanded ? '⌃' : '⌄'}
                     </Text>
                   ) : (
                     // Spacer so caret-less rows align their pill with rows
