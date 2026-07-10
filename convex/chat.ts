@@ -30,6 +30,11 @@ function isWolf(player: Doc<'players'>): boolean {
   // them in it (which would reveal the conversion landed early). The flag is
   // cleared at the next wolves step (enterStep in night.ts) when they wake.
   if (player.roleState?.pendingPackReveal) return false;
+  // A just-awakened Spawn (last wolf standing, patched to 'Werewolf') is
+  // likewise cloaked from the wolves channel until it wakes at the next wolves
+  // step — same reason, and it spares that player the pre-reveal tell of a
+  // (solo, empty) pack chat appearing mid-day. Cleared by `clearSpawnReveals`.
+  if (player.roleState?.pendingSpawnReveal) return false;
   // Real wolves only — `seerAppearsAsWolf` (Mama Wolf's mark) is deliberately
   // NOT consulted, so her targets never join the pack's chat.
   return !!player.role && isWolfTeam(player.role);

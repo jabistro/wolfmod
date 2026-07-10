@@ -308,6 +308,12 @@ export async function initializeDayClock(
  *
  *  3. No wolves and no Chupacabra alive → the village wins (Minion/Reviler
  *     lose alongside the dead wolves).
+ *
+ * A dormant Spawn (role still 'Spawn') counts as a non-wolf body here, exactly
+ * like Minion/Reviler. It never reaches this function still dormant when the
+ * pack has just fallen, though: `recordWinIfReached` runs
+ * `awakenSpawnIfPackFallen` first, flipping it to 'Werewolf' before the count —
+ * so a lone Spawn keeps the game alive rather than handing the village a win.
  */
 export function checkWinCondition(
   players: Doc<'players'>[],
@@ -336,6 +342,49 @@ export function checkWinCondition(
 }
 
 /**
+ * The Spawn is a dormant backup wolf: wolf-team for win attribution but, like
+ * the Minion/Reviler, NOT counted for parity and asleep during the wolves' kill
+ * while any real wolf lives. The instant the last real wolf is eliminated
+ * (lynch OR night death) with the Spawn still alive, it rises as the last wolf
+ * — role-patched to 'Werewolf' so `isWolfTeam` / `seerSees` / parity / the
+ * wolves night step all just work, and it wakes to pick the kill from then on.
+ *
+ * Called at the TOP of `recordWinIfReached` — the single choke point every
+ * game-ending win check funnels through (directly, or via `applyWinIfReached`).
+ * Running it here guarantees the flip lands BEFORE the village is ever credited
+ * a wolves-eliminated victory, in every path (day lynch, night resolution,
+ * Hunter triggers, drunk sober-up, beginNight), without scattering the call.
+ * This is the same "flip-then-count" ordering Cursed/Alpha/Sasquatch rely on;
+ * because it runs inside the win check (after those conversions have already
+ * patched their villager→wolf), a same-tick Cursed/Alpha conversion keeps a
+ * real wolf alive and correctly leaves the Spawn dormant.
+ *
+ * `pendingSpawnReveal` cloaks the new wolf from the (empty) pack chat/roster and
+ * drives the private "the pack has fallen" overlay shown at the next wolves
+ * step; it's cleared when that step advances (see `clearSpawnReveals`).
+ */
+export async function awakenSpawnIfPackFallen(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<void> {
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  const alive = players.filter(p => p.alive);
+  // A real wolf still lives → the Spawn stays dormant.
+  if (alive.some(p => p.role && isWolfTeam(p.role))) return;
+  const dormantSpawn = alive.filter(p => p.role === 'Spawn');
+  if (dormantSpawn.length === 0) return;
+  for (const s of dormantSpawn) {
+    await ctx.db.patch(s._id, {
+      role: 'Werewolf',
+      roleState: { ...(s.roleState ?? {}), pendingSpawnReveal: true },
+    });
+  }
+}
+
+/**
  * Records the winning team on the game if a win condition is reached, but
  * does not change phase. Returns the winner (or null). Use this when a death
  * occurs but you want the existing phase (e.g. 'morning') to continue
@@ -345,6 +394,10 @@ export async function recordWinIfReached(
   ctx: MutationCtx,
   gameId: Id<'games'>,
 ): Promise<'village' | 'wolf' | 'chupacabra' | null> {
+  // Give a dormant Spawn its chance to rise before we ever count a wolves-
+  // eliminated village win. Patches the DB, so the re-query below sees the
+  // flipped role.
+  await awakenSpawnIfPackFallen(ctx, gameId);
   const players = await ctx.db
     .query('players')
     .withIndex('by_game', q => q.eq('gameId', gameId))

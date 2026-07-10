@@ -126,7 +126,7 @@ export const ROLES: Role[] = [
   { name: 'Illusionist',             category: 'teamwolf', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),             thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Minion',                  category: 'teamwolf', image: require('../../roles_ghibli_medium/minion.jpg'),                  thumb: require('../../roles_ghibli_thumbs/minion.jpg') },
   { name: 'The Cloak',               category: 'teamwolf', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),               thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
-  { name: 'Spawn',                   category: 'teamwolf', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),                   thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg'),        barColors: ['#C05050', '#8B1818'] },
+  { name: 'Spawn',                   category: 'teamwolf', image: require('../../roles_ghibli_medium/spawn.jpg'),                   thumb: require('../../roles_ghibli_thumbs/spawn.jpg'),        barColors: ['#C05050', '#8B1818'] },
   { name: 'Den Mother',              category: 'teamwolf', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),               thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Devotee',                 category: 'teamwolf', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),                 thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },
   { name: 'Apprentice Illusionist',  category: 'teamwolf', image: require('../../roles_ghibli_medium/unlocktoplay.jpg'),  thumb: require('../../roles_ghibli_thumbs/unlocktoplay.jpg') },

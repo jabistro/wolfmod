@@ -1972,6 +1972,29 @@ async function clearSasquatchReveals(
   }
 }
 
+/**
+ * Strips `pendingSpawnReveal` from any player carrying it. Called from
+ * `advanceFromCurrentStep` when leaving the wolves step — by then the "the pack
+ * has fallen" overlay has rendered for the wolves dwell window, the awakened
+ * Spawn is no longer cloaked from the (solo) wolves channel, and later nights
+ * shouldn't replay the modal. Mirrors `clearSasquatchReveals`.
+ */
+async function clearSpawnReveals(
+  ctx: MutationCtx,
+  gameId: Id<'games'>,
+): Promise<void> {
+  const players = await ctx.db
+    .query('players')
+    .withIndex('by_game', q => q.eq('gameId', gameId))
+    .collect();
+  for (const p of players) {
+    if (!p.roleState?.pendingSpawnReveal) continue;
+    const { pendingSpawnReveal, ...rest } = p.roleState;
+    void pendingSpawnReveal;
+    await ctx.db.patch(p._id, { roleState: rest });
+  }
+}
+
 // ───── Doppelganger conversion ─────────────────────────────────────────────
 //
 // Doppelganger picks a target on the first night. When that target dies
@@ -2954,6 +2977,7 @@ async function completeStep(
   }
   if (step === 'wolves') {
     await clearSasquatchReveals(ctx, gameId);
+    await clearSpawnReveals(ctx, gameId);
     // Belt-and-braces: any stale shot-clock deadline goes away when the
     // step itself completes (consensus and auto-resolve both clear it
     // inline, so this is just a defensive zero-out).
@@ -6140,6 +6164,15 @@ export const nightView = query({
       me.alive &&
       me.role === 'Werewolf' &&
       !!me.roleState?.pendingSasquatchReveal;
+    // Set on the caller's view when they're a freshly-awakened Spawn (the last
+    // wolf standing, patched to 'Werewolf') — the wolves-step overlay reads
+    // this to show "THE PACK HAS FALLEN" once. Cleared server-side when the
+    // wolves step advances.
+    const spawnReveal =
+      activeStepSet.has('wolves') &&
+      me.alive &&
+      me.role === 'Werewolf' &&
+      !!me.roleState?.pendingSpawnReveal;
     // Set on the caller's view when they sobered up from the Drunk this night
     // (start of N3). Not tied to a step — shown as a one-time overlay. When the
     // hidden role is a wolf, carries the living pack so the overlay can name
@@ -7199,6 +7232,7 @@ export const nightView = query({
       stepLabel,
       wolfState,
       sasquatchReveal,
+      spawnReveal,
       drunkReveal,
       seerHistory,
       piState,

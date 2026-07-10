@@ -34,6 +34,9 @@ export const V1_ROLES = [
   // Solo / wolf-aligned
   'Minion',
   'Reviler',
+  // Dormant backup wolf — wolf-team but asleep and uncounted for parity
+  // (like Minion/Reviler) until the last real wolf dies, then rises as a wolf.
+  'Spawn',
   // Solo / convertible
   'Cursed',
   'Doppelganger',
@@ -82,6 +85,9 @@ export const SINGLETON_ROLES = [
   // Two Drunks would each demand their own set-aside future role, doubling
   // the "+1 role" deal requirement and making the lobby math confusing.
   'Drunk',
+  // A single dormant backup is the whole point — two Spawns would both rise
+  // the moment the pack falls, quietly doubling the endgame wolf count.
+  'Spawn',
 ] as const;
 export function isSingletonRole(name: string): boolean {
   return (SINGLETON_ROLES as readonly string[]).includes(name);
@@ -156,7 +162,17 @@ const VILLAGE_ROLES = new Set<string>([
 
 export function teamForRole(role: string): Team {
   if (role === 'Chupacabra') return TEAM_SOLO;
-  if (isWolfTeam(role) || role === 'Minion' || role === 'Reviler') return TEAM_WOLF;
+  // The dormant Spawn wins with the wolves (wolf-team for grouping), but like
+  // Minion/Reviler it is NOT an actual wolf for parity — see `checkWinCondition`
+  // and `awakenSpawnIfPackFallen`. Once the pack falls its `role` is patched to
+  // 'Werewolf', so from then on it counts via `isWolfTeam` like any wolf.
+  if (
+    isWolfTeam(role) ||
+    role === 'Minion' ||
+    role === 'Reviler' ||
+    role === 'Spawn'
+  )
+    return TEAM_WOLF;
   if (VILLAGE_ROLES.has(role)) return TEAM_VILLAGE;
   return TEAM_VILLAGE;
 }
@@ -170,6 +186,10 @@ const SEER_BLIND_ROLES = new Set<string>(['Wolf Man']);
  * Village-team roles the Seer misreads as 'wolf'. The Lycan is loyal to and
  * wins with the village (and reads correctly to every other role — Mentalist,
  * PI, etc.), but the Seer's vision flags them as a wolf.
+ *
+ * The dormant Spawn is deliberately NOT here — it reads as a plain villager to
+ * the Seer while the pack lives (a hidden threat, like the Cursed), and only
+ * reads as 'wolf' once it's patched to 'Werewolf' on the pack's fall.
  */
 const SEER_WOLF_APPEARING_ROLES = new Set<string>(['Lycan']);
 

@@ -90,6 +90,18 @@ export default function NightScreen() {
     return () => clearTimeout(timer);
   }, [sasquatchRevealNow]);
 
+  // Spawn awakening overlay: the last wolf died, so the dormant Spawn rises as
+  // the sole wolf. Same 5 s one-shot as the Sasquatch flip; the server clears
+  // `pendingSpawnReveal` when the wolves step advances, so it won't replay.
+  const spawnRevealNow = view?.spawnReveal === true;
+  const [spawnOverlayOpen, setSpawnOverlayOpen] = useState(false);
+  useEffect(() => {
+    if (!spawnRevealNow) return;
+    setSpawnOverlayOpen(true);
+    const timer = setTimeout(() => setSpawnOverlayOpen(false), 5000);
+    return () => clearTimeout(timer);
+  }, [spawnRevealNow]);
+
   // Drunk sober-up overlay: the start of N3, the Drunk learns the hidden role
   // they were all along. Same 5 s one-shot as the Sasquatch flip; the server
   // clears the pending flag at morning so it won't replay.
@@ -149,6 +161,7 @@ export default function NightScreen() {
     myDecisionEndsAt,
     wolfState,
     sasquatchReveal,
+    spawnReveal,
     drunkReveal,
     seerHistory,
     piState,
@@ -494,6 +507,10 @@ export default function NightScreen() {
       <SasquatchRevealOverlay
         visible={sasquatchOverlayOpen && sasquatchReveal === true}
         wolves={wolfState?.wolves ?? []}
+      />
+
+      <SpawnRevealOverlay
+        visible={spawnOverlayOpen && spawnReveal === true}
       />
 
       <DrunkRevealOverlay
@@ -917,6 +934,41 @@ function SasquatchRevealOverlay({
           )}
           <Text className="text-wolf-text text-xs text-center mt-5">
             You wake with the wolves now. Choose a victim together.
+          </Text>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ───── Spawn awakening overlay ──────────────────────────────────────────────
+//
+// Rendered on the Spawn's phone at the start of the wolves step, the first
+// night after the last real wolf was eliminated (lynch or night death). The
+// Spawn was a dormant backup wolf; now it rises as the SOLE surviving wolf —
+// there is no pack to name, so (unlike the Sasquatch overlay) it lists no
+// packmates. Blocks the picker briefly so the player reads the change before
+// they're asked to choose a victim. Server clears `pendingSpawnReveal` when the
+// wolves step advances; the client also dismisses after the 5 s window.
+
+function SpawnRevealOverlay({ visible }: { visible: boolean }) {
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <View className="flex-1 bg-wolf-bg items-center justify-center px-6">
+        <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
+          THE PACK HAS FALLEN
+        </Text>
+        <View
+          className="bg-wolf-card rounded-2xl px-6 py-6"
+          style={{ maxWidth: 360 }}
+        >
+          <Text className="text-wolf-text text-base leading-6 text-center">
+            {'The last wolf is dead. The curse in your blood awakens — you are '}
+            <Text className="text-wolf-red font-extrabold">THE LAST WOLF</Text>
+            {' now.'}
+          </Text>
+          <Text className="text-wolf-text text-xs text-center mt-5">
+            You hunt alone from here. Choose a victim.
           </Text>
         </View>
       </View>
