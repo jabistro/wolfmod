@@ -376,7 +376,29 @@ export async function awakenSpawnIfPackFallen(
   if (alive.some(p => p.role && isWolfTeam(p.role))) return;
   const dormantSpawn = alive.filter(p => p.role === 'Spawn');
   if (dormantSpawn.length === 0) return;
+  // The night the Spawn first hunts with the pack is the next wolves step after
+  // this flip. The flip always lands at a win-check BEFORE `beginNight`
+  // increments the counter (day-lynch resolution, `resolveMorning`, or
+  // triggers), so `game.nightNumber` here is the last night the Spawn was NOT a
+  // wolf; +1 is its first-action night. Stamp a `spawn_conversion` row there —
+  // congruent with `sasquatch_conversion` — so the end-game log shows the
+  // "CONVERSION Spawn → Werewolf" line (and the first kill) on that night, and
+  // the wolf-kill attribution excludes every night strictly before it (the
+  // `< conversionNight` rule in `endGameView`). Without this row the Spawn would
+  // inherit the whole pack's kill history and show no conversion arc.
+  const game = await ctx.db.get(gameId);
+  const awakenNight = (game?.nightNumber ?? 0) + 1;
+  const now = Date.now();
   for (const s of dormantSpawn) {
+    await ctx.db.insert('nightActions', {
+      gameId,
+      nightNumber: awakenNight,
+      actorPlayerId: s._id,
+      actionType: 'spawn_conversion',
+      targetPlayerId: s._id,
+      result: { fromRole: 'Spawn', toRole: 'Werewolf' },
+      resolvedAt: now,
+    });
     await ctx.db.patch(s._id, {
       role: 'Werewolf',
       roleState: { ...(s.roleState ?? {}), pendingSpawnReveal: true },

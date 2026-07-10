@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
+  StyleSheet,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -952,24 +953,65 @@ function SasquatchRevealOverlay({
 // wolves step advances; the client also dismisses after the 5 s window.
 
 function SpawnRevealOverlay({ visible }: { visible: boolean }) {
+  const { theme } = useTheme();
+  const art = getTableArt(theme);
+  // Day→night crossfade, matching the normal day→night phase transition (and
+  // the mirror of MorningScreen's night→day backdrop): the reveal opens on the
+  // daylight meadow and fades to the moonlit night scene the awakening plays
+  // over. Re-seeded on each open so a re-show replays the transition.
+  const nightIn = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!visible) return;
+    nightIn.setValue(0);
+    Animated.timing(nightIn, {
+      toValue: 1,
+      duration: 1500,
+      delay: 350,
+      useNativeDriver: true,
+    }).start();
+  }, [visible, nightIn]);
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <View className="flex-1 bg-wolf-bg items-center justify-center px-6">
-        <Text className="text-wolf-muted text-xs font-bold tracking-widest text-center mb-6">
-          THE PACK HAS FALLEN
-        </Text>
+      <View style={{ flex: 1, backgroundColor: '#0F0F14' }}>
+        <Image
+          source={art.backdropDay}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+        />
+        <Animated.View style={[StyleSheet.absoluteFill, { opacity: nightIn }]}>
+          <Image
+            source={art.backdropNight}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+          />
+        </Animated.View>
+        {/* Night scrim (matches PhaseScreen's night tone) so the white copy
+            reads over the scene once we settle on the night backdrop. */}
         <View
-          className="bg-wolf-card rounded-2xl px-6 py-6"
-          style={{ maxWidth: 360 }}
-        >
-          <Text className="text-wolf-text text-base leading-6 text-center">
-            {'The last wolf is dead. The curse in your blood awakens — you are '}
-            <Text className="text-wolf-red font-extrabold">THE LAST WOLF</Text>
-            {' now.'}
+          style={{
+            ...StyleSheet.absoluteFillObject,
+            backgroundColor: 'rgba(8, 10, 20, 0.34)',
+          }}
+        />
+        <View className="flex-1 items-center justify-center px-6">
+          <Text className="text-wolf-text text-xs font-bold tracking-widest text-center mb-6">
+            THE PACK HAS FALLEN
           </Text>
-          <Text className="text-wolf-text text-xs text-center mt-5">
-            You hunt alone from here. Choose a victim.
-          </Text>
+          <View
+            className="bg-wolf-card rounded-2xl px-6 py-6"
+            style={{ maxWidth: 360 }}
+          >
+            <Text className="text-wolf-text text-base leading-6 text-center">
+              {'The last wolf is dead. The curse in your blood awakens — you are '}
+              <Text className="text-wolf-red font-extrabold">THE LAST WOLF</Text>
+              {' now.'}
+            </Text>
+            <Text className="text-wolf-text text-xs text-center mt-5">
+              You hunt alone from here. Choose a victim.
+            </Text>
+          </View>
         </View>
       </View>
     </Modal>

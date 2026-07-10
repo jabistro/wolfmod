@@ -243,6 +243,13 @@ export default function LobbyScreen() {
       ),
     [draftCounts],
   );
+  // Whether the draft contains any literal wolf. The Spawn is a dormant backup
+  // wolf that only rises once every wolf is gone, so it needs one to back up —
+  // used to warn under the Spawn row and block Done (see `saveRoles`).
+  const draftHasWolf = useMemo(
+    () => [...draftedRoleSet].some(isWolfTeam),
+    [draftedRoleSet],
+  );
   const draftBalance = useMemo(() => {
     let total = 0;
     for (const [role, count] of Object.entries(draftCounts)) {
@@ -516,6 +523,16 @@ export default function LobbyScreen() {
 
   async function saveRoles() {
     if (!deviceClientId) return;
+    // The Spawn can't be used without a wolf to back up — it only rises once
+    // every wolf is eliminated, and with none in the build it would never wake.
+    // Block the save and explain (the Spawn row also carries an inline warning).
+    if ((draftCounts['Spawn'] ?? 0) > 0 && !draftHasWolf) {
+      showAlert(
+        'The Spawn needs a wolf',
+        "The Spawn is a dormant backup wolf — it only becomes a wolf once every other wolf is eliminated. With no wolves in the build it can never wake. Add at least one wolf, or remove the Spawn.",
+      );
+      return;
+    }
     const arr: string[] = [];
     for (const [role, count] of Object.entries(draftCounts)) {
       for (let i = 0; i < count; i++) arr.push(role);
@@ -1342,6 +1359,12 @@ export default function LobbyScreen() {
                             draftedRoleSet,
                           );
                           const blockedByConflict = count === 0 && conflicts.length > 0;
+                          // The Spawn is a dormant backup wolf — added freely,
+                          // but useless (and unable to ever wake) with no wolf
+                          // in the build. Warn while it's drafted wolf-less;
+                          // Done is blocked in `saveRoles`.
+                          const spawnNeedsWolf =
+                            role === 'Spawn' && count > 0 && !draftHasWolf;
                           // The Drunk raises the target by one, so it can be
                           // added even at the no-Drunk cap; every other role
                           // respects whether a Drunk is already in the draft.
@@ -1371,6 +1394,11 @@ export default function LobbyScreen() {
                                 {blockedByConflict && (
                                   <Text className="text-wolf-red text-xs mt-0.5">
                                     Can't combine with {conflicts.join(' or ')}
+                                  </Text>
+                                )}
+                                {spawnNeedsWolf && (
+                                  <Text className="text-wolf-red text-xs mt-0.5">
+                                    Needs at least one wolf in the build
                                   </Text>
                                 )}
                               </View>

@@ -584,6 +584,19 @@ export const startGame = mutation({
       );
     }
 
+    // The Spawn is a dormant backup wolf that only rises once every real wolf
+    // is eliminated (see [[wolfmod-spawn-design]] / awakenSpawnIfPackFallen). A
+    // build with a Spawn but no actual wolf has nothing for it to back up: it
+    // would awaken into a `wolves` night step that isn't in-game (stepIsInGame
+    // keys off selectedRoles, which never gains a wolf) — a stuck game. Require
+    // at least one real wolf. (wolfCount can only over-count via a Drunk's
+    // set-aside future wolf, so this never blocks a genuinely valid build.)
+    if (game.selectedRoles.includes('Spawn') && wolfCount === 0) {
+      throw new Error(
+        'The Spawn needs a wolf to back up — add at least one wolf to the build.',
+      );
+    }
+
     // Build the final seat→role map. Dev pins (if any) land first; the
     // remaining roles are shuffled into the unpinned seats. With no pins
     // this collapses to the pure shuffle.
@@ -1353,6 +1366,19 @@ export const endGameView = query({
         }
       }
     }
+    // Spawn awakenings: parallel to sasquatchConversionByPlayer. The row's
+    // nightNumber is the night the Spawn first hunts (stamped at flip time as
+    // game.nightNumber + 1 in awakenSpawnIfPackFallen). Like the Sasquatch, the
+    // Spawn picks the kill the SAME night it wakes, so the exclusion below is
+    // strictly-before (`< spawnNight`).
+    const spawnConversionByPlayer = new Map<Id<'players'>, number>();
+    for (const a of actions) {
+      if (a.actionType === 'spawn_conversion' && a.actorPlayerId) {
+        if (!spawnConversionByPlayer.has(a.actorPlayerId)) {
+          spawnConversionByPlayer.set(a.actorPlayerId, a.nightNumber);
+        }
+      }
+    }
     // Alpha Wolf conversions: keyed on the CONVERT TARGET (the new wolf), not
     // an actor (the row has no actorPlayerId). nightNumber is the conversion
     // night. Used to (a) render the wolf_kill row as CONVERTED not SAVED, and
@@ -1601,6 +1627,9 @@ export const endGameView = query({
       } else if (a.actionType === 'sasquatch_conversion') {
         fromRole = 'Sasquatch';
         toRole = 'Werewolf';
+      } else if (a.actionType === 'spawn_conversion') {
+        fromRole = 'Spawn';
+        toRole = 'Werewolf';
       } else if (
         a.actionType === 'doppelganger_conversion_reveal' &&
         a.actorPlayerId
@@ -1708,6 +1737,13 @@ export const endGameView = query({
           if (sasquatchNight != null && a.nightNumber < sasquatchNight) {
             continue;
           }
+          // Spawn woke as the last wolf on `spawnNight` and hunts from that
+          // night on — exclude every pack kill STRICTLY before it (the pack it
+          // now belongs to made those without it).
+          const spawnNight = spawnConversionByPlayer.get(p._id);
+          if (spawnNight != null && a.nightNumber < spawnNight) {
+            continue;
+          }
           const dopp = doppelgangerConversionByPlayer.get(p._id);
           if (dopp != null && a.nightNumber <= dopp.nightNumber) {
             continue;
@@ -1736,6 +1772,10 @@ export const endGameView = query({
           }
           const sasquatchNight = sasquatchConversionByPlayer.get(p._id);
           if (sasquatchNight != null && a.nightNumber < sasquatchNight) {
+            continue;
+          }
+          const spawnNight = spawnConversionByPlayer.get(p._id);
+          if (spawnNight != null && a.nightNumber < spawnNight) {
             continue;
           }
           const dopp = doppelgangerConversionByPlayer.get(p._id);
@@ -1925,6 +1965,8 @@ export const endGameView = query({
             alphaConversionByPlayer.get(p._id) ?? null,
           sasquatchConvertedAtNight:
             sasquatchConversionByPlayer.get(p._id) ?? null,
+          spawnConvertedAtNight:
+            spawnConversionByPlayer.get(p._id) ?? null,
           doppelgangerConvertedAtNight:
             doppelgangerConversionByPlayer.get(p._id)?.nightNumber ?? null,
           doppelgangerConvertedToRole:

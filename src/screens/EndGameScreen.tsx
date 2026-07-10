@@ -394,7 +394,8 @@ function renderEntryBody(entry: HistoryEntry): React.ReactNode {
       );
     case 'doppelganger_conversion_reveal':
     case 'cursed_conversion':
-    case 'sasquatch_conversion': {
+    case 'sasquatch_conversion':
+    case 'spawn_conversion': {
       const from = entry.fromRole?.toUpperCase() ?? '';
       const to = entry.toRole?.toUpperCase() ?? '';
       const arc = from && to ? ` — ${from} → ${to}` : '';
@@ -576,6 +577,13 @@ export default function EndGameScreen() {
               p.originalRole === 'Sasquatch' &&
               p.role !== 'Sasquatch' &&
               p.sasquatchConvertedAtNight != null;
+            // Spawn is a dormant backup wolf that rises to a Werewolf once the
+            // whole pack is eliminated — same arc shape as the Sasquatch flip,
+            // driven by the pack falling rather than table inaction.
+            const spawnAwakened =
+              p.originalRole === 'Spawn' &&
+              p.role !== 'Spawn' &&
+              p.spawnConvertedAtNight != null;
             // Alpha Wolf conversion: any villager-side role turned into a
             // Werewolf by the pack. Unlike Cursed/Sasquatch the origin role
             // varies (Seer, Villager, …), so show it explicitly — otherwise a
@@ -619,6 +627,11 @@ export default function EndGameScreen() {
                         Sasquatch → Werewolf (n{p.sasquatchConvertedAtNight})
                       </Text>
                     )}
+                    {spawnAwakened && (
+                      <Text className="text-wolf-muted text-xs italic uppercase">
+                        Spawn → Werewolf
+                      </Text>
+                    )}
                     {alphaConverted && (
                       <Text className="text-wolf-muted text-xs italic uppercase">
                         {p.originalRole} → Werewolf (n{p.alphaConvertedAtNight})
@@ -654,14 +667,17 @@ export default function EndGameScreen() {
                     </Text>
                   </View>
                   {hasHistory ? (
-                    <Text className="text-wolf-muted text-xs ml-2 w-4 text-center">
+                    <Text
+                      className="text-wolf-text font-bold ml-2 w-8 text-center"
+                      style={{ fontSize: 38, lineHeight: 42 }}
+                    >
                       {isExpanded ? '▾' : '▸'}
                     </Text>
                   ) : (
                     // Spacer so caret-less rows align their pill with rows
                     // that DO have a caret. Same total width as the caret
-                    // group: ml-2 (8px) + w-4 (16px) = 24px.
-                    <View className="ml-2 w-4" />
+                    // group: ml-2 (8px) + w-8 (32px) = 40px.
+                    <View className="ml-2 w-8" />
                   )}
                 </TouchableOpacity>
                 {hasHistory && isExpanded && (() => {
